@@ -1,32 +1,63 @@
-# Trace
+<p align="center">
+  <img src="Sources/Trace/Resources/logo.png" width="128" height="128" alt="Trace logo" />
+</p>
 
-**System-level quick capture for Obsidian on macOS.**
+<h1 align="center">Trace</h1>
 
-Press `⌘N` anywhere — write to your Daily Note in 2 seconds without leaving your current app.
+<p align="center">
+  <strong>System-level quick capture for Obsidian on macOS.</strong><br/>
+  Press <code>⌘N</code> anywhere. Write to your Daily Note in 2 seconds. Never leave your current app.
+</p>
 
-> *Thought is leverage. Leave a trace.*
+<p align="center">
+  <em>Thought is leverage. Leave a trace.</em>
+</p>
+
+<p align="center">
+  <a href="#why">Why</a> · <a href="#how-it-works">How It Works</a> · <a href="#features">Features</a> · <a href="#installation">Install</a> · <a href="#connect">Connect</a>
+</p>
+
+---
 
 ## Why
 
-Obsidian plugins only work when Obsidian is open. Every time you switch windows to jot down a thought, your flow breaks. Trace solves this at the OS level — capture without context-switching.
+Every knowledge worker has the same problem: a thought hits you mid-task, and you have two bad options — lose it, or break your flow to write it down.
 
-## Features
+Obsidian plugins don't help here. They only work when Obsidian is open. Every time you `⌘Tab` to capture a thought, your attention fragments. That context switch isn't 2 seconds — it's 2 minutes of getting back into the zone.
 
-- **Global hotkey** — `⌘N` (customizable) from any app, no Obsidian window required
-- **5 capture zones** — Note / Clip / Link / Task / Project, each maps to a heading in your Daily Note
-- **Dual write targets** — Daily Note (append to today's sections) or Inbox (standalone .md files)
-- **Pin mode** — continuous capture without closing the panel
-- **Native macOS UI** — SwiftUI, not Electron, not a web wrapper
-- **Zero network** — pure local, no accounts, no telemetry, your vault stays yours
+**Trace operates at the OS level.** One hotkey from any app, a floating panel appears, you type, `⌘Enter`, gone. Your Daily Note gets the entry. You never left your work.
+
+This isn't about note-taking. It's about **protecting your attention while capturing every signal**.
 
 ## How It Works
 
 ```
-Any App  →  ⌘N  →  Trace Panel  →  ⌘Enter  →  Obsidian Vault
-                    (floating)                  (direct .md write)
+Any App  ──⌘N──▶  Trace Panel  ──⌘Enter──▶  Obsidian Vault
+                  (floating)                 (direct .md write)
 ```
 
-Trace writes directly to your Obsidian vault via `FileManager`. No plugins, no sync conflicts, no middleware.
+Trace writes directly to your Obsidian vault via `FileManager`. No plugins. No sync conflicts. No middleware. No network calls. Pure local file I/O.
+
+## Features
+
+- **Global hotkey** — `⌘N` (customizable) from any app. Obsidian doesn't need to be open.
+- **5 capture zones** — Note / Clip / Link / Task / Project. Each maps to a heading in your Daily Note.
+- **Dual write mode** — Daily Note (append to today's sections) or Inbox (standalone .md files). Toggle with `⇧Tab`.
+- **Pin mode** — Rapid-fire capture. Panel stays open after each save.
+- **Native macOS** — SwiftUI + AppKit. Not Electron, not a web wrapper. Feels like part of the OS.
+- **Zero network** — No accounts, no telemetry, no cloud. Your vault is yours.
+
+## The Problem with Alternatives
+
+| | Trace | QuickAdd (plugin) | Alfred / Raycast |
+|---|---|---|---|
+| Obsidian must be open | **No** | Yes | No |
+| Zone-based Daily Note capture | **5 zones** | Needs config | No |
+| Direct .md write | **Yes** | Yes | Via plugin |
+| Native macOS UI | **Yes** | Web render | Yes |
+| Runs as standalone app | **Yes** | No | Yes |
+
+QuickAdd is great — inside Obsidian. Alfred can append text — to plain files. Trace is purpose-built for one thing: **getting thoughts into your Obsidian vault at OS speed**.
 
 ## Keyboard Shortcuts
 
@@ -40,25 +71,18 @@ Trace writes directly to your Obsidian vault via `FileManager`. No plugins, no s
 
 ## Installation
 
-### From Source
-
-Prerequisites: Xcode 16+ and macOS 13+.
+Prerequisites: **Xcode 16+** and **macOS 13+**.
 
 ```bash
 git clone https://github.com/SamSong1997/Trace.git
 cd Trace
-./scripts/trace.sh install    # builds and copies to /Applications
-./scripts/trace.sh launch-app # start Trace
+./scripts/trace.sh install       # build + copy to /Applications
+./scripts/trace.sh launch-app    # start Trace
 ```
 
-### First Run
+**First run:** Menu bar icon → Settings → set your Vault path → done.
 
-1. Click the menu bar icon → **Settings**
-2. Set your Obsidian Vault path
-3. Adjust the global hotkey if needed
-4. Press the hotkey from anywhere — you're set
-
-## Project Structure
+## Under the Hood
 
 ```
 Sources/Trace/
@@ -66,49 +90,41 @@ Sources/Trace/
 ├── UI/
 │   ├── Capture/  # Floating capture panel
 │   └── Settings/ # Preferences window
-├── Services/     # Hotkey, Daily Note writer, persistence
+├── Services/     # Hotkey registration, Daily Note writer, persistence
 ├── Models/       # Data models
-├── Utils/        # Helpers
+├── Utils/        # Theme, keyboard shortcuts, brand assets
 └── Resources/    # Icons, assets
-Tests/TraceTests/ # Unit tests
-scripts/          # Build and dev scripts
 ```
 
-## Tech Stack
-
-- **UI**: SwiftUI + AppKit (macOS native)
-- **Global hotkey**: `CGEvent` / `NSEvent.addGlobalMonitorForEvents`
-- **File I/O**: `FileManager` direct .md writes, UTF-8
-- **No backend, no accounts, no network calls**
-
-## Development
+**Stack:** SwiftUI + AppKit · `CGEvent` global hotkey · `FileManager` direct .md write · Zero dependencies.
 
 ```bash
-swift build        # compile
-swift test         # run tests
-./scripts/trace.sh check  # build + test
+swift build                   # compile
+swift test                    # test
+./scripts/trace.sh check      # build + test
 ```
 
-## Comparison
+## Origin Story
 
-| | Trace | QuickAdd (plugin) | Alfred/Raycast |
-|---|---|---|---|
-| Requires Obsidian open | No | Yes | No |
-| Zone-based capture | 5 zones | Configurable | Plain text |
-| Direct Daily Note write | Yes | Yes | Via plugin |
-| Native macOS UI | Yes | Web render | Yes |
-| Runs independently | Yes | No | Yes |
+Trace started as [ObsidianFlashNote](https://github.com/SamSong1997/ObsidianFlashNote) — a Hammerspoon Lua script that proved the concept: you can capture thoughts without leaving your current app. The response was clear enough that I rewrote it from scratch as a native macOS app in SwiftUI.
 
-## Prior Art
+The name changed because the mission became clearer. This isn't about "flash notes." It's about leaving a **trace** of every thought that matters — before it evaporates.
 
-Trace started as [ObsidianFlashNote](https://github.com/SamSong1997/ObsidianFlashNote), a Hammerspoon-based prototype. The native macOS app is a complete rewrite in SwiftUI.
+> 万象皆留痕。
+
+## Connect
+
+Built by **Sam Song**.
+
+I'm building Trace as part of [SOTA Sync](https://sotasync.com) — tools and thinking around AI, productivity, and the craft of building.
+
+- X / Twitter: [@SamSongAI](https://twitter.com/SamSongAI)
+- WeChat: scan to connect 👇
+
+<p align="center">
+  <img src="Sources/Trace/Resources/wechat-qr.jpg" width="200" alt="WeChat QR" />
+</p>
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
-
-## Author
-
-**Sam Song** — [@SamSongAI](https://twitter.com/SamSongAI)
-
-Part of [SOTA Sync](https://sotasync.com).
+[MIT](LICENSE) — use it, fork it, make it yours.
