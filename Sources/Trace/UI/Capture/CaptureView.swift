@@ -51,19 +51,11 @@ struct CaptureView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(BrandAssets.displayName)
-                    .font(.custom("Lora", size: 14))
-                    .fontWeight(.bold)
-                    .foregroundStyle(theme.textPrimary)
-                    .lineLimit(1)
-
-                Text(BrandAssets.slogan)
-                    .font(.custom("Lora", size: 10))
-                    .fontWeight(.semibold)
-                    .foregroundStyle(theme.caption)
-                    .lineLimit(1)
-            }
+            Text(BrandAssets.displayName)
+                .font(.custom("Lora", size: 13))
+                .fontWeight(.bold)
+                .foregroundStyle(theme.textPrimary)
+                .lineLimit(1)
 
             Spacer()
 
@@ -71,14 +63,14 @@ struct CaptureView: View {
                 viewModel.pinned.toggle()
             } label: {
                 Image(systemName: viewModel.pinned ? "pin.fill" : "pin")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(viewModel.pinned ? theme.accent : theme.iconMuted)
             }
             .buttonStyle(.plain)
-            .help("Pin 模式")
+            .help("Pin")
         }
         .padding(.horizontal, 16)
-        .frame(height: 52)
+        .frame(height: 36)
         .background(theme.chromeBackground)
     }
 
@@ -98,8 +90,8 @@ struct CaptureView: View {
             Divider().overlay(theme.border)
 
             documentTitleField
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
         }
         .background(theme.chromeBackground)
     }
@@ -107,24 +99,20 @@ struct CaptureView: View {
     private var documentTitleField: some View {
         ZStack(alignment: .leading) {
             if viewModel.fileTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("文档标题（可选）")
-                    .font(.custom("Lora", size: 13))
+                Text("标题（可选）")
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(theme.caption)
             }
 
             TextField("", text: $viewModel.fileTitle)
                 .textFieldStyle(.plain)
-                .font(.custom("Lora", size: 13))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(theme.textPrimary)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .background(theme.surface.opacity(0.92))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(theme.border, lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(theme.surface.opacity(0.8))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private var modeFooter: some View {
@@ -137,33 +125,25 @@ struct CaptureView: View {
             Divider().overlay(theme.border)
 
             sectionButtons
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
         }
     }
 
     private var sectionButtons: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 6) {
             ForEach(NoteSection.allCases) { section in
                 Button {
                     viewModel.selectedSection = section
                 } label: {
                     Text(settings.title(for: section))
                         .lineLimit(1)
-                        .font(.custom("Lora", size: 13))
-                        .fontWeight(.bold)
+                        .font(.system(size: 12, weight: viewModel.selectedSection == section ? .semibold : .medium))
                         .foregroundStyle(viewModel.selectedSection == section ? theme.selectedText : theme.textSecondary)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 38)
-                        .background(viewModel.selectedSection == section ? theme.accentStrong : theme.surface)
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(
-                                    viewModel.selectedSection == section ? theme.accent : theme.border,
-                                    lineWidth: 1
-                                )
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .frame(height: 30)
+                        .background(viewModel.selectedSection == section ? theme.accentStrong : theme.surface.opacity(0.6))
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
