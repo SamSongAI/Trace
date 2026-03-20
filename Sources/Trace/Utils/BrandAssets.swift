@@ -23,10 +23,8 @@ enum BrandAssets {
         size: CGFloat = 18,
         appearance: NSAppearance? = nil
     ) -> NSImage? {
-        themedLogo(
-            variant: logoVariant(for: appearance ?? NSApp.effectiveAppearance),
-            size: size
-        ) ?? makeResizedBrandImage(size: size)
+        _ = appearance
+        return makeMenuBarTemplateLogo(size: size)
     }
 
     static func headerLogo(
@@ -65,6 +63,52 @@ enum BrandAssets {
         }
 
         return resizedImage(from: source, size: size)
+    }
+
+    private static func makeMenuBarTemplateLogo(size: CGFloat) -> NSImage? {
+        let targetSize = NSSize(width: size, height: size)
+        let image = NSImage(size: targetSize)
+        image.lockFocus()
+
+        NSColor.clear.setFill()
+        NSBezierPath(rect: NSRect(origin: .zero, size: targetSize)).fill()
+
+        NSColor.black.setFill()
+
+        let topBarWidth = size * 0.78
+        let topBarHeight = max(size * 0.18, 3)
+        let stemWidth = max(size * 0.2, 3.6)
+        let stemHeight = size * 0.5
+        let topBarX = (size - topBarWidth) / 2
+        let topBarY = size * 0.66
+        let stemX = (size - stemWidth) / 2
+        let stemY = size * 0.16
+
+        NSBezierPath(
+            roundedRect: NSRect(
+                x: topBarX,
+                y: topBarY,
+                width: topBarWidth,
+                height: topBarHeight
+            ),
+            xRadius: 1,
+            yRadius: 1
+        ).fill()
+
+        NSBezierPath(
+            roundedRect: NSRect(
+                x: stemX,
+                y: stemY,
+                width: stemWidth,
+                height: stemHeight
+            ),
+            xRadius: 1,
+            yRadius: 1
+        ).fill()
+
+        image.unlockFocus()
+        image.isTemplate = true
+        return image
     }
 
     private static func bundledTraceIcon() -> NSImage? {
@@ -106,6 +150,11 @@ enum BrandAssets {
     }
 
     private static func moduleLogo() -> NSImage? {
+        if let svgURL = Bundle.module.url(forResource: "trace-app-icon", withExtension: "svg"),
+           let svgImage = NSImage(contentsOf: svgURL) {
+            return svgImage
+        }
+
         if let pngURL = Bundle.module.url(forResource: "logo", withExtension: "png"),
            let pngImage = NSImage(contentsOf: pngURL) {
             return pngImage

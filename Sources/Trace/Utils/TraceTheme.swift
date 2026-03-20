@@ -29,7 +29,7 @@ enum AppThemePreset: String, CaseIterable, Identifiable {
         case .light:
             return "参考 Obsidian Light 的灰白底色和紫色强调，更干净、更通用。"
         case .dark:
-            return "参考 Obsidian Dark 的 slate / plum 夜间氛围，适合常驻捕捉。"
+            return "黑白灰夜间主题，保留足够对比度，避免紫色品牌偏移。"
         case .paper:
             return "纸张米白与墨黑正文，适合长时间阅读、整理和静态编辑。"
         case .dune:
@@ -201,60 +201,60 @@ struct TraceTheme {
             return TraceTheme(
                 preset: preset,
                 capture: CapturePalette(
-                    panelBackground: Color(hex: 0x15121C),
-                    chromeBackground: Color(hex: 0x1C1825),
-                    surface: Color(hex: 0x2A2338),
-                    border: Color(hex: 0x4F4468),
-                    textPrimary: Color(hex: 0xF0EBFA),
-                    textSecondary: Color(hex: 0xE2DCF2),
-                    caption: Color(hex: 0xC8C0DD),
-                    iconMuted: Color(hex: 0xD7D0ED),
-                    accent: Color(hex: 0xA88BFA),
-                    accentStrong: Color(hex: 0x6C31E3),
-                    selectedSurface: Color(hex: 0x6C31E3),
-                    selectedText: .white
+                    panelBackground: Color(hex: 0x101010),
+                    chromeBackground: Color(hex: 0x141414),
+                    surface: Color(hex: 0x1B1B1B),
+                    border: Color(hex: 0x343434),
+                    textPrimary: Color(hex: 0xF5F5F5),
+                    textSecondary: Color(hex: 0xDFDFDF),
+                    caption: Color(hex: 0xA8A8A8),
+                    iconMuted: Color(hex: 0xC8C8C8),
+                    accent: Color(hex: 0xF5F5F5),
+                    accentStrong: Color(hex: 0xFFFFFF),
+                    selectedSurface: Color(hex: 0xF5F5F5),
+                    selectedText: Color(hex: 0x101010)
                 ),
                 settings: SettingsPalette(
-                    shellTop: Color(hex: 0x17141F),
-                    shellMiddle: Color(hex: 0x131019),
-                    shellBottom: Color(hex: 0x0C0A11),
-                    shellPrimaryGlow: Color(hex: 0xA88BFA, alpha: 0.28),
-                    shellSecondaryGlow: Color(hex: 0x6F7BF2, alpha: 0.16),
-                    shellPanel: Color(hex: 0x1A1624, alpha: 0.82),
-                    shellPanelBorder: Color(hex: 0x554770, alpha: 0.94),
-                    cardBackground: Color(hex: 0x1E1928),
-                    cardBorder: Color(hex: 0x45395B),
-                    cardShadow: Color.black.opacity(0.3),
-                    headerEyebrow: Color(hex: 0xC3B6FF),
-                    headerTitle: Color(hex: 0xF3EEFC),
-                    headerSubtitle: Color(hex: 0xD1C8E6),
-                    sectionTitle: Color(hex: 0xEFEAF8),
-                    sectionDescription: Color(hex: 0xC5BBD9),
-                    rowLabel: Color(hex: 0xE3DBF5),
-                    fieldBackground: Color(hex: 0x251F33),
-                    fieldBorder: Color(hex: 0x5A4C77),
-                    fieldText: Color(hex: 0xF4F0FC),
-                    chipBackground: Color(hex: 0x2C2440),
-                    chipText: Color(hex: 0xF0E8FF),
-                    accent: Color(hex: 0xA88BFA),
-                    accentStrong: Color(hex: 0x6C31E3),
-                    primaryButtonText: .white,
+                    shellTop: Color(hex: 0x111111),
+                    shellMiddle: Color(hex: 0x0C0C0C),
+                    shellBottom: Color(hex: 0x080808),
+                    shellPrimaryGlow: Color.white.opacity(0.06),
+                    shellSecondaryGlow: Color.white.opacity(0.03),
+                    shellPanel: Color(hex: 0x131313, alpha: 0.86),
+                    shellPanelBorder: Color(hex: 0x2C2C2C, alpha: 0.96),
+                    cardBackground: Color(hex: 0x171717),
+                    cardBorder: Color(hex: 0x292929),
+                    cardShadow: Color.black.opacity(0.34),
+                    headerEyebrow: Color(hex: 0xD5D5D5),
+                    headerTitle: Color(hex: 0xF5F5F5),
+                    headerSubtitle: Color(hex: 0xCFCFCF),
+                    sectionTitle: Color(hex: 0xF0F0F0),
+                    sectionDescription: Color(hex: 0xBABABA),
+                    rowLabel: Color(hex: 0xE2E2E2),
+                    fieldBackground: Color(hex: 0x1A1A1A),
+                    fieldBorder: Color(hex: 0x343434),
+                    fieldText: Color(hex: 0xF5F5F5),
+                    chipBackground: Color(hex: 0x202020),
+                    chipText: Color(hex: 0xEEEEEE),
+                    accent: Color(hex: 0xF5F5F5),
+                    accentStrong: Color(hex: 0xFFFFFF),
+                    primaryButtonText: Color(hex: 0x101010),
                     secondaryButtonBackground: Color.white.opacity(0.07),
-                    secondaryButtonBorder: Color(hex: 0x695788, alpha: 0.94),
-                    secondaryButtonText: Color(hex: 0xF1EDFA),
-                    mutedText: Color(hex: 0xB7AED0),
-                    warningText: Color(hex: 0xD7CBFF)
+                    secondaryButtonBorder: Color(hex: 0x3A3A3A, alpha: 0.96),
+                    secondaryButtonText: Color(hex: 0xEFEFEF),
+                    mutedText: Color(hex: 0xA8A8A8),
+                    warningText: Color(hex: 0xF5F5F5)
                 ),
                 editor: makeEditorTheme(
-                    text: 0xEFEAF8,
-                    placeholder: 0xBBB0D8,
-                    insertion: 0xA88BFA
+                    text: 0xF5F5F5,
+                    placeholder: 0x8F8F8F,
+                    insertion: 0xFFFFFF
                 ),
                 previewSwatches: [
-                    Color(hex: 0x15131B),
-                    Color(hex: 0x241F2D),
-                    Color(hex: 0xA88BFA),
-                    Color(hex: 0x6C31E3)
+                    Color(hex: 0x101010),
+                    Color(hex: 0x1A1A1A),
+                    Color(hex: 0x7E7E7E),
+                    Color(hex: 0xF5F5F5)
                 ]
             )
         case .paper:

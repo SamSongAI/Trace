@@ -12,13 +12,16 @@ EXECUTABLE_SOURCE="${ROOT_DIR}/.build/release/${EXECUTABLE_NAME}"
 EXECUTABLE_DEST="${BUNDLE_DIR}/Contents/MacOS/${APP_NAME}"
 RESOURCES_DIR="${BUNDLE_DIR}/Contents/Resources"
 INFO_PLIST_PATH="${BUNDLE_DIR}/Contents/Info.plist"
-ICON_SOURCE_PATH="${ROOT_DIR}/logo.png"
 ICONSET_DIR="${DIST_DIR}/Trace.iconset"
 ICON_OUTPUT_PATH="${DIST_DIR}/Trace.icns"
 ICON_BUNDLE_PATH="${RESOURCES_DIR}/Trace.icns"
 APPLICATIONS_DIR="/Applications"
 INSTALLED_APP_PATH="${APPLICATIONS_DIR}/${BUNDLE_NAME}"
 DEFAULT_CODESIGN_IDENTITY="-"
+ICON_SOURCE_CANDIDATES=(
+  "${ROOT_DIR}/Sources/Trace/Resources/trace-app-icon.svg"
+  "${ROOT_DIR}/logo.png"
+)
 
 log() {
   printf '[trace] %s\n' "$*"
@@ -34,7 +37,15 @@ require_command() {
 }
 
 generate_app_icon() {
-  [[ -f "${ICON_SOURCE_PATH}" ]] || return 0
+  local icon_source_path=""
+  for candidate in "${ICON_SOURCE_CANDIDATES[@]}"; do
+    if [[ -f "${candidate}" ]]; then
+      icon_source_path="${candidate}"
+      break
+    fi
+  done
+
+  [[ -n "${icon_source_path}" ]] || return 0
 
   require_command swift
   require_command iconutil
@@ -42,7 +53,7 @@ generate_app_icon() {
   rm -rf "${ICONSET_DIR}" "${ICON_OUTPUT_PATH}"
   mkdir -p "${ICONSET_DIR}"
 
-  swift "${ROOT_DIR}/scripts/generate-app-icon.swift" "${ICON_SOURCE_PATH}" "${ICONSET_DIR}"
+  swift "${ROOT_DIR}/scripts/generate-app-icon.swift" "${icon_source_path}" "${ICONSET_DIR}"
   iconutil -c icns "${ICONSET_DIR}" -o "${ICON_OUTPUT_PATH}"
 }
 

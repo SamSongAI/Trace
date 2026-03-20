@@ -26,21 +26,13 @@ private enum ShortcutTarget {
 
 private struct SettingsShellHeader: View {
     let palette: SettingsPalette
-    let currentThemePreset: AppThemePreset
     let currentThemeTitle: String
     let currentModeTitle: String
 
     var body: some View {
         HStack(alignment: .top, spacing: 18) {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 10) {
-                    if let logo = BrandAssets.headerLogo(for: currentThemePreset, size: 20) {
-                        Image(nsImage: logo)
-                            .resizable()
-                            .interpolation(.high)
-                            .frame(width: 20, height: 20)
-                    }
-
+                HStack(spacing: 0) {
                     Text("Trace Control")
                         .font(.system(size: 12, weight: .bold, design: .default))
                         .textCase(.uppercase)
@@ -567,7 +559,6 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 18) {
                 SettingsShellHeader(
                     palette: palette,
-                    currentThemePreset: settings.appThemePreset,
                     currentThemeTitle: settings.appThemePreset.title,
                     currentModeTitle: settings.noteWriteMode.compactTitle
                 )

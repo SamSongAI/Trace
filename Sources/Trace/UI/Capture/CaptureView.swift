@@ -50,14 +50,7 @@ struct CaptureView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            if let logo = BrandAssets.headerLogo(for: settings.appThemePreset) {
-                Image(nsImage: logo)
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: 16, height: 16)
-            }
-
+        HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(BrandAssets.displayName)
                     .font(.custom("Lora", size: 14))

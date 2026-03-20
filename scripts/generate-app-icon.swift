@@ -8,6 +8,7 @@ struct IconSpec {
     let pixels: Int
 }
 
+private let appIconCanvasInsetRatio: CGFloat = 11.0 / 128.0
 private let horizontalInsetRatio: CGFloat = 0.05
 private let topInsetRatio: CGFloat = 0.05
 private let bottomInsetRatio: CGFloat = 0.05
@@ -254,20 +255,20 @@ func contentRect(for bitmap: NSBitmapImageRep, imageSize: NSSize) -> NSRect {
     return expandedRect.intersection(imageBounds)
 }
 
-func fittedRect(for sourceRect: NSRect, canvasSize: CGFloat) -> NSRect {
-    let leftInset = canvasSize * horizontalInsetRatio
-    let rightInset = canvasSize * horizontalInsetRatio
-    let topInset = canvasSize * topInsetRatio
-    let bottomInset = canvasSize * bottomInsetRatio
-    let availableWidth = canvasSize - leftInset - rightInset
-    let availableHeight = canvasSize - topInset - bottomInset
+func fittedRect(for sourceRect: NSRect, in backgroundRect: NSRect) -> NSRect {
+    let leftInset = backgroundRect.width * horizontalInsetRatio
+    let rightInset = backgroundRect.width * horizontalInsetRatio
+    let topInset = backgroundRect.height * topInsetRatio
+    let bottomInset = backgroundRect.height * bottomInsetRatio
+    let availableWidth = backgroundRect.width - leftInset - rightInset
+    let availableHeight = backgroundRect.height - topInset - bottomInset
     let scale = min(availableWidth / sourceRect.width, availableHeight / sourceRect.height)
     let targetWidth = sourceRect.width * scale
     let targetHeight = sourceRect.height * scale
 
     return NSRect(
-        x: leftInset + (availableWidth - targetWidth) / 2,
-        y: bottomInset + (availableHeight - targetHeight) / 2,
+        x: backgroundRect.minX + leftInset + (availableWidth - targetWidth) / 2,
+        y: backgroundRect.minY + bottomInset + (availableHeight - targetHeight) / 2,
         width: targetWidth,
         height: targetHeight
     )
@@ -294,9 +295,11 @@ for spec in specs {
     NSBezierPath(rect: NSRect(x: 0, y: 0, width: spec.pixels, height: spec.pixels)).fill()
 
     let canvasRect = NSRect(x: 0, y: 0, width: spec.pixels, height: spec.pixels)
-    let cornerRadius = CGFloat(spec.pixels) * cornerRadiusRatio
+    let canvasInset = CGFloat(spec.pixels) * appIconCanvasInsetRatio
+    let backgroundRect = canvasRect.insetBy(dx: canvasInset, dy: canvasInset)
+    let cornerRadius = backgroundRect.width * cornerRadiusRatio
     let backgroundPath = NSBezierPath(
-        roundedRect: canvasRect,
+        roundedRect: backgroundRect,
         xRadius: cornerRadius,
         yRadius: cornerRadius
     )
@@ -304,7 +307,7 @@ for spec in specs {
     backgroundPath.fill()
     backgroundPath.addClip()
 
-    let destinationRect = fittedRect(for: sourceContentRect, canvasSize: CGFloat(spec.pixels))
+    let destinationRect = fittedRect(for: sourceContentRect, in: backgroundRect)
     sourceImage.draw(
         in: destinationRect,
         from: sourceContentRect,
