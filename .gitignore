@@ -39,3 +39,4 @@ trace_textview_override_test
 .vscode/
 .idea/
 *.xcuserdata
+CLAUDE.md
