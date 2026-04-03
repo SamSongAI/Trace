@@ -41,3 +41,10 @@ trace_textview_override_test
 *.xcuserdata
 CLAUDE.md
 CHANGELOG.md
+CONTRIBUTING.md
+SECURITY.md
+
+# === Unused resources ===
+Sources/Trace/Resources/lava-mark.svg
+Sources/Trace/Resources/obsidian-logo-gradient.svg
+Sources/Trace/Resources/obsidian-logo-text-black.svg

@@ -161,12 +161,7 @@ enum BrandAssets {
             return pngImage
         }
 
-        guard let svgURL = Bundle.module.url(forResource: "lava-mark", withExtension: "svg"),
-              let svgImage = NSImage(contentsOf: svgURL) else {
-            return nil
-        }
-
-        return svgImage
+        return nil
     }
 
     private static func logoVariant(for appearance: NSAppearance) -> BrandLogoVariant {
