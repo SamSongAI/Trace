@@ -3,12 +3,25 @@ import SwiftUI
 
 private typealias CaptureTheme = TraceTheme.CapturePalette
 
+private struct SectionGridWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct CaptureView: View {
     @ObservedObject var viewModel: CaptureViewModel
     @ObservedObject var settings: AppSettings
     let onPasteImage: ((NSImage) -> String?)?
 
     @State private var inputFocused = false
+    @State private var sectionGridWidth: CGFloat = 0
+
+    private let sectionGridSpacing: CGFloat = 6
+    private let minimumSectionButtonWidth: CGFloat = 92
+    private let maximumSectionRows = 3
 
     private var theme: CaptureTheme {
         settings.appTheme.capture
@@ -41,6 +54,21 @@ struct CaptureView: View {
         }
         .frame(minWidth: 360, minHeight: 220)
         .background(theme.panelBackground)
+        .overlay(alignment: .bottom) {
+            if let message = viewModel.toastMessage {
+                Text(message)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(theme.textSecondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(theme.surface.opacity(0.95))
+                    .clipShape(Capsule())
+                    .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                    .padding(.bottom, 12)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
+            }
+        }
         .onAppear {
             focusInputSoon()
         }
@@ -67,7 +95,7 @@ struct CaptureView: View {
                     .foregroundStyle(viewModel.pinned ? theme.accent : theme.iconMuted)
             }
             .buttonStyle(.plain)
-            .help("Pin")
+            .help("固定面板，保存后不关闭 (⌘P)")
         }
         .padding(.horizontal, 16)
         .frame(height: 36)
@@ -97,22 +125,14 @@ struct CaptureView: View {
     }
 
     private var documentTitleField: some View {
-        ZStack(alignment: .leading) {
-            if viewModel.fileTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("标题（可选）")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(theme.caption)
-            }
-
-            TextField("", text: $viewModel.fileTitle)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(theme.textPrimary)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(theme.surface.opacity(0.8))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        TextField("标题（可选）", text: $viewModel.fileTitle)
+            .textFieldStyle(.plain)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(theme.textPrimary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(theme.surface.opacity(0.8))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private var modeFooter: some View {
@@ -128,26 +148,59 @@ struct CaptureView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
         }
+        .onPreferenceChange(SectionGridWidthPreferenceKey.self) { width in
+            sectionGridWidth = width
+        }
     }
 
     private var sectionButtons: some View {
-        HStack(spacing: 6) {
-            ForEach(NoteSection.allCases) { section in
+        LazyVGrid(columns: sectionGridColumns, spacing: sectionGridSpacing) {
+            ForEach(settings.sections) { section in
                 Button {
                     viewModel.selectedSection = section
                 } label: {
                     Text(settings.title(for: section))
-                        .lineLimit(1)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                         .font(.system(size: 12, weight: viewModel.selectedSection == section ? .semibold : .medium))
                         .foregroundStyle(viewModel.selectedSection == section ? theme.selectedText : theme.textSecondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 8)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 30)
+                        .frame(minHeight: 34)
                         .background(viewModel.selectedSection == section ? theme.accentStrong : theme.surface.opacity(0.6))
                         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
         }
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: SectionGridWidthPreferenceKey.self, value: proxy.size.width)
+            }
+        )
+    }
+
+    private var sectionGridColumns: [GridItem] {
+        let columnCount = sectionColumnCount(for: sectionGridWidth, itemCount: settings.sections.count)
+        return Array(
+            repeating: GridItem(.flexible(), spacing: sectionGridSpacing, alignment: .top),
+            count: columnCount
+        )
+    }
+
+    private func sectionColumnCount(for width: CGFloat, itemCount: Int) -> Int {
+        guard itemCount > 0 else { return 1 }
+
+        let minimumColumnsForThreeRows = Int(ceil(Double(itemCount) / Double(maximumSectionRows)))
+        guard width > 0 else { return min(itemCount, max(1, minimumColumnsForThreeRows)) }
+
+        let widthBasedColumns = max(
+            1,
+            Int((width + sectionGridSpacing) / (minimumSectionButtonWidth + sectionGridSpacing))
+        )
+        return min(itemCount, max(minimumColumnsForThreeRows, widthBasedColumns))
     }
 
     private func focusInputSoon() {

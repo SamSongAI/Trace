@@ -33,11 +33,11 @@ final class KeyboardShortcutTests: XCTestCase {
 
     func testReservedSectionSwitchDetection() {
         let reserved = KeyboardShortcut(
-            keyCode: UInt32(kVK_ANSI_3),
+            keyCode: UInt32(kVK_ANSI_9),
             modifiers: UInt32(cmdKey | shiftKey)
         )
         let free = KeyboardShortcut(
-            keyCode: UInt32(kVK_ANSI_3),
+            keyCode: UInt32(kVK_ANSI_9),
             modifiers: UInt32(optionKey)
         )
 

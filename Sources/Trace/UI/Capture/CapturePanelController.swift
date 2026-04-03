@@ -14,7 +14,7 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
     private lazy var clipboardImageWriter = ClipboardImageWriter(settings: settings)
 
     private let viewModel = CaptureViewModel()
-    private let minimumPanelSize = NSSize(width: 340, height: 240)
+    private let minimumPanelSize = NSSize(width: 360, height: 240)
     private var panel: CapturePanel?
     private var localKeyMonitor: Any?
     private var previousFrontmostApplication: NSRunningApplication?
@@ -25,6 +25,7 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
         self.writer = writer
         super.init()
         bindPinnedBehavior()
+        bindSectionState()
     }
 
     func toggle() {
@@ -51,7 +52,7 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
         self.panel = panel
 
         rememberFrontmostApplicationBeforeShowing()
-        viewModel.selectedSection = .default
+        viewModel.selectedSection = settings.defaultSection
         applySavedFrameIfNeeded(on: panel)
 
         NSApp.activate(ignoringOtherApps: true)
@@ -153,15 +154,15 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
             }
 
             if modifierFlags.contains(.command), let key = event.charactersIgnoringModifiers {
-                switch key {
-                case "1": viewModel.selectedSection = .note
-                case "2": viewModel.selectedSection = .clip
-                case "3": viewModel.selectedSection = .link
-                case "4": viewModel.selectedSection = .task
-                case "5": viewModel.selectedSection = .project
-                default: return event
+                if key.lowercased() == "p", modifierFlags == .command {
+                    viewModel.pinned.toggle()
+                    return nil
                 }
-                return nil
+                if let section = selectSection(forShortcutKey: key) {
+                    viewModel.selectedSection = section
+                    return nil
+                }
+                return event
             }
 
             return event
@@ -276,9 +277,7 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
         let trimmedText = viewModel.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !trimmedText.isEmpty else {
-            if !viewModel.pinned {
-                hide()
-            }
+            viewModel.showToast("内容为空，未保存")
             return
         }
 
@@ -290,6 +289,7 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
                 mode: mode,
                 documentTitle: viewModel.fileTitle
             )
+            settings.lastUsedSectionIndex = viewModel.selectedSection.index
             if viewModel.pinned {
                 viewModel.resetInput()
                 NotificationCenter.default.post(name: .traceFocusInput, object: nil)
@@ -331,6 +331,24 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
                 self?.panel?.hidesOnDeactivate = !pinned
             }
             .store(in: &cancellables)
+    }
+
+    private func bindSectionState() {
+        settings.$sectionTitles
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.viewModel.selectedSection = self.settings.resolvedSection(for: self.viewModel.selectedSection)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func selectSection(forShortcutKey key: String) -> NoteSection? {
+        guard let shortcutNumber = Int(key), (1...NoteSection.maximumCount).contains(shortcutNumber) else {
+            return nil
+        }
+
+        return settings.section(atShortcutIndex: shortcutNumber - 1)
     }
 
     func windowDidMove(_ notification: Notification) {

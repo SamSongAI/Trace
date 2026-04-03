@@ -28,6 +28,8 @@ enum SettingKeys {
     static let sectionTitlesOrderVersion = "trace.sectionTitlesOrderVersion"
     static let dailyEntryThemePreset = "trace.dailyEntryThemePreset"
     static let markdownEntrySeparatorStyle = "trace.markdownEntrySeparatorStyle"
+    static let lastUsedSectionIndex = "trace.lastUsedSectionIndex"
+    static let inboxVaultPath = "trace.inboxVaultPath"
 }
 
 enum LegacySettingKeys {
@@ -69,16 +71,16 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .dimension:
-            return "条目（Daily）"
+            return "日记"
         case .file:
-            return "文档（Inbox）"
+            return "文档"
         }
     }
 
     var compactTitle: String {
         switch self {
         case .dimension:
-            return "条目"
+            return "日记"
         case .file:
             return "文档"
         }
@@ -96,16 +98,16 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
     var destinationTitle: String {
         switch self {
         case .dimension:
-            return "写入 Daily 条目"
+            return "追加到当天日记"
         case .file:
-            return "写入独立文档"
+            return "创建独立文档"
         }
     }
 
     var summary: String {
         switch self {
         case .dimension:
-            return "保留在今天的 Daily 条目里，适合快速收集和后续整理。"
+            return "追加到当天的日记文件，适合快速收集和后续整理。"
         case .file:
             return "每次新建一篇独立 Markdown 文档，适合沉淀为正式稿件。"
         }
@@ -114,9 +116,9 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
     var targetSummary: String {
         switch self {
         case .dimension:
-            return "继续按模块写入 Daily，底部保留 5 个条目模块切换。"
+            return "按模块追加到当天日记，底部保留自定义模块切换。"
         case .file:
-            return "新建独立文件，可选标题，目录由 Settings 中的 Inbox 配置管理。"
+            return "新建独立文件，可选标题，保存到指定目录。"
         }
     }
 
@@ -130,77 +132,66 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
     }
 }
 
+enum DailyFileDateFormat: String, CaseIterable, Identifiable {
+    case chineseFull = "yyyy M月d日 EEEE"
+    case chineseShort = "yyyy M月d日"
+    case isoDate = "yyyy-MM-dd"
+    case isoDateTime = "yyyy-MM-dd EEEE"
+    case slashDate = "yyyy/MM/dd"
+
+    var id: String { rawValue }
+
+    var title: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.dateFormat = rawValue
+        let example = formatter.string(from: Date())
+        return "\(rawValue)  →  \(example)"
+    }
+
+    static func resolved(fromStored value: String?) -> DailyFileDateFormat {
+        guard let value, let preset = DailyFileDateFormat(rawValue: value) else {
+            return .chineseFull
+        }
+        return preset
+    }
+}
+
 enum DailyEntryThemePreset: String, CaseIterable, Identifiable {
-    case plainTextTimestamp
     case codeBlockClassic
+    case plainTextTimestamp
     case markdownQuote
-    case linear
-    case notion
-    case obsidian
-    case anthropic
-    case openAI
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .codeBlockClassic:
+            return "代码块（推荐）"
         case .plainTextTimestamp:
             return "文本 + 时间戳"
-        case .codeBlockClassic:
-            return "代码块（经典）"
         case .markdownQuote:
             return "引用（Markdown）"
-        case .linear:
-            return "Linear"
-        case .notion:
-            return "Notion"
-        case .obsidian:
-            return "Obsidian"
-        case .anthropic:
-            return "Anthropic"
-        case .openAI:
-            return "OpenAI"
         }
     }
 
-    // Uses Obsidian built-in callout types so output stays plugin-independent.
-    var calloutType: String? {
-        switch self {
-        case .plainTextTimestamp:
-            return nil
-        case .codeBlockClassic:
-            return nil
-        case .markdownQuote:
-            return nil
-        case .linear:
-            return "info"
-        case .notion:
-            return "quote"
-        case .obsidian:
-            return "example"
-        case .anthropic:
-            return "warning"
-        case .openAI:
-            return "tip"
+    /// Resolves a stored rawValue that may reference a removed preset.
+    static func resolved(fromStored rawValue: String?) -> DailyEntryThemePreset {
+        guard let rawValue, let preset = DailyEntryThemePreset(rawValue: rawValue) else {
+            return .codeBlockClassic
         }
+        return preset
     }
 
     fileprivate static func migrated(
         from legacyContainer: LegacyDailyEntryContainerStyle,
         legacyCardTheme: LegacyDailyCardTheme
     ) -> DailyEntryThemePreset {
-        guard legacyContainer == .calloutCard else {
-            return .plainTextTimestamp
+        // All legacy callout styles map to codeBlockClassic now.
+        guard legacyContainer != .calloutCard else {
+            return .codeBlockClassic
         }
-
-        switch legacyCardTheme {
-        case .anthropic:
-            return .anthropic
-        case .obsidianPurple:
-            return .obsidian
-        case .slate:
-            return .linear
-        }
+        return .plainTextTimestamp
     }
 }
 
@@ -254,13 +245,13 @@ enum VaultPathValidationIssue: Equatable {
     var message: String {
         switch self {
         case .empty:
-            return "请先选择 Obsidian Vault 文件夹。"
+            return "请先选择笔记库文件夹。"
         case .doesNotExist:
-            return "Vault 路径不存在，请重新选择。"
+            return "笔记库路径不存在，请重新选择。"
         case .notDirectory:
-            return "Vault 路径必须是文件夹。"
+            return "笔记库路径必须是文件夹。"
         case .notWritable:
-            return "Vault 路径不可写，请检查文件夹权限。"
+            return "笔记库路径不可写，请检查文件夹权限。"
         }
     }
 }
@@ -283,6 +274,12 @@ final class AppSettings: ObservableObject {
     @Published var vaultPath: String {
         didSet {
             defaults.set(vaultPath, forKey: SettingKeys.vaultPath)
+        }
+    }
+
+    @Published var inboxVaultPath: String {
+        didSet {
+            defaults.set(inboxVaultPath, forKey: SettingKeys.inboxVaultPath)
         }
     }
 
@@ -414,6 +411,11 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    var lastUsedSectionIndex: Int {
+        get { defaults.integer(forKey: SettingKeys.lastUsedSectionIndex) }
+        set { defaults.set(newValue, forKey: SettingKeys.lastUsedSectionIndex) }
+    }
+
     init(
         defaults: UserDefaults = .standard,
         legacyDefaults: UserDefaults? = nil,
@@ -428,6 +430,7 @@ final class AppSettings: ObservableObject {
         )
 
         vaultPath = defaults.string(forKey: SettingKeys.vaultPath) ?? ""
+        inboxVaultPath = defaults.string(forKey: SettingKeys.inboxVaultPath) ?? ""
         dailyFolderName = defaults.string(forKey: SettingKeys.dailyFolderName) ?? "Daily"
         dailyFileDateFormat = defaults.string(forKey: SettingKeys.dailyFileDateFormat) ?? "yyyy M月d日 EEEE"
         noteWriteMode = NoteWriteMode(rawValue: defaults.string(forKey: SettingKeys.noteWriteMode) ?? "") ?? .dimension
@@ -483,25 +486,25 @@ final class AppSettings: ObservableObject {
         }
         let storedOrderVersion = defaults.integer(forKey: SettingKeys.sectionTitlesOrderVersion)
         let persistedSectionTitles = defaults.stringArray(forKey: SettingKeys.sectionTitles) ?? []
-        let migratedSectionTitles = Self.migrateLegacySectionTitleOrder(
+        let migratedSectionTitles = Self.migratedStoredSectionTitles(
             persistedSectionTitles,
             storedVersion: storedOrderVersion
         )
-        sectionTitles = Self.normalizedSectionTitles(migratedSectionTitles)
+        sectionTitles = migratedSectionTitles
         markdownEntrySeparatorStyle = MarkdownEntrySeparatorStyle(
             rawValue: defaults.string(forKey: SettingKeys.markdownEntrySeparatorStyle) ?? ""
         ) ?? .horizontalRule
+        if persistedSectionTitles != migratedSectionTitles {
+            defaults.set(migratedSectionTitles, forKey: SettingKeys.sectionTitles)
+        }
         if storedOrderVersion < Self.currentSectionTitleOrderVersion {
             defaults.set(Self.currentSectionTitleOrderVersion, forKey: SettingKeys.sectionTitlesOrderVersion)
         }
-        if let storedPreset = DailyEntryThemePreset(
-            rawValue: defaults.string(forKey: SettingKeys.dailyEntryThemePreset) ?? ""
-        ) {
-            dailyEntryThemePreset = storedPreset
-        } else {
-            dailyEntryThemePreset = .plainTextTimestamp
-            defaults.set(dailyEntryThemePreset.rawValue, forKey: SettingKeys.dailyEntryThemePreset)
-        }
+        let resolvedPreset = DailyEntryThemePreset.resolved(
+            fromStored: defaults.string(forKey: SettingKeys.dailyEntryThemePreset)
+        )
+        dailyEntryThemePreset = resolvedPreset
+        defaults.set(resolvedPreset.rawValue, forKey: SettingKeys.dailyEntryThemePreset)
 
         normalizePanelShortcutCollisionsIfNeeded()
     }
@@ -534,8 +537,52 @@ final class AppSettings: ObservableObject {
         vaultPathValidationIssue == nil
     }
 
+    var inboxVaultPathValidationIssue: VaultPathValidationIssue? {
+        let trimmedPath = inboxVaultPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPath.isEmpty else { return .empty }
+
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: trimmedPath, isDirectory: &isDirectory) else {
+            return .doesNotExist
+        }
+
+        guard isDirectory.boolValue else {
+            return .notDirectory
+        }
+
+        guard fileManager.isWritableFile(atPath: trimmedPath) else {
+            return .notWritable
+        }
+
+        return nil
+    }
+
+    var hasValidInboxVaultPath: Bool {
+        inboxVaultPathValidationIssue == nil
+    }
+
     var appTheme: TraceTheme {
         appThemePreset.theme
+    }
+
+    var sections: [NoteSection] {
+        sectionTitles.enumerated().map { index, title in
+            NoteSection(index: index, title: title)
+        }
+    }
+
+    var canAddSection: Bool {
+        sectionTitles.count < NoteSection.maximumCount
+    }
+
+    var canRemoveSection: Bool {
+        sectionTitles.count > NoteSection.minimumCount
+    }
+
+    var defaultSection: NoteSection {
+        let saved = lastUsedSectionIndex
+        let section = saved > 0 ? NoteSection(index: saved, title: "") : nil
+        return resolvedSection(for: section)
     }
 
     func savedPanelFrame() -> NSRect? {
@@ -562,8 +609,11 @@ final class AppSettings: ObservableObject {
     }
 
     func title(for section: NoteSection) -> String {
-        let index = max(0, min(section.rawValue - 1, sectionTitles.count - 1))
-        return sectionTitles[index]
+        guard sectionTitles.indices.contains(section.index) else { return section.title }
+        let stored = sectionTitles[section.index]
+        return stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? NoteSection.defaultTitle(for: section.index)
+            : stored
     }
 
     func header(for section: NoteSection) -> String {
@@ -571,11 +621,40 @@ final class AppSettings: ObservableObject {
     }
 
     func setTitle(_ title: String, for section: NoteSection) {
-        let index = section.rawValue - 1
-        guard sectionTitles.indices.contains(index) else { return }
+        guard sectionTitles.indices.contains(section.index) else { return }
         var updated = sectionTitles
-        updated[index] = title
+        updated[section.index] = title
         sectionTitles = updated
+    }
+
+    func addSection() {
+        guard canAddSection else { return }
+        var updated = sectionTitles
+        updated.append(NoteSection.defaultTitle(for: updated.count))
+        sectionTitles = updated
+    }
+
+    func removeSection(_ section: NoteSection) {
+        guard canRemoveSection, sectionTitles.indices.contains(section.index) else { return }
+        var updated = sectionTitles
+        updated.remove(at: section.index)
+        sectionTitles = Self.normalizedSectionTitles(updated)
+    }
+
+    func section(atShortcutIndex index: Int) -> NoteSection? {
+        guard sections.indices.contains(index) else { return nil }
+        return sections[index]
+    }
+
+    func resolvedSection(for section: NoteSection?) -> NoteSection {
+        let availableSections = sections
+        guard !availableSections.isEmpty else {
+            return NoteSection(index: 0, title: NoteSection.defaultTitle(for: 0))
+        }
+
+        let requestedIndex = section?.index ?? 0
+        let resolvedIndex = min(max(requestedIndex, 0), availableSections.count - 1)
+        return availableSections[resolvedIndex]
     }
 
     func resetSectionTitlesToDefault() {
@@ -604,15 +683,22 @@ final class AppSettings: ObservableObject {
     }
 
     private static var defaultSectionTitles: [String] {
-        NoteSection.allCases.map(\.defaultTitle)
+        NoteSection.defaultTitles
     }
 
     private static func normalizedSectionTitles(_ titles: [String]) -> [String] {
-        NoteSection.allCases.enumerated().map { index, section in
-            let candidate = index < titles.count ? titles[index] : ""
-            let migrated = migrateLegacySectionTitle(candidate, for: section)
-            return normalizedSectionTitle(migrated, fallback: section.defaultTitle)
+        let trimmed = Array(titles.prefix(NoteSection.maximumCount))
+        let sourceTitles = trimmed.isEmpty ? defaultSectionTitles : trimmed
+
+        return sourceTitles.enumerated().map { index, candidate in
+            normalizedSectionTitle(candidate, fallback: NoteSection.defaultTitle(for: index))
         }
+    }
+
+    private static func migratedStoredSectionTitles(_ titles: [String], storedVersion: Int) -> [String] {
+        let orderMigrated = migrateLegacySectionTitleOrder(titles, storedVersion: storedVersion)
+        let titleMigrated = migrateLegacyProjectTitle(orderMigrated, storedVersion: storedVersion)
+        return normalizedSectionTitles(titleMigrated)
     }
 
     private static func migrateLegacySectionTitleOrder(_ titles: [String], storedVersion: Int) -> [String] {
@@ -624,19 +710,24 @@ final class AppSettings: ObservableObject {
         return migrated
     }
 
-    private static func migrateLegacySectionTitle(_ title: String, for section: NoteSection) -> String {
-        guard section == .project else { return title }
+    private static func migrateLegacyProjectTitle(_ titles: [String], storedVersion: Int) -> [String] {
+        guard storedVersion < currentSectionTitleOrderVersion else { return titles }
+
+        let projectIndex = NoteSection.project.index
+        guard titles.indices.contains(projectIndex) else { return titles }
+
+        let title = titles[projectIndex]
 
         let compacted = title
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: " ", with: "")
             .uppercased()
 
-        if compacted == "TODO" {
-            return NoteSection.project.defaultTitle
-        }
+        guard compacted == "TODO" else { return titles }
 
-        return title
+        var migrated = titles
+        migrated[projectIndex] = NoteSection.defaultTitle(for: projectIndex)
+        return migrated
     }
 
     private static func normalizedSectionTitle(_ rawTitle: String, fallback: String) -> String {

@@ -2,6 +2,7 @@ import Foundation
 
 protocol DailyNoteSettingsProviding {
     var vaultPath: String { get }
+    var inboxVaultPath: String { get }
     var dailyFolderName: String { get }
     var dailyFileDateFormat: String { get }
     var noteWriteMode: NoteWriteMode { get }
@@ -24,9 +25,9 @@ enum DailyNoteWriterError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .invalidVaultPath:
-            return "Vault 路径未配置。"
+            return "笔记库路径未配置。"
         case .invalidTargetFolderPath:
-            return "目标目录必须是 Vault 内的相对路径，且不能包含 .."
+            return "目标目录必须是笔记库内的相对路径，且不能包含 .."
         }
     }
 }
@@ -113,12 +114,14 @@ final class DailyNoteWriter {
     }
 
     private func inboxFileURL(for date: Date, title: String?, targetFolder: String?) throws -> URL {
-        let vaultURL = try vaultURL()
-        let fallbackFolderName = normalizedFolderName(settings.inboxFolderName, fallback: "inbox")
-        let folderName = try normalizedRelativeFolderPath(targetFolder, fallback: fallbackFolderName)
-        let inboxDirectoryURL = vaultURL.appendingPathComponent(folderName, isDirectory: true)
+        let inboxBaseURL = try inboxVaultURL()
         let baseName = fileBaseName(for: title, at: date)
-        return nextAvailableFileURL(baseName: baseName, in: inboxDirectoryURL)
+        if let targetFolder, !targetFolder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let folderName = try normalizedRelativeFolderPath(targetFolder, fallback: "")
+            let targetDir = folderName.isEmpty ? inboxBaseURL : inboxBaseURL.appendingPathComponent(folderName, isDirectory: true)
+            return nextAvailableFileURL(baseName: baseName, in: targetDir)
+        }
+        return nextAvailableFileURL(baseName: baseName, in: inboxBaseURL)
     }
 
     private func nextAvailableFileURL(baseName: String, in directoryURL: URL) -> URL {
@@ -157,6 +160,14 @@ final class DailyNoteWriter {
             throw DailyNoteWriterError.invalidVaultPath
         }
         return URL(fileURLWithPath: trimmedVaultPath, isDirectory: true)
+    }
+
+    private func inboxVaultURL() throws -> URL {
+        let trimmedPath = settings.inboxVaultPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPath.isEmpty else {
+            throw DailyNoteWriterError.invalidVaultPath
+        }
+        return URL(fileURLWithPath: trimmedPath, isDirectory: true)
     }
 
     private func normalizedFolderName(_ folderName: String, fallback: String) -> String {
@@ -264,28 +275,24 @@ final class DailyNoteWriter {
 
     private func entryForText(_ text: String, at date: Date) -> String {
         switch settings.dailyEntryThemePreset {
-        case .plainTextTimestamp:
-            return markdownEntry(plainTextBodyForText(text, at: date))
         case .codeBlockClassic:
             let body = "```\n\(text)\n\(timestamp(for: date))\n```"
             return markdownEntry(body)
+        case .plainTextTimestamp:
+            return markdownEntry(plainTextBodyForText(text, at: date))
         case .markdownQuote:
             return markdownEntry(markdownQuoteBodyForText(text, at: date))
-        case .linear, .notion, .obsidian, .anthropic, .openAI:
-            return calloutEntryForText(text, at: date)
         }
     }
 
     private func appendLatestEntry(_ text: String, at date: Date, into content: String, under section: NoteSection) -> String? {
         switch settings.dailyEntryThemePreset {
-        case .plainTextTimestamp:
-            return appendLatestPlainTextEntry(text, at: date, into: content, under: section)
         case .codeBlockClassic:
             return appendLatestCodeBlockEntry(text, at: date, into: content, under: section)
+        case .plainTextTimestamp:
+            return appendLatestPlainTextEntry(text, at: date, into: content, under: section)
         case .markdownQuote:
             return appendLatestMarkdownQuoteEntry(text, at: date, into: content, under: section)
-        case .linear, .notion, .obsidian, .anthropic, .openAI:
-            return appendLatestCalloutEntry(text, at: date, into: content, under: section)
         }
     }
 
@@ -314,25 +321,6 @@ final class DailyNoteWriter {
         return mutableContent
     }
 
-    private func calloutEntryForText(_ text: String, at date: Date) -> String {
-        guard let themeType = settings.dailyEntryThemePreset.calloutType else {
-            return "```\n\(text)\n\(timestamp(for: date))\n```\n\n"
-        }
-        let marker = "trace-\(settings.dailyEntryThemePreset.rawValue)"
-        let header = "> [!\(themeType)|\(marker)]"
-        let body = quotedText(from: text)
-        let mutedTimestamp = "<span class=\"trace-time\" style=\"color: var(--text-muted); font-size: 0.86em;\">\(timestamp(for: date))</span>"
-        return """
-        \(header)
-        > <span class="trace-marker" style="display:none;">\(marker)</span>
-        \(body)
-        >
-        > \(mutedTimestamp)
-
-
-        """
-    }
-
     private func quotedText(from text: String) -> String {
         text
             .components(separatedBy: .newlines)
@@ -356,10 +344,7 @@ final class DailyNoteWriter {
     }
 
     private func markdownEntry(_ body: String) -> String {
-        guard let separator = settings.markdownEntrySeparatorStyle.markdown else {
-            return "\(body)\n\n"
-        }
-        return "\(body)\n\n\(separator)\n\n"
+        "\(body)\n\n"
     }
 
     private func appendLatestPlainTextEntry(_ text: String, at date: Date, into content: String, under section: NoteSection) -> String? {
@@ -383,27 +368,6 @@ final class DailyNoteWriter {
         return mutableContent
     }
 
-    private func appendLatestCalloutEntry(_ text: String, at date: Date, into content: String, under section: NoteSection) -> String? {
-        guard let sectionBodyRange = sectionBodyRange(in: content, under: section) else {
-            return nil
-        }
-
-        let sectionBody = content[sectionBodyRange]
-        guard let calloutStart = firstCalloutStart(in: sectionBody) else {
-            return nil
-        }
-
-        let calloutEnd = calloutBlockEnd(in: sectionBody, from: calloutStart)
-        let insertionIndex = calloutEnd
-        let appendedBody = quotedText(from: text)
-        let mutedTimestamp = "<span class=\"trace-time\" style=\"color: var(--text-muted); font-size: 0.86em;\">\(timestamp(for: date))</span>"
-        let chunk = "\n> ---\n\(appendedBody)\n>\n> \(mutedTimestamp)\n"
-
-        var mutableContent = content
-        mutableContent.insert(contentsOf: chunk, at: insertionIndex)
-        return mutableContent
-    }
-
     private func appendLatestMarkdownQuoteEntry(_ text: String, at date: Date, into content: String, under section: NoteSection) -> String? {
         guard let sectionBodyRange = sectionBodyRange(in: content, under: section) else {
             return nil
@@ -422,40 +386,6 @@ final class DailyNoteWriter {
         var mutableContent = content
         mutableContent.insert(contentsOf: chunk, at: insertionIndex)
         return mutableContent
-    }
-
-    private func firstCalloutStart(in sectionBody: Substring) -> String.Index? {
-        var firstAny: String.Index?
-        var firstTrace: String.Index?
-        var searchStart = sectionBody.startIndex
-
-        if sectionBody.hasPrefix("> [!") {
-            firstAny = sectionBody.startIndex
-            if isTraceCalloutHeaderLine(in: sectionBody, at: sectionBody.startIndex) {
-                firstTrace = sectionBody.startIndex
-                return firstTrace
-            }
-        }
-
-        while searchStart < sectionBody.endIndex,
-              let prefixed = sectionBody[searchStart...].range(of: "\n> [!") {
-            let start = sectionBody.index(after: prefixed.lowerBound)
-            if firstAny == nil {
-                firstAny = start
-            }
-            if isTraceCalloutHeaderLine(in: sectionBody, at: start) {
-                firstTrace = start
-                break
-            }
-            searchStart = prefixed.upperBound
-        }
-
-        return firstTrace ?? firstAny
-    }
-
-    private func isTraceCalloutHeaderLine(in sectionBody: Substring, at start: String.Index) -> Bool {
-        let lineEnd = sectionBody[start...].firstIndex(of: "\n") ?? sectionBody.endIndex
-        return sectionBody[start..<lineEnd].contains("|trace-")
     }
 
     private func firstQuoteBlockStart(in sectionBody: Substring) -> String.Index? {

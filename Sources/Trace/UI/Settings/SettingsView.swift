@@ -24,29 +24,6 @@ private enum ShortcutTarget {
     }
 }
 
-// MARK: - Compact Header
-
-private struct SettingsHeader: View {
-    let palette: SettingsPalette
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("SETTINGS")
-                .font(.system(size: 11, weight: .bold))
-                .textCase(.uppercase)
-                .tracking(1.6)
-                .foregroundStyle(palette.mutedText)
-
-            Text(BrandAssets.displayName)
-                .font(.system(size: 24, weight: .bold))
-                .foregroundStyle(palette.headerTitle)
-        }
-        .padding(.horizontal, 24)
-        .padding(.top, 28)
-        .padding(.bottom, 8)
-    }
-}
-
 // MARK: - Section Card (simplified)
 
 private struct SectionCard<Content: View>: View {
@@ -78,26 +55,37 @@ private struct SectionCard<Content: View>: View {
 
 private struct SettingRow<Content: View>: View {
     let label: String
+    let hint: String?
     let palette: SettingsPalette
     @ViewBuilder var content: Content
 
     init(
         label: String,
+        hint: String? = nil,
         palette: SettingsPalette,
         @ViewBuilder content: () -> Content
     ) {
         self.label = label
+        self.hint = hint
         self.palette = palette
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(label)
-                .font(.system(size: 11, weight: .semibold))
-                .textCase(.uppercase)
-                .tracking(0.8)
-                .foregroundStyle(palette.rowLabel)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(label)
+                    .font(.system(size: 11, weight: .semibold))
+                    .textCase(.uppercase)
+                    .tracking(0.8)
+                    .foregroundStyle(palette.rowLabel)
+
+                if let hint {
+                    Text(hint)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(palette.mutedText)
+                }
+            }
 
             content
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -304,8 +292,6 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                SettingsHeader(palette: palette)
-
                 // Theme
                 SectionCard(title: "主题", palette: palette) {
                     VStack(spacing: 8) {
@@ -320,32 +306,8 @@ struct SettingsView: View {
                     }
                 }
 
-                // Vault
-                SectionCard(title: "Vault", palette: palette) {
-                    SettingRow(label: "Obsidian Vault 路径", palette: palette) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 8) {
-                                TextField("/Users/you/Obsidian", text: $settings.vaultPath)
-                                    .textFieldStyle(.plain)
-                                    .settingsFieldChrome(palette)
-
-                                Button("选择") {
-                                    chooseVaultPath()
-                                }
-                                .buttonStyle(SettingsPrimaryButtonStyle(palette: palette))
-                            }
-
-                            if let issue = settings.vaultPathValidationIssue {
-                                Text(issue.message)
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(palette.warningText)
-                            }
-                        }
-                    }
-                }
-
-                // Routing
-                SectionCard(title: "保存目标", palette: palette) {
+                // Storage
+                SectionCard(title: "保存位置", palette: palette) {
                     VStack(spacing: 12) {
                         SettingRow(label: "写入模式", palette: palette) {
                             HStack(spacing: 8) {
@@ -361,108 +323,128 @@ struct SettingsView: View {
                             }
                         }
 
-                        SettingRow(label: "Inbox 目录", palette: palette) {
-                            TextField("inbox", text: $settings.inboxFolderName)
-                                .textFieldStyle(.plain)
-                                .settingsFieldChrome(palette)
-                        }
+                        if settings.noteWriteMode == .dimension {
+                            SettingRow(label: "笔记库", hint: "日记保存的文件夹路径", palette: palette) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(spacing: 8) {
+                                        TextField("/Users/you/Daily", text: $settings.vaultPath)
+                                            .textFieldStyle(.plain)
+                                            .settingsFieldChrome(palette)
 
-                        SettingRow(label: "子目录", palette: palette) {
-                            TextField("Daily", text: $settings.dailyFolderName)
-                                .textFieldStyle(.plain)
-                                .settingsFieldChrome(palette)
-                        }
-                        .disabled(settings.noteWriteMode == .file)
-                        .opacity(settings.noteWriteMode == .file ? 0.5 : 1)
+                                        Button("选择") {
+                                            chooseFolderPath(binding: $settings.vaultPath)
+                                        }
+                                        .buttonStyle(SettingsPrimaryButtonStyle(palette: palette))
+                                    }
 
-                        SettingRow(label: "文件名格式", palette: palette) {
-                            TextField("yyyy M月d日 EEEE", text: $settings.dailyFileDateFormat)
-                                .textFieldStyle(.plain)
-                                .settingsFieldChrome(palette)
-                        }
-                        .disabled(settings.noteWriteMode == .file)
-                        .opacity(settings.noteWriteMode == .file ? 0.5 : 1)
-
-                        SettingRow(label: "输出风格", palette: palette) {
-                            Picker("", selection: $settings.dailyEntryThemePreset) {
-                                ForEach(DailyEntryThemePreset.allCases) { preset in
-                                    Text(preset.title).tag(preset)
+                                    if let issue = settings.vaultPathValidationIssue {
+                                        Text(issue.message)
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundStyle(palette.warningText)
+                                    }
                                 }
                             }
-                            .labelsHidden()
-                            .pickerStyle(.menu)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .settingsFieldChrome(palette)
-                        }
-                        .disabled(settings.noteWriteMode == .file)
-                        .opacity(settings.noteWriteMode == .file ? 0.5 : 1)
 
-                        SettingRow(label: "分割线", palette: palette) {
-                            Picker("", selection: $settings.markdownEntrySeparatorStyle) {
-                                ForEach(MarkdownEntrySeparatorStyle.allCases) { style in
-                                    Text(style.title).tag(style)
+                            SettingRow(label: "文件名格式", palette: palette) {
+                                Picker("", selection: dailyFileDateFormatBinding) {
+                                    ForEach(DailyFileDateFormat.allCases) { format in
+                                        Text(format.title).tag(format)
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .settingsFieldChrome(palette)
+                            }
+
+                            SettingRow(label: "条目格式", palette: palette) {
+                                Picker("", selection: $settings.dailyEntryThemePreset) {
+                                    ForEach(DailyEntryThemePreset.allCases) { preset in
+                                        Text(preset.title).tag(preset)
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .settingsFieldChrome(palette)
+                            }
+                        }
+
+                        if settings.noteWriteMode == .file {
+                            SettingRow(label: "笔记库", hint: "文档保存的文件夹路径", palette: palette) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(spacing: 8) {
+                                        TextField("/Users/you/Documents", text: $settings.inboxVaultPath)
+                                            .textFieldStyle(.plain)
+                                            .settingsFieldChrome(palette)
+
+                                        Button("选择") {
+                                            chooseFolderPath(binding: $settings.inboxVaultPath)
+                                        }
+                                        .buttonStyle(SettingsPrimaryButtonStyle(palette: palette))
+                                    }
+
+                                    if let issue = settings.inboxVaultPathValidationIssue {
+                                        Text(issue.message)
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundStyle(palette.warningText)
+                                    }
                                 }
                             }
-                            .labelsHidden()
-                            .pickerStyle(.menu)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .settingsFieldChrome(palette)
                         }
-                        .disabled(settings.noteWriteMode == .file)
-                        .opacity(settings.noteWriteMode == .file ? 0.5 : 1)
                     }
                 }
 
                 // Modules
-                SectionCard(title: "默认模块", palette: palette) {
+                SectionCard(title: "快捷分类", palette: palette) {
                     VStack(alignment: .leading, spacing: 8) {
-                        ForEach(NoteSection.allCases) { section in
-                            HStack(spacing: 8) {
-                                Text("\(section.rawValue)")
-                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(palette.mutedText)
-                                    .frame(width: 18)
-
-                                TextField("模块名", text: sectionTitleBinding(for: section))
-                                    .textFieldStyle(.plain)
-                                    .settingsFieldChrome(palette)
-                            }
+                        ForEach(settings.sections) { section in
+                            SectionTitleRow(
+                                section: section,
+                                settings: settings,
+                                palette: palette
+                            )
                         }
 
                         HStack {
-                            Spacer()
-                            Button("重置") {
-                                settings.resetSectionTitlesToDefault()
+                            Button {
+                                settings.addSection()
+                            } label: {
+                                Label("新增模块", systemImage: "plus")
                             }
                             .buttonStyle(SettingsSecondaryButtonStyle(palette: palette))
+                            .disabled(!settings.canAddSection)
+
+                            Spacer()
+
+                            Button("保存") {
+                                // Resign first responder to commit all pending drafts
+                                NSApp.keyWindow?.makeFirstResponder(nil)
+                            }
+                            .buttonStyle(SettingsPrimaryButtonStyle(palette: palette))
                         }
                     }
                 }
 
                 // Shortcuts
                 SectionCard(title: "快捷键", palette: palette) {
-                    VStack(spacing: 8) {
-                        shortcutRecorderRow(for: .create)
-                        shortcutRecorderRow(for: .send)
-                        shortcutRecorderRow(for: .append)
-                        shortcutRecorderRow(for: .toggleWriteMode)
+                    VStack(spacing: 0) {
+                        shortcutRow(for: .create)
+                        shortcutRow(for: .send)
+                        shortcutRow(for: .append)
+                        shortcutRow(for: .toggleWriteMode)
+
+                        Divider().overlay(palette.mutedText.opacity(0.15)).padding(.vertical, 6)
+
+                        fixedShortcutRow("Esc", "关闭面板")
+                        fixedShortcutRow("⌘P", "固定面板")
+                        fixedShortcutRow("⌘1–9", "切换模块")
 
                         if let shortcutRecorderMessage {
                             Text(shortcutRecorderMessage)
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(palette.warningText)
-                        }
-
-                        HStack {
-                            Text("Esc 关闭面板，⌘1–5 切换模块")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(palette.mutedText)
-                            Spacer()
-                            Button("恢复默认") {
-                                stopRecording()
-                                settings.resetShortcutSettingsToDefault()
-                            }
-                            .buttonStyle(SettingsSecondaryButtonStyle(palette: palette))
+                                .padding(.top, 6)
                         }
                     }
                 }
@@ -482,6 +464,7 @@ struct SettingsView: View {
                 }
             }
             .padding(.horizontal, 24)
+            .padding(.top, 16)
             .padding(.bottom, 28)
         }
         .scrollIndicators(.hidden)
@@ -495,40 +478,61 @@ struct SettingsView: View {
     // MARK: - Shortcut Recorder
 
     @ViewBuilder
-    private func shortcutRecorderRow(for target: ShortcutTarget) -> some View {
+    private func shortcutRow(for target: ShortcutTarget) -> some View {
         let currentShortcut = shortcut(for: target)
         let isRecording = recordingTarget == target
 
-        HStack(spacing: 8) {
+        HStack(spacing: 0) {
             Text(target.name)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(palette.sectionTitle)
-                .frame(width: 80, alignment: .leading)
+                .frame(width: 100, alignment: .leading)
 
-            Text(currentShortcut.displayLabel)
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                .foregroundStyle(palette.chipText)
+            Text(isRecording ? "按键录制中…" : currentShortcut.displayLabel)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(isRecording ? palette.accent : palette.chipText)
                 .padding(.horizontal, 8)
-                .padding(.vertical, 5)
+                .padding(.vertical, 4)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(palette.chipBackground)
+                        .fill(isRecording ? palette.accent.opacity(0.12) : palette.chipBackground)
                 )
 
             Spacer()
 
-            Button(isRecording ? "按键中…" : "录制") {
-                toggleRecording(for: target)
-            }
-            .buttonStyle(SettingsPrimaryButtonStyle(palette: palette))
-
             if isRecording {
-                Button("取消") {
-                    stopRecording()
-                }
-                .buttonStyle(SettingsSecondaryButtonStyle(palette: palette))
+                Button("取消") { stopRecording() }
+                    .font(.system(size: 11, weight: .medium))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(palette.mutedText)
+            } else {
+                Button("修改") { toggleRecording(for: target) }
+                    .font(.system(size: 11, weight: .medium))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(palette.accent)
             }
         }
+        .padding(.vertical, 8)
+    }
+
+    @ViewBuilder
+    private func fixedShortcutRow(_ key: String, _ label: String) -> some View {
+        HStack(spacing: 0) {
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(palette.mutedText)
+                .frame(width: 100, alignment: .leading)
+
+            Text(key)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(palette.mutedText.opacity(0.7))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+
+            Spacer()
+        }
+        .padding(.vertical, 4)
+        .padding(.vertical, 3)
     }
 
     // MARK: - Logic
@@ -619,7 +623,7 @@ struct SettingsView: View {
         }
 
         if target != .create && candidate.isReservedSectionSwitch {
-            shortcutRecorderMessage = "⌘1–5 已用于切换模块"
+            shortcutRecorderMessage = "⌘1–9 已用于切换模块"
             NSSound.beep()
             return
         }
@@ -643,23 +647,78 @@ struct SettingsView: View {
         return nil
     }
 
-    private func chooseVaultPath() {
+    private var dailyFileDateFormatBinding: Binding<DailyFileDateFormat> {
+        Binding {
+            DailyFileDateFormat.resolved(fromStored: settings.dailyFileDateFormat)
+        } set: { newValue in
+            settings.dailyFileDateFormat = newValue.rawValue
+        }
+    }
+
+    private func chooseFolderPath(binding: Binding<String>) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "选择 Vault"
+        panel.prompt = "选择文件夹"
 
         if panel.runModal() == .OK {
-            settings.vaultPath = panel.url?.path ?? ""
+            binding.wrappedValue = panel.url?.path ?? ""
         }
     }
 
-    private func sectionTitleBinding(for section: NoteSection) -> Binding<String> {
-        Binding {
-            settings.title(for: section)
-        } set: { updatedTitle in
-            settings.setTitle(updatedTitle, for: section)
+}
+
+// MARK: - Section Title Row (local-state editing to avoid mid-keystroke normalization)
+
+private struct SectionTitleRow: View {
+    let section: NoteSection
+    @ObservedObject var settings: AppSettings
+    let palette: SettingsPalette
+
+    @State private var draft: String = ""
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("\(section.displayIndex)")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(palette.mutedText)
+                .frame(width: 18)
+
+            TextField("模块名", text: $draft)
+                .textFieldStyle(.plain)
+                .settingsFieldChrome(palette)
+                .focused($isFocused)
+                .onSubmit { commitDraft() }
+                .onChange(of: isFocused) { focused in
+                    if !focused { commitDraft() }
+                }
+
+            Button {
+                settings.removeSection(section)
+            } label: {
+                Image(systemName: "minus.circle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(settings.canRemoveSection ? palette.warningText : palette.mutedText)
+            }
+            .buttonStyle(.plain)
+            .help("删除模块")
+            .disabled(!settings.canRemoveSection)
+        }
+        .onAppear { draft = settings.title(for: section) }
+        .onChange(of: settings.sectionTitles) { _ in
+            if !isFocused { draft = settings.title(for: section) }
+        }
+    }
+
+    private func commitDraft() {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            draft = settings.title(for: section)
+        } else {
+            settings.setTitle(trimmed, for: section)
+            draft = settings.title(for: section)
         }
     }
 }

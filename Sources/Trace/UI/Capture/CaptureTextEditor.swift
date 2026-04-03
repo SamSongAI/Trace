@@ -75,6 +75,7 @@ struct CaptureTextEditor: NSViewRepresentable {
         textView.font = theme.editorFont
         textView.placeholderFont = theme.editorFont
 
+
         if isFocused,
            nsView.window?.firstResponder !== textView,
            !textView.isComposingMarkedText {

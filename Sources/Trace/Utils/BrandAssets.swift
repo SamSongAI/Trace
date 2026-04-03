@@ -19,12 +19,8 @@ enum BrandAssets {
     static let displayName = "Trace"
     static let slogan = "Thought is leverage, Leave a trace."
 
-    static func menuBarLogo(
-        size: CGFloat = 18,
-        appearance: NSAppearance? = nil
-    ) -> NSImage? {
-        _ = appearance
-        return makeMenuBarTemplateLogo(size: size)
+    static func menuBarLogo(size: CGFloat = 18) -> NSImage? {
+        makeMenuBarTemplateLogo(size: size)
     }
 
     static func headerLogo(
@@ -112,6 +108,11 @@ enum BrandAssets {
     }
 
     private static func bundledTraceIcon() -> NSImage? {
+        // NSImage(named:) checks CFBundleIconFile in Info.plist automatically
+        if let named = NSImage(named: "Trace") {
+            return named
+        }
+
         let candidates: [URL?] = [
             Bundle.main.url(forResource: "Trace", withExtension: "icns"),
             Bundle.main.resourceURL?.appendingPathComponent("Trace.icns"),

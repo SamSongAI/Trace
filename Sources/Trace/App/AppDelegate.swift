@@ -77,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.statusItem = item
 
         if let button = item.button {
-            button.image = BrandAssets.menuBarLogo(appearance: button.effectiveAppearance)
+            button.image = BrandAssets.menuBarLogo()
             button.imagePosition = .imageOnly
             button.title = ""
         }
@@ -128,7 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let rootView = SettingsView(settings: settings)
             let hostingController = NSHostingController(rootView: rootView)
             let window = NSWindow(contentViewController: hostingController)
-            window.title = "Settings"
+            window.title = "Trace Settings"
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             window.setContentSize(NSSize(width: 760, height: 760))
             window.isReleasedWhenClosed = false
