@@ -345,7 +345,7 @@ struct SettingsView: View {
                                 }
                             }
 
-                            SettingRow(label: "日记文件夹", hint: "笔记库内存放日记的子文件夹名称，需与 Obsidian 日记设置一致", palette: palette) {
+                            SettingRow(label: "日记文件夹", hint: "笔记库内存放日记的子文件夹名称，建议与 Obsidian 日记设置一致", palette: palette) {
                                 TextField("Daily", text: $settings.dailyFolderName)
                                     .textFieldStyle(.plain)
                                     .settingsFieldChrome(palette)
