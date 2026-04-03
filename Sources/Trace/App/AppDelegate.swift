@@ -27,6 +27,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bindSettings()
         registerCurrentHotKey()
 
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(openSettingsFromMenu),
+            name: .traceOpenSettings,
+            object: nil
+        )
+
         DispatchQueue.main.async { [weak self] in
             self?.presentInitialSurface()
         }

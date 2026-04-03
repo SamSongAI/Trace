@@ -96,6 +96,16 @@ struct CaptureView: View {
             }
             .buttonStyle(.plain)
             .help("固定面板，保存后不关闭 (⌘P)")
+
+            Button {
+                NotificationCenter.default.post(name: .traceOpenSettings, object: nil)
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.iconMuted)
+            }
+            .buttonStyle(.plain)
+            .help("设置")
         }
         .padding(.horizontal, 16)
         .frame(height: 36)
