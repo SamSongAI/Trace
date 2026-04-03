@@ -10,14 +10,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/SamSong1997/Trace/releases/latest">Download</a> · <a href="#2-features">Features</a> · <a href="#3-use-with-obsidian">Obsidian Setup</a> · <a href="#5-keyboard-shortcuts">Shortcuts</a> · <a href="README.md">中文</a>
+  <a href="https://github.com/SamSongAI/Trace/releases/latest">Download</a> · <a href="#2-features">Features</a> · <a href="#3-use-with-obsidian">Obsidian Setup</a> · <a href="#5-keyboard-shortcuts">Shortcuts</a> · <a href="README.md">中文</a>
 </p>
 
 ---
 
 ## 1. Download
 
-Get the latest `Trace.dmg` from [GitHub Releases](https://github.com/SamSong1997/Trace/releases/latest).
+Get the latest `Trace.dmg` from [GitHub Releases](https://github.com/SamSongAI/Trace/releases/latest).
 
 1. Open the DMG and drag Trace into Applications
 2. Launch Trace
