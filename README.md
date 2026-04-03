@@ -14,14 +14,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/SamSong1997/Trace/releases/latest">下载</a> · <a href="#2-功能">功能</a> · <a href="#3-配合-obsidian-使用">Obsidian 配置</a> · <a href="#5-快捷键">快捷键</a> · <a href="README_EN.md">English</a>
+  <a href="https://github.com/SamSongAI/Trace/releases/latest">下载</a> · <a href="#2-功能">功能</a> · <a href="#3-配合-obsidian-使用">Obsidian 配置</a> · <a href="#5-快捷键">快捷键</a> · <a href="README_EN.md">English</a>
 </p>
 
 ---
 
 ## 1. 下载安装
 
-从 [GitHub Releases](https://github.com/SamSong1997/Trace/releases/latest) 下载最新的 `Trace.dmg`。
+从 [GitHub Releases](https://github.com/SamSongAI/Trace/releases/latest) 下载最新的 `Trace.dmg`。
 
 1. 打开 DMG，将 Trace 拖入 Applications 文件夹
 2. 启动 Trace
