@@ -14,7 +14,7 @@ enum ClipboardImageWriterError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .invalidVaultPath:
-            return "Vault 路径未配置或不可写，无法保存图片。"
+            return "笔记库路径未配置或不可写，无法保存图片。"
         case .imageEncodingFailed:
             return "图片编码失败，无法写入 PNG 文件。"
         }

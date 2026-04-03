@@ -49,13 +49,12 @@ final class DailyNoteWriterTests: XCTestCase {
         let fixedDate = makeDate(year: 2026, month: 3, day: 5, hour: 10, minute: 34)
         var settings = TestSettings(vaultPath: tempDir.path, dailyFolderName: "Daily", dailyFileDateFormat: "yyyy-MM-dd")
         settings.noteWriteMode = .file
-        settings.inboxFolderName = "inbox"
         let writer = DailyNoteWriter(settings: settings)
 
         try writer.save(text: "快速记录一条想法", to: .project, documentTitle: "", now: fixedDate)
 
-        let inboxURL = tempDir.appendingPathComponent("inbox", isDirectory: true)
-        let files = try FileManager.default.contentsOfDirectory(at: inboxURL, includingPropertiesForKeys: nil)
+        let files = try FileManager.default.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "md" }
         XCTAssertEqual(files.count, 1)
         XCTAssertEqual(files[0].pathExtension, "md")
         XCTAssertTrue(
@@ -79,14 +78,13 @@ final class DailyNoteWriterTests: XCTestCase {
         let fixedDate = makeDate(year: 2026, month: 3, day: 5, hour: 10, minute: 34)
         var settings = TestSettings(vaultPath: tempDir.path, dailyFolderName: "Daily", dailyFileDateFormat: "yyyy-MM-dd")
         settings.noteWriteMode = .file
-        settings.inboxFolderName = "inbox"
         let writer = DailyNoteWriter(settings: settings)
 
         try writer.save(text: "文档 A", to: .note, documentTitle: "项目复盘", now: fixedDate)
         try writer.save(text: "文档 B", to: .note, documentTitle: "项目复盘", now: fixedDate)
 
-        let inboxURL = tempDir.appendingPathComponent("inbox", isDirectory: true)
-        let files = try FileManager.default.contentsOfDirectory(at: inboxURL, includingPropertiesForKeys: nil)
+        let files = try FileManager.default.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "md" }
         XCTAssertEqual(files.count, 2)
 
         let names = files.map(\.lastPathComponent).sorted()
@@ -165,6 +163,26 @@ final class DailyNoteWriterTests: XCTestCase {
         XCTAssertTrue(content.contains("project idea"))
     }
 
+    func testSaveSupportsCustomAddedSection() throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let fixedDate = makeDate(year: 2026, month: 3, day: 7, hour: 9, minute: 15)
+        var settings = TestSettings(vaultPath: tempDir.path, dailyFolderName: "Daily", dailyFileDateFormat: "yyyy-MM-dd")
+        settings.dailyEntryThemePreset = .codeBlockClassic
+        let writer = DailyNoteWriter(settings: settings)
+        let customSection = NoteSection(index: 5, title: "Ideas")
+
+        try writer.save(text: "sixth bucket", to: customSection, now: fixedDate)
+
+        let fileURL = try writer.dailyNoteFileURL(for: fixedDate)
+        let content = try String(contentsOf: fileURL, encoding: .utf8)
+
+        XCTAssertTrue(content.contains("# Ideas"))
+        XCTAssertTrue(content.contains("sixth bucket"))
+    }
+
     func testAppendToLatestEntryKeepsSingleCodeBlock() throws {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -208,93 +226,6 @@ final class DailyNoteWriterTests: XCTestCase {
         XCTAssertTrue(content.contains("```\nappend fallback\n\(timestamp(from: date))\n```"))
     }
 
-    func testCalloutCardWritesTimestampAtBottomInMutedStyle() throws {
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        let date = makeDate(year: 2026, month: 3, day: 3, hour: 21, minute: 30)
-        var settings = TestSettings(vaultPath: tempDir.path, dailyFolderName: "Daily", dailyFileDateFormat: "yyyy-MM-dd")
-        settings.dailyEntryThemePreset = .anthropic
-        let writer = DailyNoteWriter(settings: settings)
-
-        try writer.save(text: "visual focus first", to: .note, now: date)
-
-        let fileURL = try writer.dailyNoteFileURL(for: date)
-        let content = try String(contentsOf: fileURL, encoding: .utf8)
-        let expectedTimestamp = timestamp(from: date)
-
-        XCTAssertTrue(content.contains("> [!warning|trace-anthropic]"))
-        XCTAssertTrue(content.contains("trace-marker"))
-        XCTAssertTrue(content.contains("> visual focus first"))
-        XCTAssertTrue(content.contains("> <span class=\"trace-time\" style=\"color: var(--text-muted); font-size: 0.86em;\">\(expectedTimestamp)</span>"))
-        XCTAssertFalse(content.contains("```\n"))
-    }
-
-    func testAppendInCalloutModeAppendsIntoLatestCard() throws {
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        let firstDate = makeDate(year: 2026, month: 3, day: 3, hour: 21, minute: 40)
-        let secondDate = makeDate(year: 2026, month: 3, day: 3, hour: 21, minute: 45)
-        var settings = TestSettings(vaultPath: tempDir.path, dailyFolderName: "Daily", dailyFileDateFormat: "yyyy-MM-dd")
-        settings.dailyEntryThemePreset = .obsidian
-        let writer = DailyNoteWriter(settings: settings)
-
-        try writer.save(text: "card 1", to: .note, now: firstDate)
-        try writer.save(text: "card 2", to: .note, mode: .appendToLatestEntry, now: secondDate)
-
-        let fileURL = try writer.dailyNoteFileURL(for: firstDate)
-        let content = try String(contentsOf: fileURL, encoding: .utf8)
-
-        XCTAssertEqual(countOccurrences(of: "> [!example|trace-obsidian]", in: content), 1)
-        XCTAssertTrue(content.contains("> ---\n> card 2\n>\n> <span class=\"trace-time\""))
-        XCTAssertFalse(content.contains("```"))
-    }
-
-    func testAppendInCalloutModeTargetsLatestCardWhenSectionHasMultipleCards() throws {
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        let firstDate = makeDate(year: 2026, month: 3, day: 3, hour: 22, minute: 1)
-        let secondDate = makeDate(year: 2026, month: 3, day: 3, hour: 22, minute: 2)
-        let appendDate = makeDate(year: 2026, month: 3, day: 3, hour: 22, minute: 3)
-        var settings = TestSettings(vaultPath: tempDir.path, dailyFolderName: "Daily", dailyFileDateFormat: "yyyy-MM-dd")
-        settings.dailyEntryThemePreset = .notion
-        let writer = DailyNoteWriter(settings: settings)
-
-        try writer.save(text: "card A", to: .note, now: firstDate)
-        try writer.save(text: "card B", to: .note, now: secondDate)
-        try writer.save(text: "card C", to: .note, mode: .appendToLatestEntry, now: appendDate)
-
-        let fileURL = try writer.dailyNoteFileURL(for: firstDate)
-        let content = try String(contentsOf: fileURL, encoding: .utf8)
-
-        guard let newestHeaderRange = content.range(of: "> [!quote|trace-notion]") else {
-            return XCTFail("Missing newest callout header")
-        }
-
-        guard let olderHeaderRange = content[newestHeaderRange.upperBound...].range(of: "> [!quote|trace-notion]") else {
-            return XCTFail("Missing older callout header")
-        }
-
-        guard let appendedRange = content.range(of: "> ---\n> card C\n>", options: .backwards) else {
-            return XCTFail("Missing appended chunk")
-        }
-
-        XCTAssertTrue(appendedRange.lowerBound > newestHeaderRange.lowerBound)
-        XCTAssertTrue(appendedRange.lowerBound < olderHeaderRange.lowerBound)
-        XCTAssertNotEqual(olderHeaderRange.lowerBound, content.startIndex)
-        let characterBeforeOlderHeader = content[content.index(before: olderHeaderRange.lowerBound)]
-        XCTAssertEqual(
-            characterBeforeOlderHeader,
-            "\n",
-            "Next callout header should start on a new line after appended chunk."
-        )
-    }
-
     func testMarkdownQuoteWritesPlainTimestampWithoutInlineCSS() throws {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -325,7 +256,6 @@ final class DailyNoteWriterTests: XCTestCase {
         let date = makeDate(year: 2026, month: 3, day: 4, hour: 9, minute: 40)
         var settings = TestSettings(vaultPath: tempDir.path, dailyFolderName: "Daily", dailyFileDateFormat: "yyyy-MM-dd")
         settings.dailyEntryThemePreset = .plainTextTimestamp
-        settings.markdownEntrySeparatorStyle = .horizontalRule
         let writer = DailyNoteWriter(settings: settings)
 
         try writer.save(text: "plain body", to: .note, now: date)
@@ -334,7 +264,6 @@ final class DailyNoteWriterTests: XCTestCase {
         let content = try String(contentsOf: fileURL, encoding: .utf8)
 
         XCTAssertTrue(content.contains("plain body\n\(timestamp(from: date))"))
-        XCTAssertTrue(content.contains("\n---\n"))
         XCTAssertFalse(content.contains("```"))
         XCTAssertFalse(content.contains("> "))
         XCTAssertFalse(content.contains("[!"))
@@ -398,41 +327,24 @@ final class DailyNoteWriterTests: XCTestCase {
         XCTAssertTrue(appendedRange.lowerBound < olderQuoteRange.lowerBound)
     }
 
-    func testMarkdownSeparatorStyleHorizontalRuleIsRenderedForCodeBlock() throws {
+    func testEntriesAreSeparatedByBlankLineOnly() throws {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
-        let date = makeDate(year: 2026, month: 3, day: 3, hour: 23, minute: 31)
+        let firstDate = makeDate(year: 2026, month: 3, day: 3, hour: 23, minute: 31)
+        let secondDate = makeDate(year: 2026, month: 3, day: 3, hour: 23, minute: 32)
         var settings = TestSettings(vaultPath: tempDir.path, dailyFolderName: "Daily", dailyFileDateFormat: "yyyy-MM-dd")
         settings.dailyEntryThemePreset = .codeBlockClassic
-        settings.markdownEntrySeparatorStyle = .horizontalRule
         let writer = DailyNoteWriter(settings: settings)
 
-        try writer.save(text: "separator test", to: .note, now: date)
+        try writer.save(text: "entry one", to: .note, now: firstDate)
+        try writer.save(text: "entry two", to: .note, now: secondDate)
 
-        let fileURL = try writer.dailyNoteFileURL(for: date)
+        let fileURL = try writer.dailyNoteFileURL(for: firstDate)
         let content = try String(contentsOf: fileURL, encoding: .utf8)
-        XCTAssertTrue(content.contains("```\nseparator test\n\(timestamp(from: date))\n```\n\n---"))
-    }
-
-    func testMarkdownSeparatorStyleNoneSkipsDividerForMarkdownQuote() throws {
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        let date = makeDate(year: 2026, month: 3, day: 3, hour: 23, minute: 32)
-        var settings = TestSettings(vaultPath: tempDir.path, dailyFolderName: "Daily", dailyFileDateFormat: "yyyy-MM-dd")
-        settings.dailyEntryThemePreset = .markdownQuote
-        settings.markdownEntrySeparatorStyle = .none
-        let writer = DailyNoteWriter(settings: settings)
-
-        try writer.save(text: "no separator", to: .note, now: date)
-
-        let fileURL = try writer.dailyNoteFileURL(for: date)
-        let content = try String(contentsOf: fileURL, encoding: .utf8)
-        XCTAssertFalse(content.contains("\n---\n"))
-        XCTAssertFalse(content.contains("\n***\n"))
+        XCTAssertFalse(content.contains("\n---\n"), "Entries should not have horizontal rule separators")
+        XCTAssertFalse(content.contains("\n***\n"), "Entries should not have asterisk separators")
     }
 
     private func makeDate(year: Int, month: Int, day: Int, hour: Int, minute: Int) -> Date {
@@ -462,15 +374,23 @@ final class DailyNoteWriterTests: XCTestCase {
 
 private struct TestSettings: DailyNoteSettingsProviding {
     let vaultPath: String
+    var inboxVaultPath: String
     let dailyFolderName: String
     let dailyFileDateFormat: String
     var noteWriteMode: NoteWriteMode = .dimension
     var inboxFolderName: String = "inbox"
+
+    init(vaultPath: String, dailyFolderName: String, dailyFileDateFormat: String) {
+        self.vaultPath = vaultPath
+        self.inboxVaultPath = vaultPath
+        self.dailyFolderName = dailyFolderName
+        self.dailyFileDateFormat = dailyFileDateFormat
+    }
     var dailyEntryThemePreset: DailyEntryThemePreset = .plainTextTimestamp
     var markdownEntrySeparatorStyle: MarkdownEntrySeparatorStyle = .horizontalRule
 
     func title(for section: NoteSection) -> String {
-        section.defaultTitle
+        section.title
     }
 
     func header(for section: NoteSection) -> String {
