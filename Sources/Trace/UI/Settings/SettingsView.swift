@@ -324,10 +324,10 @@ struct SettingsView: View {
                         }
 
                         if settings.noteWriteMode == .dimension {
-                            SettingRow(label: "笔记库", hint: "日记保存的文件夹路径", palette: palette) {
+                            SettingRow(label: "笔记库", hint: "Obsidian Vault 根目录，或其他笔记库的根路径", palette: palette) {
                                 VStack(alignment: .leading, spacing: 6) {
                                     HStack(spacing: 8) {
-                                        TextField("/Users/you/Daily", text: $settings.vaultPath)
+                                        TextField("/Users/you/MyVault", text: $settings.vaultPath)
                                             .textFieldStyle(.plain)
                                             .settingsFieldChrome(palette)
 
@@ -343,6 +343,12 @@ struct SettingsView: View {
                                             .foregroundStyle(palette.warningText)
                                     }
                                 }
+                            }
+
+                            SettingRow(label: "日记文件夹", hint: "笔记库内存放日记的子文件夹名称，需与 Obsidian 日记设置一致", palette: palette) {
+                                TextField("Daily", text: $settings.dailyFolderName)
+                                    .textFieldStyle(.plain)
+                                    .settingsFieldChrome(palette)
                             }
 
                             SettingRow(label: "文件名格式", palette: palette) {
