@@ -48,3 +48,4 @@ SECURITY.md
 Sources/Trace/Resources/lava-mark.svg
 Sources/Trace/Resources/obsidian-logo-gradient.svg
 Sources/Trace/Resources/obsidian-logo-text-black.svg
+scripts/generate-app-icon.swift
