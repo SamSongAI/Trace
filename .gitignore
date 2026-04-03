@@ -40,3 +40,4 @@ trace_textview_override_test
 .idea/
 *.xcuserdata
 CLAUDE.md
+CHANGELOG.md
