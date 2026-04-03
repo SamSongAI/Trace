@@ -5,47 +5,14 @@ dist/
 # === Python cache ===
 **/__pycache__/
 
-# === Windows client build ===
-clients/trace-win/target/
-clients/trace-win/.cargo/
-
 # === macOS system ===
 .DS_Store
 **/.DS_Store
-
-# === NOT part of Trace App ===
-cms/
-content/
-deploy/
-.content-admin/
-website/
-docs/
-scripts/build-content-site.sh
-scripts/publish-content-site.sh
-scripts/run-admin.sh
-scripts/serve-website.sh
-scripts/package-downloads.sh
-clients/
-.github/
-
-# === Internal / development only ===
-Daily/
-PRD.md
-trace_textview_override_test
-/logo.png
-/个人微信二维码.jpg
 
 # === IDE ===
 .vscode/
 .idea/
 *.xcuserdata
-CLAUDE.md
-CHANGELOG.md
-CONTRIBUTING.md
-SECURITY.md
 
-# === Unused resources ===
-Sources/Trace/Resources/lava-mark.svg
-Sources/Trace/Resources/obsidian-logo-gradient.svg
-Sources/Trace/Resources/obsidian-logo-text-black.svg
-scripts/generate-app-icon.swift
+# === Development only ===
+CLAUDE.md
