@@ -8,6 +8,11 @@ BUNDLE_NAME="${APP_NAME}.app"
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${ROOT_DIR}/dist"
 BUNDLE_DIR="${DIST_DIR}/${BUNDLE_NAME}"
+DMG_NAME="${APP_NAME}.dmg"
+DMG_PATH="${DIST_DIR}/${DMG_NAME}"
+DMG_RW_PATH="${DIST_DIR}/${APP_NAME}-temp.dmg"
+DMG_STAGING_DIR="${DIST_DIR}/dmg-staging"
+DMG_VOLUME_NAME="${APP_NAME}"
 EXECUTABLE_SOURCE="${ROOT_DIR}/.build/release/${EXECUTABLE_NAME}"
 EXECUTABLE_DEST="${BUNDLE_DIR}/Contents/MacOS/${APP_NAME}"
 RESOURCES_DIR="${BUNDLE_DIR}/Contents/Resources"
@@ -117,7 +122,7 @@ build_app_bundle() {
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.0.0</string>
+  <string>1.0.1</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>LSMinimumSystemVersion</key>
@@ -137,6 +142,126 @@ sign_bundle() {
   local identity="${CODESIGN_IDENTITY:-$DEFAULT_CODESIGN_IDENTITY}"
   log "Codesigning bundle (identity: ${identity})..."
   codesign --force --deep --sign "${identity}" "${BUNDLE_DIR}"
+}
+
+prepare_dmg_staging() {
+  require_command ditto
+
+  rm -rf "${DMG_STAGING_DIR}"
+  mkdir -p "${DMG_STAGING_DIR}"
+
+  ditto "${BUNDLE_DIR}" "${DMG_STAGING_DIR}/${BUNDLE_NAME}"
+  ln -s /Applications "${DMG_STAGING_DIR}/Applications"
+}
+
+mount_dmg_rw() {
+  local attach_output
+  attach_output="$(hdiutil attach -readwrite -noverify -noautoopen "${DMG_RW_PATH}")"
+
+  local device
+  device="$(printf '%s\n' "${attach_output}" | awk '/Apple_HFS/ {print $1; exit}')"
+  local mount_point
+  mount_point="$(printf '%s\n' "${attach_output}" | awk -F '\t' '/Apple_HFS/ {print $NF; exit}')"
+
+  [[ -n "${device}" ]] || fail "Unable to determine mounted device for ${DMG_RW_PATH}"
+  [[ -n "${mount_point}" ]] || fail "Unable to determine mount point for ${DMG_RW_PATH}"
+
+  printf '%s\t%s\n' "${device}" "${mount_point}"
+}
+
+detach_dmg() {
+  local device="$1"
+  local attempt
+
+  for attempt in 1 2 3; do
+    if hdiutil detach "${device}" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  hdiutil detach -force "${device}" >/dev/null 2>&1 || fail "Unable to detach ${device}"
+}
+
+customize_dmg_window() {
+  local mount_point="$1"
+  local volume_name
+  volume_name="$(basename "${mount_point}")"
+
+  if ! command -v osascript >/dev/null 2>&1; then
+    log "osascript unavailable; skipping Finder layout customization."
+    return 0
+  fi
+
+  if command -v SetFile >/dev/null 2>&1; then
+    SetFile -a C "${mount_point}" 2>/dev/null || true
+  fi
+
+  osascript <<EOF
+tell application "Finder"
+  tell disk "${volume_name}"
+    open
+    delay 1
+    set containerWindow to container window
+    set current view of containerWindow to icon view
+    set toolbar visible of containerWindow to false
+    set statusbar visible of containerWindow to false
+    set bounds of containerWindow to {120, 120, 660, 420}
+    set viewOptions to the icon view options of containerWindow
+    set arrangement of viewOptions to not arranged
+    set icon size of viewOptions to 144
+    set text size of viewOptions to 16
+    set position of item "${BUNDLE_NAME}" of containerWindow to {170, 170}
+    set position of item "Applications" of containerWindow to {410, 170}
+    close
+    open
+    update without registering applications
+    delay 1
+  end tell
+end tell
+EOF
+
+  if command -v bless >/dev/null 2>&1; then
+    bless --folder "${mount_point}" --openfolder "${mount_point}" >/dev/null 2>&1 || true
+  fi
+}
+
+build_dmg() {
+  require_command hdiutil
+
+  [[ -d "${BUNDLE_DIR}" ]] || build_app_bundle
+
+  prepare_dmg_staging
+  rm -f "${DMG_RW_PATH}" "${DMG_PATH}"
+
+  log "Creating writable disk image..."
+  hdiutil create \
+    -volname "${DMG_VOLUME_NAME}" \
+    -srcfolder "${DMG_STAGING_DIR}" \
+    -fs HFS+ \
+    -format UDRW \
+    -ov \
+    "${DMG_RW_PATH}" >/dev/null
+
+  local mount_info device mount_point
+  mount_info="$(mount_dmg_rw)"
+  device="${mount_info%%$'\t'*}"
+  mount_point="${mount_info#*$'\t'}"
+
+  customize_dmg_window "${mount_point}"
+  sync
+  detach_dmg "${device}"
+
+  log "Compressing final disk image..."
+  hdiutil convert "${DMG_RW_PATH}" \
+    -format UDZO \
+    -imagekey zlib-level=9 \
+    -ov \
+    -o "${DMG_PATH}" >/dev/null
+
+  rm -f "${DMG_RW_PATH}"
+  rm -rf "${DMG_STAGING_DIR}"
+  log "Built disk image: ${DMG_PATH}"
 }
 
 install_app_bundle() {
@@ -183,6 +308,7 @@ Trace packaging helper
 
 Usage:
   ./scripts/trace.sh build-app     Build dist/Trace.app
+  ./scripts/trace.sh build-dmg     Build dist/Trace.dmg with drag-to-Applications layout
   ./scripts/trace.sh install-app   Install dist/Trace.app into /Applications
   ./scripts/trace.sh launch-app    Launch installed app (or local dist app)
   ./scripts/trace.sh install       Build + install
@@ -202,6 +328,9 @@ COMMAND="${1:-install}"
 case "${COMMAND}" in
   build-app)
     build_app_bundle
+    ;;
+  build-dmg)
+    build_dmg
     ;;
   install-app)
     install_app_bundle

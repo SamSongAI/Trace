@@ -97,7 +97,7 @@ Trace 写入本地 `.md` 文件，天然适配 Obsidian。关键是让 Trace 的
 
 从 [GitHub Releases](https://github.com/SamSongAI/Trace/releases/latest) 下载最新的 `Trace.dmg`。
 
-1. 打开 DMG，将 Trace 拖入 Applications 文件夹
+1. 打开 DMG 后，你会看到 `Trace.app` 和 `Applications` 图标，把 `Trace.app` 直接拖到 `Applications`
 2. 首次打开时，macOS 可能提示"无法验证开发者"。解决方法：
    - **方式一**：右键点击 Trace.app → 选择「打开」→ 在弹窗中点击「打开」
    - **方式二**：打开终端，运行 `xattr -cr /Applications/Trace.app`，然后正常启动
