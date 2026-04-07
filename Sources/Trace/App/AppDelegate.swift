@@ -155,11 +155,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
 
             let alert = NSAlert()
-            alert.messageText = "无法注册全局快捷键"
-            alert.informativeText = "当前快捷键可能与其他应用冲突，请前往设置修改快捷键。"
+            alert.messageText = L10n.hotkeyRegistrationFailed
+            alert.informativeText = L10n.hotkeyConflictMessage
             alert.alertStyle = .warning
-            alert.addButton(withTitle: "打开设置")
-            alert.addButton(withTitle: "稍后")
+            alert.addButton(withTitle: L10n.openSettings)
+            alert.addButton(withTitle: L10n.later)
 
             NSApp.activate(ignoringOtherApps: true)
             let response = alert.runModal()

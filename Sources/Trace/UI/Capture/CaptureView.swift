@@ -33,10 +33,8 @@ struct CaptureView: View {
 
     private var editorPlaceholder: String {
         switch settings.noteWriteMode {
-        case .dimension:
-            return "输入笔记内容..."
-        case .file:
-            return "输入文档内容..."
+        case .dimension: return L10n.notePlaceholder
+        case .file: return L10n.documentPlaceholder
         }
     }
 
@@ -95,7 +93,7 @@ struct CaptureView: View {
                     .foregroundStyle(viewModel.pinned ? theme.accent : theme.iconMuted)
             }
             .buttonStyle(.plain)
-            .help("固定面板，保存后不关闭 (⌘P)")
+            .help(L10n.pinPanelHelp)
 
             Button {
                 NotificationCenter.default.post(name: .traceOpenSettings, object: nil)
@@ -105,7 +103,7 @@ struct CaptureView: View {
                     .foregroundStyle(theme.iconMuted)
             }
             .buttonStyle(.plain)
-            .help("设置")
+            .help(L10n.settingsTooltip)
         }
         .padding(.horizontal, 16)
         .frame(height: 36)
@@ -135,7 +133,7 @@ struct CaptureView: View {
     }
 
     private var documentTitleField: some View {
-        TextField("标题（可选）", text: $viewModel.fileTitle)
+        TextField(L10n.documentTitlePlaceholder, text: $viewModel.fileTitle)
             .textFieldStyle(.plain)
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(theme.textPrimary)

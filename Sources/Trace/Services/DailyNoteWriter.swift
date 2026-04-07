@@ -24,10 +24,8 @@ enum DailyNoteWriterError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .invalidVaultPath:
-            return "笔记库路径未配置，请点击右上角 ⚙ 进入设置。"
-        case .invalidTargetFolderPath:
-            return "目标目录必须是笔记库内的相对路径，且不能包含 .."
+        case .invalidVaultPath: return L10n.vaultNotConfigured
+        case .invalidTargetFolderPath: return L10n.invalidTargetFolder
         }
     }
 }

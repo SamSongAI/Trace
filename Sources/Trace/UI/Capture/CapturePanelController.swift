@@ -277,7 +277,7 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
         let trimmedText = viewModel.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !trimmedText.isEmpty else {
-            viewModel.showToast("内容为空，未保存")
+            viewModel.showToast(L10n.emptyNotSaved)
             return
         }
 
@@ -309,7 +309,7 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
     private func showError(_ message: String) {
         guard let panel else { return }
         let alert = NSAlert()
-        alert.messageText = "保存失败"
+        alert.messageText = L10n.saveFailed
         alert.informativeText = message
         alert.alertStyle = .warning
         alert.beginSheetModal(for: panel)
