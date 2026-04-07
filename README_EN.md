@@ -93,7 +93,7 @@ Once aligned, press `⌘D` in Obsidian to open today's note — you'll see what 
 
 Get the latest `Trace.dmg` from [GitHub Releases](https://github.com/SamSongAI/Trace/releases/latest).
 
-1. Open the DMG and drag Trace into Applications
+1. Open the DMG. You'll see `Trace.app` and an `Applications` shortcut. Drag `Trace.app` onto `Applications`
 2. On first launch, macOS may show "unverified developer" warning. To fix:
    - **Option A**: Right-click Trace.app → "Open" → click "Open" in the dialog
    - **Option B**: Run `xattr -cr /Applications/Trace.app` in Terminal, then launch normally
