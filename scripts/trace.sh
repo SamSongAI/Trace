@@ -122,7 +122,7 @@ build_app_bundle() {
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.0.1</string>
+  <string>1.0.2</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>LSMinimumSystemVersion</key>
@@ -206,13 +206,13 @@ tell application "Finder"
     set current view of containerWindow to icon view
     set toolbar visible of containerWindow to false
     set statusbar visible of containerWindow to false
-    set bounds of containerWindow to {120, 120, 660, 420}
+    set bounds of containerWindow to {120, 120, 760, 500}
     set viewOptions to the icon view options of containerWindow
     set arrangement of viewOptions to not arranged
-    set icon size of viewOptions to 144
-    set text size of viewOptions to 16
-    set position of item "${BUNDLE_NAME}" of containerWindow to {170, 170}
-    set position of item "Applications" of containerWindow to {410, 170}
+    set icon size of viewOptions to 112
+    set text size of viewOptions to 14
+    set position of item "${BUNDLE_NAME}" of containerWindow to {190, 145}
+    set position of item "Applications" of containerWindow to {455, 145}
     close
     open
     update without registering applications
