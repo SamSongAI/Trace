@@ -12,14 +12,10 @@ private enum ShortcutTarget {
 
     var name: String {
         switch self {
-        case .create:
-            return "创建笔记"
-        case .send:
-            return "发送笔记"
-        case .append:
-            return "追加上一条"
-        case .toggleWriteMode:
-            return "切换写入模式"
+        case .create: return L10n.shortcutCreate
+        case .send: return L10n.shortcutSend
+        case .append: return L10n.shortcutAppend
+        case .toggleWriteMode: return L10n.shortcutToggleMode
         }
     }
 }
@@ -292,8 +288,42 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                // Language
+                SectionCard(title: L10n.language, palette: palette) {
+                    HStack(spacing: 8) {
+                        ForEach(AppLanguage.allCases) { lang in
+                            Button {
+                                settings.language = lang
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Text(lang.displayName)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(palette.sectionTitle)
+
+                                    Spacer(minLength: 4)
+
+                                    Image(systemName: settings.language == lang ? "checkmark.circle.fill" : "circle")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundStyle(settings.language == lang ? palette.accentStrong : palette.cardBorder)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(palette.cardBackground)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .stroke(settings.language == lang ? palette.accent : palette.cardBorder, lineWidth: settings.language == lang ? 1.5 : 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
                 // Theme
-                SectionCard(title: "主题", palette: palette) {
+                SectionCard(title: L10n.theme, palette: palette) {
                     VStack(spacing: 8) {
                         ForEach(AppThemePreset.allCases) { preset in
                             ThemePresetTile(
@@ -307,9 +337,9 @@ struct SettingsView: View {
                 }
 
                 // Storage
-                SectionCard(title: "保存位置", palette: palette) {
+                SectionCard(title: L10n.storage, palette: palette) {
                     VStack(spacing: 12) {
-                        SettingRow(label: "写入模式", palette: palette) {
+                        SettingRow(label: L10n.writeMode, palette: palette) {
                             HStack(spacing: 8) {
                                 ForEach(NoteWriteMode.allCases) { mode in
                                     WriteModeTile(
@@ -324,14 +354,14 @@ struct SettingsView: View {
                         }
 
                         if settings.noteWriteMode == .dimension {
-                            SettingRow(label: "笔记库", hint: "Obsidian Vault 根目录，或其他笔记库的根路径", palette: palette) {
+                            SettingRow(label: L10n.vault, hint: L10n.vaultHintDimension, palette: palette) {
                                 VStack(alignment: .leading, spacing: 6) {
                                     HStack(spacing: 8) {
                                         TextField("/Users/you/MyVault", text: $settings.vaultPath)
                                             .textFieldStyle(.plain)
                                             .settingsFieldChrome(palette)
 
-                                        Button("选择") {
+                                        Button(L10n.browse) {
                                             chooseFolderPath(binding: $settings.vaultPath)
                                         }
                                         .buttonStyle(SettingsPrimaryButtonStyle(palette: palette))
@@ -345,13 +375,13 @@ struct SettingsView: View {
                                 }
                             }
 
-                            SettingRow(label: "日记文件夹", hint: "笔记库内存放日记的子文件夹名称，建议与 Obsidian 日记设置一致", palette: palette) {
+                            SettingRow(label: L10n.dailyFolder, hint: L10n.dailyFolderHint, palette: palette) {
                                 TextField("Daily", text: $settings.dailyFolderName)
                                     .textFieldStyle(.plain)
                                     .settingsFieldChrome(palette)
                             }
 
-                            SettingRow(label: "文件名格式", palette: palette) {
+                            SettingRow(label: L10n.fileNameFormat, palette: palette) {
                                 Picker("", selection: dailyFileDateFormatBinding) {
                                     ForEach(DailyFileDateFormat.allCases) { format in
                                         Text(format.title).tag(format)
@@ -363,7 +393,7 @@ struct SettingsView: View {
                                 .settingsFieldChrome(palette)
                             }
 
-                            SettingRow(label: "条目格式", palette: palette) {
+                            SettingRow(label: L10n.entryFormat, palette: palette) {
                                 Picker("", selection: $settings.dailyEntryThemePreset) {
                                     ForEach(DailyEntryThemePreset.allCases) { preset in
                                         Text(preset.title).tag(preset)
@@ -377,14 +407,14 @@ struct SettingsView: View {
                         }
 
                         if settings.noteWriteMode == .file {
-                            SettingRow(label: "笔记库", hint: "文档保存的文件夹路径", palette: palette) {
+                            SettingRow(label: L10n.vault, hint: L10n.vaultHintFile, palette: palette) {
                                 VStack(alignment: .leading, spacing: 6) {
                                     HStack(spacing: 8) {
                                         TextField("/Users/you/Documents", text: $settings.inboxVaultPath)
                                             .textFieldStyle(.plain)
                                             .settingsFieldChrome(palette)
 
-                                        Button("选择") {
+                                        Button(L10n.browse) {
                                             chooseFolderPath(binding: $settings.inboxVaultPath)
                                         }
                                         .buttonStyle(SettingsPrimaryButtonStyle(palette: palette))
@@ -402,7 +432,7 @@ struct SettingsView: View {
                 }
 
                 // Modules
-                SectionCard(title: "快捷分类", palette: palette) {
+                SectionCard(title: L10n.quickSections, palette: palette) {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(settings.sections) { section in
                             SectionTitleRow(
@@ -416,14 +446,14 @@ struct SettingsView: View {
                             Button {
                                 settings.addSection()
                             } label: {
-                                Label("新增模块", systemImage: "plus")
+                                Label(L10n.addSection, systemImage: "plus")
                             }
                             .buttonStyle(SettingsSecondaryButtonStyle(palette: palette))
                             .disabled(!settings.canAddSection)
 
                             Spacer()
 
-                            Button("保存") {
+                            Button(L10n.save) {
                                 // Resign first responder to commit all pending drafts
                                 NSApp.keyWindow?.makeFirstResponder(nil)
                             }
@@ -433,7 +463,7 @@ struct SettingsView: View {
                 }
 
                 // Shortcuts
-                SectionCard(title: "快捷键", palette: palette) {
+                SectionCard(title: L10n.shortcuts, palette: palette) {
                     VStack(spacing: 0) {
                         shortcutRow(for: .create)
                         shortcutRow(for: .send)
@@ -442,9 +472,9 @@ struct SettingsView: View {
 
                         Divider().overlay(palette.mutedText.opacity(0.15)).padding(.vertical, 6)
 
-                        fixedShortcutRow("Esc", "关闭面板")
-                        fixedShortcutRow("⌘P", "固定面板")
-                        fixedShortcutRow("⌘1–9", "切换模块")
+                        fixedShortcutRow("Esc", L10n.shortcutClosePanel)
+                        fixedShortcutRow("⌘P", L10n.shortcutPinPanel)
+                        fixedShortcutRow("⌘1–9", L10n.shortcutSwitchSection)
 
                         if let shortcutRecorderMessage {
                             Text(shortcutRecorderMessage)
@@ -456,9 +486,9 @@ struct SettingsView: View {
                 }
 
                 // System
-                SectionCard(title: "系统", palette: palette) {
+                SectionCard(title: L10n.system, palette: palette) {
                     HStack {
-                        Text("开机自启动")
+                        Text(L10n.launchAtLogin)
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(palette.sectionTitle)
                         Spacer()
@@ -494,7 +524,7 @@ struct SettingsView: View {
                 .foregroundStyle(palette.sectionTitle)
                 .frame(width: 100, alignment: .leading)
 
-            Text(isRecording ? "按键录制中…" : currentShortcut.displayLabel)
+            Text(isRecording ? L10n.recording : currentShortcut.displayLabel)
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                 .foregroundStyle(isRecording ? palette.accent : palette.chipText)
                 .padding(.horizontal, 8)
@@ -507,12 +537,12 @@ struct SettingsView: View {
             Spacer()
 
             if isRecording {
-                Button("取消") { stopRecording() }
+                Button(L10n.cancel) { stopRecording() }
                     .font(.system(size: 11, weight: .medium))
                     .buttonStyle(.plain)
                     .foregroundStyle(palette.mutedText)
             } else {
-                Button("修改") { toggleRecording(for: target) }
+                Button(L10n.edit) { toggleRecording(for: target) }
                     .font(.system(size: 11, weight: .medium))
                     .buttonStyle(.plain)
                     .foregroundStyle(palette.accent)
@@ -617,25 +647,25 @@ struct SettingsView: View {
 
     private func handleRecordedShortcut(_ candidate: KeyboardShortcut, for target: ShortcutTarget) {
         if !candidate.hasModifier {
-            shortcutRecorderMessage = "需要至少一个修饰键（⌘/⇧/⌥/⌃）"
+            shortcutRecorderMessage = L10n.needModifierKey
             NSSound.beep()
             return
         }
 
         if candidate.keyCode == UInt32(kVK_Escape) {
-            shortcutRecorderMessage = "Esc 已用于关闭面板"
+            shortcutRecorderMessage = L10n.escReserved
             NSSound.beep()
             return
         }
 
         if target != .create && candidate.isReservedSectionSwitch {
-            shortcutRecorderMessage = "⌘1–9 已用于切换模块"
+            shortcutRecorderMessage = L10n.cmdNumberReserved
             NSSound.beep()
             return
         }
 
         if let conflict = conflictingShortcutTarget(for: candidate, excluding: target) {
-            shortcutRecorderMessage = "与「\(conflict.name)」冲突"
+            shortcutRecorderMessage = L10n.shortcutConflict(with: conflict.name)
             NSSound.beep()
             return
         }
@@ -666,7 +696,7 @@ struct SettingsView: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "选择文件夹"
+        panel.prompt = L10n.chooseFolder
 
         if panel.runModal() == .OK {
             binding.wrappedValue = panel.url?.path ?? ""
@@ -692,7 +722,7 @@ private struct SectionTitleRow: View {
                 .foregroundStyle(palette.mutedText)
                 .frame(width: 18)
 
-            TextField("模块名", text: $draft)
+            TextField(L10n.sectionName, text: $draft)
                 .textFieldStyle(.plain)
                 .settingsFieldChrome(palette)
                 .focused($isFocused)
@@ -709,7 +739,7 @@ private struct SectionTitleRow: View {
                     .foregroundStyle(settings.canRemoveSection ? palette.warningText : palette.mutedText)
             }
             .buttonStyle(.plain)
-            .help("删除模块")
+            .help(L10n.deleteSection)
             .disabled(!settings.canRemoveSection)
         }
         .onAppear { draft = settings.title(for: section) }

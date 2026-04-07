@@ -26,14 +26,10 @@ enum AppThemePreset: String, CaseIterable, Identifiable {
 
     var summary: String {
         switch self {
-        case .light:
-            return "参考 Obsidian Light 的灰白底色和紫色强调，更干净、更通用。"
-        case .dark:
-            return "黑白灰夜间主题，保留足够对比度，避免紫色品牌偏移。"
-        case .paper:
-            return "纸张米白与墨黑正文，适合长时间阅读、整理和静态编辑。"
-        case .dune:
-            return "燕麦底与陶土橙强调，整体更暖、更柔和，也更有材料感。"
+        case .light: return L10n.themeLightSummary
+        case .dark: return L10n.themeDarkSummary
+        case .paper: return L10n.themePaperSummary
+        case .dune: return L10n.themeDuneSummary
         }
     }
 

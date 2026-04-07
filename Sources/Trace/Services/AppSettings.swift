@@ -4,7 +4,31 @@ import Carbon
 import Foundation
 import ServiceManagement
 
+enum AppLanguage: String, CaseIterable, Identifiable {
+    case zh
+    case en
+    case ja
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .zh: return "中文"
+        case .en: return "English"
+        case .ja: return "日本語"
+        }
+    }
+
+    static var systemDefault: AppLanguage {
+        let preferred = Locale.preferredLanguages.first ?? ""
+        if preferred.hasPrefix("zh") { return .zh }
+        if preferred.hasPrefix("ja") { return .ja }
+        return .en
+    }
+}
+
 enum SettingKeys {
+    static let language = "trace.language"
     static let vaultPath = "trace.vaultPath"
     static let dailyFolderName = "trace.dailyFolderName"
     static let dailyFileDateFormat = "trace.dailyFileDateFormat"
@@ -70,19 +94,15 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .dimension:
-            return "日记"
-        case .file:
-            return "文档"
+        case .dimension: return L10n.writeModeDailyTitle
+        case .file: return L10n.writeModeDocumentTitle
         }
     }
 
     var compactTitle: String {
         switch self {
-        case .dimension:
-            return "日记"
-        case .file:
-            return "文档"
+        case .dimension: return L10n.writeModeDailyTitle
+        case .file: return L10n.writeModeDocumentTitle
         }
     }
 
@@ -97,28 +117,22 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
 
     var destinationTitle: String {
         switch self {
-        case .dimension:
-            return "追加到当天日记"
-        case .file:
-            return "创建独立文档"
+        case .dimension: return L10n.writeModeDailyDestination
+        case .file: return L10n.writeModeDocumentDestination
         }
     }
 
     var summary: String {
         switch self {
-        case .dimension:
-            return "追加到当天的日记文件，适合快速收集和后续整理。"
-        case .file:
-            return "每次新建一篇独立 Markdown 文档，适合沉淀为正式稿件。"
+        case .dimension: return L10n.writeModeDailySummary
+        case .file: return L10n.writeModeDocumentSummary
         }
     }
 
     var targetSummary: String {
         switch self {
-        case .dimension:
-            return "按模块追加到当天日记，底部保留自定义模块切换。"
-        case .file:
-            return "新建独立文件，可选标题，保存到指定目录。"
+        case .dimension: return L10n.writeModeDailyTarget
+        case .file: return L10n.writeModeDocumentTarget
         }
     }
 
@@ -166,12 +180,9 @@ enum DailyEntryThemePreset: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .codeBlockClassic:
-            return "代码块（推荐）"
-        case .plainTextTimestamp:
-            return "文本 + 时间戳"
-        case .markdownQuote:
-            return "引用（Markdown）"
+        case .codeBlockClassic: return L10n.entryCodeBlock
+        case .plainTextTimestamp: return L10n.entryPlainText
+        case .markdownQuote: return L10n.entryQuote
         }
     }
 
@@ -204,12 +215,9 @@ enum MarkdownEntrySeparatorStyle: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .none:
-            return "仅空行"
-        case .horizontalRule:
-            return "--- 分割线"
-        case .asteriskRule:
-            return "*** 分割线"
+        case .none: return L10n.separatorNone
+        case .horizontalRule: return L10n.separatorHorizontalRule
+        case .asteriskRule: return L10n.separatorAsteriskRule
         }
     }
 
@@ -244,14 +252,10 @@ enum VaultPathValidationIssue: Equatable {
 
     var message: String {
         switch self {
-        case .empty:
-            return "请先选择笔记库文件夹。"
-        case .doesNotExist:
-            return "笔记库路径不存在，请重新选择。"
-        case .notDirectory:
-            return "笔记库路径必须是文件夹。"
-        case .notWritable:
-            return "笔记库路径不可写，请检查文件夹权限。"
+        case .empty: return L10n.vaultEmpty
+        case .doesNotExist: return L10n.vaultNotExist
+        case .notDirectory: return L10n.vaultNotDirectory
+        case .notWritable: return L10n.vaultNotWritable
         }
     }
 }
@@ -270,6 +274,12 @@ final class AppSettings: ObservableObject {
 
     private let defaults: UserDefaults
     private let fileManager: FileManager
+
+    @Published var language: AppLanguage {
+        didSet {
+            defaults.set(language.rawValue, forKey: SettingKeys.language)
+        }
+    }
 
     @Published var vaultPath: String {
         didSet {
@@ -429,6 +439,7 @@ final class AppSettings: ObservableObject {
             legacyDefaults: legacyDefaults ?? Self.defaultLegacyDefaults(for: defaults)
         )
 
+        language = AppLanguage(rawValue: defaults.string(forKey: SettingKeys.language) ?? "") ?? .systemDefault
         vaultPath = defaults.string(forKey: SettingKeys.vaultPath) ?? ""
         inboxVaultPath = defaults.string(forKey: SettingKeys.inboxVaultPath) ?? ""
         dailyFolderName = defaults.string(forKey: SettingKeys.dailyFolderName) ?? "Daily"
