@@ -440,6 +440,20 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var threadConfigs: [ThreadConfig] {
+        didSet {
+            if let data = try? JSONEncoder().encode(threadConfigs) {
+                defaults.set(data, forKey: SettingKeys.threadConfigs)
+            }
+        }
+    }
+
+    @Published var threadVaultPath: String {
+        didSet {
+            defaults.set(threadVaultPath, forKey: SettingKeys.threadVaultPath)
+        }
+    }
+
     var lastUsedSectionIndex: Int {
         get { defaults.integer(forKey: SettingKeys.lastUsedSectionIndex) }
         set { defaults.set(newValue, forKey: SettingKeys.lastUsedSectionIndex) }
@@ -536,7 +550,25 @@ final class AppSettings: ObservableObject {
         dailyEntryThemePreset = resolvedPreset
         defaults.set(resolvedPreset.rawValue, forKey: SettingKeys.dailyEntryThemePreset)
 
+        // Thread configs
+        if let data = defaults.data(forKey: SettingKeys.threadConfigs),
+           let configs = try? JSONDecoder().decode([ThreadConfig].self, from: data) {
+            threadConfigs = configs
+        } else {
+            threadConfigs = Self.defaultThreadConfigs
+        }
+        threadVaultPath = defaults.string(forKey: SettingKeys.threadVaultPath) ?? ""
+
         normalizePanelShortcutCollisionsIfNeeded()
+    }
+
+    private static var defaultThreadConfigs: [ThreadConfig] {
+        [
+            ThreadConfig(name: "想法", targetFile: "Threads/想法.md", icon: "lightbulb", order: 0),
+            ThreadConfig(name: "读书笔记", targetFile: "Threads/读书笔记.md", icon: "book", order: 1),
+            ThreadConfig(name: "产品设计", targetFile: "Threads/产品设计.md", icon: "pencil", order: 2),
+            ThreadConfig(name: "技术研究", targetFile: "Threads/技术研究.md", icon: "cpu", order: 3)
+        ]
     }
 
     var hasVaultPath: Bool {
@@ -589,6 +621,77 @@ final class AppSettings: ObservableObject {
 
     var hasValidInboxVaultPath: Bool {
         inboxVaultPathValidationIssue == nil
+    }
+
+    var hasValidThreadVaultPath: Bool {
+        threadVaultPathValidationIssue == nil
+    }
+
+    var threadVaultPathValidationIssue: VaultPathValidationIssue? {
+        let trimmedPath = threadVaultPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPath.isEmpty else { return .empty }
+
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: trimmedPath, isDirectory: &isDirectory) else {
+            return .doesNotExist
+        }
+
+        guard isDirectory.boolValue else {
+            return .notDirectory
+        }
+
+        guard fileManager.isWritableFile(atPath: trimmedPath) else {
+            return .notWritable
+        }
+
+        return nil
+    }
+
+    var defaultThread: ThreadConfig? {
+        let savedId = defaults.string(forKey: SettingKeys.lastUsedThreadId)
+        if let savedId = savedId,
+           let uuid = UUID(uuidString: savedId),
+           let config = threadConfigs.first(where: { $0.id == uuid }) {
+            return config
+        }
+        return threadConfigs.first
+    }
+
+    func addThread(name: String, targetFile: String, icon: String? = nil) {
+        let maxOrder = threadConfigs.map(\.order).max() ?? 0
+        let config = ThreadConfig(
+            name: name,
+            targetFile: targetFile,
+            icon: icon,
+            order: maxOrder + 1
+        )
+        threadConfigs.append(config)
+    }
+
+    func removeThread(_ config: ThreadConfig) {
+        threadConfigs.removeAll { $0.id == config.id }
+    }
+
+    func updateThread(_ config: ThreadConfig) {
+        if let index = threadConfigs.firstIndex(where: { $0.id == config.id }) {
+            threadConfigs[index] = config
+        }
+    }
+
+    func setLastUsedThread(_ config: ThreadConfig?) {
+        if let config = config {
+            defaults.set(config.id.uuidString, forKey: SettingKeys.lastUsedThreadId)
+        } else {
+            defaults.removeObject(forKey: SettingKeys.lastUsedThreadId)
+        }
+    }
+
+    var canAddThread: Bool {
+        threadConfigs.count < 9
+    }
+
+    var canRemoveThread: Bool {
+        threadConfigs.count > 1
     }
 
     var appTheme: TraceTheme {
