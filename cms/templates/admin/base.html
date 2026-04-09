@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ title or "SOTA SYNC Admin" }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}" />
+</head>
+<body>
+  <div class="admin-shell">
+    <header class="admin-header">
+      <div>
+        <a class="admin-brand" href="{{ url_for('dashboard') }}">SOTA SYNC Admin</a>
+        <p class="admin-sub">Markdown-first content control panel</p>
+      </div>
+      <nav class="admin-nav">
+        <a href="{{ url_for('dashboard') }}">Dashboard</a>
+        <a href="{{ url_for('content_list', kind='blog') }}">Blog</a>
+        <a href="{{ url_for('content_list', kind='resources') }}">Resources</a>
+        <a href="{{ url_for('homepage_featured') }}">Homepage Featured</a>
+      </nav>
+      {% if session.get('is_admin') %}
+        <div class="admin-actions">
+          <form method="post" action="{{ url_for('publish_site') }}">
+            <button class="admin-button admin-button-primary" type="submit">Publish Site</button>
+          </form>
+          <form method="post" action="{{ url_for('logout') }}">
+            <button class="admin-button" type="submit">Logout</button>
+          </form>
+        </div>
+      {% endif %}
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <section class="flash-stack">
+          {% for category, message in messages %}
+            <div class="flash flash-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        </section>
+      {% endif %}
+    {% endwith %}
+
+    {% block body %}{% endblock %}
+  </div>
+</body>
+</html>

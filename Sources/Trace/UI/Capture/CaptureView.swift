@@ -35,6 +35,7 @@ struct CaptureView: View {
         switch settings.noteWriteMode {
         case .dimension: return L10n.notePlaceholder
         case .file: return L10n.documentPlaceholder
+        case .thread: return L10n.threadPlaceholder
         }
     }
 
@@ -48,6 +49,8 @@ struct CaptureView: View {
                 modeFooter
             case .file:
                 documentFooter
+            case .thread:
+                modeFooter
             }
         }
         .frame(minWidth: 360, minHeight: 220)

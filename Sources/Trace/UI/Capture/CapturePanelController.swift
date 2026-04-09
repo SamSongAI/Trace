@@ -130,7 +130,7 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
                 keyCode: settings.modeToggleKeyCode,
                 modifiers: settings.modeToggleModifiers
             ) {
-                settings.noteWriteMode = settings.noteWriteMode.toggled
+                settings.noteWriteMode = settings.noteWriteMode.next()
                 NotificationCenter.default.post(name: .traceFocusInput, object: nil)
                 return nil
             }

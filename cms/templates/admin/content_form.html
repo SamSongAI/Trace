@@ -1,0 +1,103 @@
+{% extends "admin/base.html" %}
+{% set title = ("Edit " if mode == "edit" else "New ") ~ ("Blog" if kind == "blog" else "Resource") ~ " | SOTA SYNC Admin" %}
+
+{% block body %}
+  <section class="admin-panel">
+    <div class="admin-panel-head">
+      <div>
+        <p class="eyebrow">{{ "Blog" if kind == "blog" else "Resources" }}</p>
+        <h1>{{ "编辑内容" if mode == "edit" else "新建内容" }}</h1>
+      </div>
+      {% if entry %}
+        <div class="split-actions">
+          <a class="admin-button" href="{{ url_for('content_preview', kind=kind, slug=entry.slug) }}" target="_blank" rel="noreferrer">Preview</a>
+          <form method="post" action="{{ url_for('content_publish', kind=kind, slug=entry.slug) }}">
+            <input type="hidden" name="action" value="publish" />
+            <button class="admin-button admin-button-primary" type="submit">Publish</button>
+          </form>
+          {% if entry.is_published %}
+            <form method="post" action="{{ url_for('content_publish', kind=kind, slug=entry.slug) }}">
+              <input type="hidden" name="action" value="unpublish" />
+              <button class="admin-button admin-button-danger" type="submit">Unpublish</button>
+            </form>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+
+    {% if errors %}
+      <div class="flash-stack">
+        {% for error in errors %}
+          <div class="flash flash-error">{{ error }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <form class="admin-form admin-form-wide" method="post">
+      <div class="form-grid">
+        <label>
+          <span>Title</span>
+          <input type="text" name="title" value="{{ form_data.title }}" required />
+        </label>
+        <label>
+          <span>Slug</span>
+          <input type="text" name="slug" value="{{ form_data.slug }}" placeholder="auto-from-title-if-empty" />
+        </label>
+        <label>
+          <span>Published At</span>
+          <input type="date" name="published_at" value="{{ form_data.published_at }}" />
+        </label>
+        <label>
+          <span>Status</span>
+          <select name="status">
+            <option value="draft" {% if form_data.status == 'draft' %}selected{% endif %}>draft</option>
+            <option value="published" {% if form_data.status == 'published' %}selected{% endif %}>published</option>
+          </select>
+        </label>
+      </div>
+
+      {% if kind == "blog" %}
+        <label>
+          <span>Excerpt</span>
+          <textarea name="excerpt" rows="3">{{ form_data.excerpt }}</textarea>
+        </label>
+        <label>
+          <span>SEO Description</span>
+          <textarea name="seo_description" rows="3">{{ form_data.seo_description }}</textarea>
+        </label>
+      {% else %}
+        <div class="form-grid">
+          <label>
+            <span>External URL</span>
+            <input type="url" name="external_url" value="{{ form_data.external_url }}" />
+          </label>
+          <label>
+            <span>Source Name</span>
+            <input type="text" name="source_name" value="{{ form_data.source_name }}" />
+          </label>
+        </div>
+        <label>
+          <span>Summary</span>
+          <textarea name="summary" rows="3">{{ form_data.summary }}</textarea>
+        </label>
+      {% endif %}
+
+      <label>
+        <span>Tags</span>
+        <input type="text" name="tags" value="{{ form_data.tags }}" placeholder="Context Engineering, Harness, Agent Infra" />
+      </label>
+
+      <label>
+        <span>Markdown Body</span>
+        <textarea class="code-textarea" name="body_markdown" rows="24" required>{{ form_data.body_markdown }}</textarea>
+      </label>
+
+      <div class="split-actions">
+        <button class="admin-button admin-button-primary" type="submit">Save Draft</button>
+        {% if entry %}
+          <a class="admin-button" href="{{ url_for('content_list', kind=kind) }}">Back to List</a>
+        {% endif %}
+      </div>
+    </form>
+  </section>
+{% endblock %}

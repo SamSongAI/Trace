@@ -1,0 +1,50 @@
+name: windows-build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'clients/trace-win/**'
+      - '.github/workflows/windows-build.yml'
+  pull_request:
+    paths:
+      - 'clients/trace-win/**'
+      - '.github/workflows/windows-build.yml'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: clients/trace-win
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/trace-win -> target
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Package Windows binary
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\dist-win" | Out-Null
+          Copy-Item "target\release\trace-win.exe" "$env:GITHUB_WORKSPACE\dist-win\Trace.exe"
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\dist-win\Trace.exe" -DestinationPath "$env:GITHUB_WORKSPACE\dist-win\Trace-win-x64.zip" -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Trace-win-x64
+          path: dist-win/Trace-win-x64.zip

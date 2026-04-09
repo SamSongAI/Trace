@@ -60,6 +60,9 @@ final class DailyNoteWriter {
                 targetFolder: fileTargetFolder,
                 now: now
             )
+        case .thread:
+            // Thread 模式将在后续 Task 中实现
+            throw DailyNoteWriterError.invalidTargetFolderPath
         }
     }
 

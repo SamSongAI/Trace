@@ -1,0 +1,20 @@
+[Unit]
+Description=SOTA SYNC content admin
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/sotasync
+Environment=PYTHONPATH=/opt/sotasync
+Environment=ADMIN_HOST=127.0.0.1
+Environment=ADMIN_PORT=4310
+Environment=ADMIN_COOKIE_SECURE=1
+Environment=SITE_BASE_URL=https://sotasync.com
+EnvironmentFile=/etc/sotasync-admin.env
+ExecStart=/opt/sotasync/.venv/bin/python -m cms.app serve
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,80 @@
+{% extends "public/base.html" %}
+{% set page_title = "Blog | SOTA SYNC" %}
+{% set page_description = "SOTA SYNC Blog：围绕 Agent 范式、工程信号与生产级系统设计的长文与判断。" %}
+
+{% block body %}
+  <section class="hero reveal">
+    <p class="eyebrow">Blog</p>
+    <h1>只放值得读完的文章。</h1>
+    <p>围绕 Agent 范式、工程信号与生产经验的长文，会在这里持续更新。每一篇都应该有明确判断，而不是凑数。</p>
+    {% if blogs %}
+      <div class="cta-row">
+        <a class="button primary" href="{{ blogs[0].public_path }}">Read The Latest Essay</a>
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="section reveal delay-1">
+    <p class="section-label">Latest</p>
+    <h2>最新发布</h2>
+    {% if blogs %}
+      {% set lead_blog = blogs[0] %}
+      <article class="card feature-story">
+        <div class="feature-story-grid">
+          <div>
+            <div class="meta-row">
+              <span class="tag">Latest</span>
+              <span>{{ lead_blog.published_at }}</span>
+              <span>{{ lead_blog.reading_time_minutes }} min read</span>
+            </div>
+            <h3 class="feature-story-title"><a href="{{ lead_blog.public_path }}">{{ lead_blog.title }}</a></h3>
+            <p class="feature-story-excerpt">{{ lead_blog.excerpt }}</p>
+            <div class="cta-row">
+              <a class="button soft" href="{{ lead_blog.public_path }}">Open Essay</a>
+            </div>
+          </div>
+          <div class="feature-notes">
+            <h4>Tags</h4>
+            <ul class="meta-list feature-points">
+              {% for tag in lead_blog.tags %}
+                <li>{{ tag }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+        </div>
+      </article>
+    {% else %}
+      <article class="card empty-state">
+        <h3>Blog 还没有已发布文章</h3>
+        <p>进入后台创建草稿、预览排版，确认无误后再点发布，这里就会自动出现入口。</p>
+      </article>
+    {% endif %}
+  </section>
+
+  <section class="section reveal delay-2">
+    <p class="section-label">Archive</p>
+    <h2>文章目录</h2>
+    {% if blogs %}
+      <div class="archive-list">
+        {% for entry in blogs %}
+          <a class="card archive-item" href="{{ entry.public_path }}">
+            <div class="archive-meta">
+              {% if entry.tags %}
+                <span class="tag">{{ entry.tags[0] }}</span>
+              {% endif %}
+              <span>{{ entry.published_at }}</span>
+              <span>{{ entry.reading_time_minutes }} min read</span>
+            </div>
+            <h3>{{ entry.title }}</h3>
+            <p>{{ entry.excerpt }}</p>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <article class="card empty-state">
+        <h3>目录会在发布后自动生成</h3>
+        <p>保存草稿不会改线上，只有通过后台发布后，这里才会更新站点入口。</p>
+      </article>
+    {% endif %}
+  </section>
+{% endblock %}

@@ -1,0 +1,56 @@
+{% extends "public/base.html" %}
+{% set page_title = entry.title ~ " | SOTA SYNC" %}
+{% set page_description = entry.seo_description or entry.excerpt %}
+
+{% block body %}
+  <section class="hero reveal">
+    <p class="eyebrow">Essay</p>
+    <h1>{{ entry.title }}</h1>
+    <p>{{ entry.excerpt }}</p>
+    <div class="hero-meta">
+      <span>Published {{ entry.published_at }}</span>
+      <span>{{ entry.reading_time_minutes }} min read</span>
+      <span>Blog</span>
+    </div>
+    {% if entry.tags %}
+      <div class="tag-row">
+        {% for tag in entry.tags %}
+          <span class="trace-chip {% if not loop.first %}muted{% endif %}">{{ tag }}</span>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="section reveal delay-1">
+    <div class="article-layout">
+      <article class="article-body article-surface">
+        <div class="card article-summary">
+          <p class="article-summary-label">Core Thesis</p>
+          <p class="article-summary-copy">{{ entry.seo_description or entry.excerpt }}</p>
+        </div>
+        {{ entry.body_html | safe }}
+        <div class="card article-endcap">
+          <h3>Continue Reading</h3>
+          <p>回到 Blog，继续浏览已经发布的文章。后续上线的新文章也会在目录页持续追加。</p>
+          <div class="cta-row">
+            <a class="button soft" href="/blog/">Back to Blog</a>
+          </div>
+        </div>
+      </article>
+
+      {% if entry.toc %}
+        <aside class="toc-card">
+          <p class="toc-label">On This Page</p>
+          <nav class="toc-nav">
+            {% for item in entry.toc %}
+              <a class="toc-depth-{{ item.level }}" href="#{{ item.anchor }}">{{ item.title }}</a>
+            {% endfor %}
+          </nav>
+          <div class="toc-card-actions">
+            <a class="button soft" href="/blog/">Back to Blog</a>
+          </div>
+        </aside>
+      {% endif %}
+    </div>
+  </section>
+{% endblock %}

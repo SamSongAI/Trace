@@ -1,0 +1,61 @@
+{% extends "admin/base.html" %}
+{% set title = "Homepage Featured | SOTA SYNC Admin" %}
+
+{% block body %}
+  <section class="admin-panel">
+    <div class="admin-panel-head">
+      <div>
+        <p class="eyebrow">Homepage</p>
+        <h1>精选位排序</h1>
+      </div>
+    </div>
+    <p class="admin-muted">首页固定渲染前 3 篇 Blog 和前 6 个 Resource。勾选并填写排序数字，保存后需要发布才会影响公开站点。</p>
+
+    <form class="admin-form admin-form-wide" method="post">
+      <div class="selection-grid">
+        <section class="selection-panel">
+          <h2>Featured Blog</h2>
+          {% for entry in published_blogs %}
+            {% set current_index = config.featured_blog_slugs.index(entry.slug) + 1 if entry.slug in config.featured_blog_slugs else '' %}
+            <label class="selection-item">
+              <span class="selection-main">
+                <input type="checkbox" name="featured_blog_slugs" value="{{ entry.slug }}" {% if entry.slug in config.featured_blog_slugs %}checked{% endif %} />
+                <span>
+                  <strong>{{ entry.title }}</strong>
+                  <small>{{ entry.published_at }}</small>
+                </span>
+              </span>
+              <input class="order-input" type="number" min="1" name="blog_order_{{ entry.slug }}" value="{{ current_index }}" />
+            </label>
+          {% else %}
+            <p class="admin-muted">先发布 Blog 才能加入首页。</p>
+          {% endfor %}
+        </section>
+
+        <section class="selection-panel">
+          <h2>Featured Resources</h2>
+          {% for entry in published_resources %}
+            {% set current_index = config.featured_resource_slugs.index(entry.slug) + 1 if entry.slug in config.featured_resource_slugs else '' %}
+            <label class="selection-item">
+              <span class="selection-main">
+                <input type="checkbox" name="featured_resource_slugs" value="{{ entry.slug }}" {% if entry.slug in config.featured_resource_slugs %}checked{% endif %} />
+                <span>
+                  <strong>{{ entry.title }}</strong>
+                  <small>{{ entry.source_name }} · {{ entry.published_at }}</small>
+                </span>
+              </span>
+              <input class="order-input" type="number" min="1" name="resource_order_{{ entry.slug }}" value="{{ current_index }}" />
+            </label>
+          {% else %}
+            <p class="admin-muted">先发布 Resources 才能加入首页。</p>
+          {% endfor %}
+        </section>
+      </div>
+
+      <div class="split-actions">
+        <button class="admin-button admin-button-primary" type="submit">Save Featured Slots</button>
+        <button class="admin-button" type="submit" name="publish_now" value="1">Save and Publish</button>
+      </div>
+    </form>
+  </section>
+{% endblock %}

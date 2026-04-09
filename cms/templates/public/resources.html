@@ -1,0 +1,61 @@
+{% extends "public/base.html" %}
+{% set page_title = "Resources | SOTA SYNC" %}
+{% set page_description = "SOTA SYNC Resources：沉淀 Agent 领域更耐久的概念页、范式梳理、系统设计图谱与阅读地图。" %}
+
+{% block body %}
+  <section class="hero reveal">
+    <p class="eyebrow">Resources</p>
+    <h1>把更耐久的 Agent 理解，沉淀成可以回访的主题页。</h1>
+    <p>Resources 承担的是站点长期记忆层。它不追逐时间线，而是组织概念、范式、系统设计和阅读路径，让新内容有地方被吸收，不只是被发布。</p>
+  </section>
+
+  <section class="section reveal delay-1">
+    <p class="section-label">Curated Shelf</p>
+    <h2>已发布 Resources</h2>
+    {% if resources %}
+      <div class="resource-grid">
+        {% for entry in resources %}
+          <article class="card resource-card {% if preview_entry and preview_entry.slug == entry.slug %}resource-card-preview{% endif %}">
+            <div class="archive-meta">
+              <span class="tag">{{ entry.source_name }}</span>
+              <span>{{ entry.published_at }}</span>
+              {% if entry.tags %}
+                <span>{{ entry.tags | join(" · ") }}</span>
+              {% endif %}
+            </div>
+            <h3>{{ entry.title }}</h3>
+            <p class="resource-summary">{{ entry.summary }}</p>
+            <div class="resource-comment">{{ entry.body_html | safe }}</div>
+            <div class="cta-row">
+              <a class="button soft" href="{{ entry.external_url }}" target="_blank" rel="noreferrer">Open Source</a>
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <article class="card empty-state">
+        <h3>Resources 还没有公开条目</h3>
+        <p>后台会把每个资源保存为外链卡片加短评。等你发布第一批内容后，这里会自动更新。</p>
+      </article>
+    {% endif %}
+  </section>
+
+  <section class="section reveal delay-2">
+    <p class="section-label">How It Works</p>
+    <h2>Resources 的入站标准</h2>
+    <div class="grid three">
+      <article class="card story-card">
+        <h3>Durable</h3>
+        <p>适合被反复引用，而不是只适合“今天看一眼”的时间性内容。</p>
+      </article>
+      <article class="card story-card">
+        <h3>Opinionated</h3>
+        <p>每条资源都附带你的判断，不只是链接清单和被动收藏。</p>
+      </article>
+      <article class="card story-card">
+        <h3>Structured</h3>
+        <p>围绕主题和脉络沉淀，方便后续在首页和 Blog 中反复引用。</p>
+      </article>
+    </div>
+  </section>
+{% endblock %}

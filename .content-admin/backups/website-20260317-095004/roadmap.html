@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trace 路线图 | SOTA SYNC</title>
+  <meta name="description" content="Trace 未来几个阶段的公开路线图：先稳住留痕层，再扩展跨平台与路由能力。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./site.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="header">
+      <div class="brand-lockup">
+        <a class="brand" href="./index.html"><span class="logo-dot"></span>SOTA SYNC</a>
+        <span class="brand-sub">Frontier Agent Curation + Product</span>
+      </div>
+      <nav class="nav">
+        <a href="./resources.html">Resources</a>
+        <a href="./blog/">Blog</a>
+        <a class="active" href="./product.html">Product</a>
+        <a href="./readme.html">Read Me</a>
+      </nav>
+    </header>
+
+    <div class="subnav reveal">
+      <a href="./product.html">Overview</a>
+      <a href="./download.html">Download</a>
+      <a href="./changelog.html">Changelog</a>
+      <a class="active" href="./roadmap.html">Roadmap</a>
+      <a href="./pricing.html">Pricing</a>
+    </div>
+
+    <section class="hero reveal delay-1">
+      <p class="eyebrow">Product · Roadmap</p>
+      <h1>产品路线图</h1>
+      <p>Trace 的路线图围绕一个原则展开：先把痕迹留下来，再让这条痕迹在更多平台和规则里流动。</p>
+      <div class="hero-meta">
+        <span id="site-version">Version --</span>
+        <span id="site-date">Released --</span>
+      </div>
+    </section>
+
+    <section class="section reveal delay-2">
+      <h2>阶段目标</h2>
+      <p class="desc">以下为当前公开路线图，实际细节会随发布继续修正。</p>
+      <div id="roadmap-list" class="timeline"></div>
+    </section>
+
+    <section class="section reveal delay-3">
+      <h2>Windows 推进策略</h2>
+      <div class="grid two">
+        <article class="card">
+          <h3>核心原则</h3>
+          <p>不把复杂 AI 强塞进客户端，先保持捕捉链路可预测，并对齐 macOS 的写入一致性。</p>
+        </article>
+        <article class="card">
+          <h3>交付标准</h3>
+          <p>Win 公开版上线前，Daily 写入成功率需达到 99% 以上，且无数据丢失问题。</p>
+        </article>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span>Roadmap updated with every public Trace release.</span>
+      <nav>
+        <a href="./product.html">Overview</a>
+        <a href="./download.html">Download</a>
+        <a href="./changelog.html">Changelog</a>
+        <a href="./pricing.html">Pricing</a>
+        <a href="./terms.html">Terms</a>
+      </nav>
+    </footer>
+  </div>
+
+  <script src="./release-data.js" defer></script>
+  <script src="./site.js" defer></script>
+</body>
+</html>

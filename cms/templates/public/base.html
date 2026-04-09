@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ page_title }}</title>
+  <meta name="description" content="{{ page_description }}" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/site.css" />
+</head>
+<body>
+  <div class="shell">
+    {% if is_preview %}
+      <div class="preview-banner card">
+        <strong>Preview Mode</strong>
+        <span>这是一份后台预览，公开站点不会在发布前更新。</span>
+        <a href="/admin">Back to Admin</a>
+      </div>
+    {% endif %}
+
+    <header class="header">
+      <div class="brand-lockup">
+        <a class="brand" href="/index.html"><span class="logo-dot"></span>SOTA SYNC</a>
+        <span class="brand-sub">Frontier Agent Curation + Product</span>
+      </div>
+      <nav class="nav">
+        <a class="{% if active_nav == 'resources' %}active{% endif %}" href="/resources.html">Resources</a>
+        <a class="{% if active_nav == 'blog' %}active{% endif %}" href="/blog/">Blog</a>
+        <a class="{% if active_nav == 'product' %}active{% endif %}" href="/product.html">Product</a>
+        <a class="{% if active_nav == 'readme' %}active{% endif %}" href="/readme.html">Read Me</a>
+      </nav>
+    </header>
+
+    {% block body %}{% endblock %}
+
+    <footer class="footer">
+      <span>{{ footer_copy }}</span>
+      <nav>
+        <a href="/index.html">Home</a>
+        <a href="/resources.html">Resources</a>
+        <a href="/blog/">Blog</a>
+        <a href="/product.html">Product</a>
+        <a href="/readme.html">Read Me</a>
+      </nav>
+    </footer>
+  </div>
+</body>
+</html>

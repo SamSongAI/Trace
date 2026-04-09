@@ -1,0 +1,84 @@
+{% extends "admin/base.html" %}
+{% set title = "Dashboard | SOTA SYNC Admin" %}
+
+{% block body %}
+  <section class="admin-panel">
+    <div class="admin-panel-head">
+      <div>
+        <p class="eyebrow">Overview</p>
+        <h1>内容后台</h1>
+      </div>
+      <p class="admin-muted">Public root: <code>{{ public_site_dir }}</code></p>
+    </div>
+    <div class="stats-grid">
+      <article class="stat-card">
+        <strong>{{ blog_count }}</strong>
+        <span>Blog drafts + published</span>
+        <small>{{ blog_published }} published</small>
+      </article>
+      <article class="stat-card">
+        <strong>{{ resource_count }}</strong>
+        <span>Resources drafts + published</span>
+        <small>{{ resource_published }} published</small>
+      </article>
+      <article class="stat-card">
+        <strong>{{ homepage.featured_blog_slugs|length }}</strong>
+        <span>Homepage blog slots</span>
+        <small>{{ homepage.featured_resource_slugs|length }} resources selected</small>
+      </article>
+      <article class="stat-card">
+        <strong>Static</strong>
+        <span>草稿、预览、发布</span>
+        <small>backup: {{ backup_root }}</small>
+      </article>
+    </div>
+  </section>
+
+  <section class="admin-grid">
+    <article class="admin-panel">
+      <div class="admin-panel-head">
+        <div>
+          <p class="eyebrow">Blog</p>
+          <h2>长文与判断</h2>
+        </div>
+        <a class="admin-link" href="{{ url_for('content_list', kind='blog') }}">Manage Blog</a>
+      </div>
+      <p>创建文章草稿、保存 Markdown、预览公开页模板，然后按条目发布。</p>
+    </article>
+
+    <article class="admin-panel">
+      <div class="admin-panel-head">
+        <div>
+          <p class="eyebrow">Resources</p>
+          <h2>外链卡片与短评</h2>
+        </div>
+        <a class="admin-link" href="{{ url_for('content_list', kind='resources') }}">Manage Resources</a>
+      </div>
+      <p>每个 Resource 由外链、来源、摘要和你的短评组成，适合做长期沉淀。</p>
+    </article>
+
+    <article class="admin-panel">
+      <div class="admin-panel-head">
+        <div>
+          <p class="eyebrow">Homepage</p>
+          <h2>精选位控制</h2>
+        </div>
+        <a class="admin-link" href="{{ url_for('homepage_featured') }}">Edit Featured Slots</a>
+      </div>
+      <p>首页只展示你手动挑选和排序后的 Blog、Resources，不自动堆最新内容。</p>
+    </article>
+
+    <article class="admin-panel">
+      <div class="admin-panel-head">
+        <div>
+          <p class="eyebrow">Publish</p>
+          <h2>静态生成与备份</h2>
+        </div>
+      </div>
+      <p>每次发布都会先创建备份，再用临时目录生成并原子替换公开站点，避免半发布状态。</p>
+      <form method="post" action="{{ url_for('publish_site') }}">
+        <button class="admin-button admin-button-primary" type="submit">Build and Publish</button>
+      </form>
+    </article>
+  </section>
+{% endblock %}

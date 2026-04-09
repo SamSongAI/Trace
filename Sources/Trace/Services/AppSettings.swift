@@ -54,6 +54,9 @@ enum SettingKeys {
     static let markdownEntrySeparatorStyle = "trace.markdownEntrySeparatorStyle"
     static let lastUsedSectionIndex = "trace.lastUsedSectionIndex"
     static let inboxVaultPath = "trace.inboxVaultPath"
+    static let threadConfigs = "trace.threadConfigs"
+    static let lastUsedThreadId = "trace.lastUsedThreadId"
+    static let threadVaultPath = "trace.threadVaultPath"
 }
 
 enum LegacySettingKeys {
@@ -84,11 +87,13 @@ enum LegacySettingKeys {
     static let markdownEntrySeparatorStyle = "flashnote.markdownEntrySeparatorStyle"
     static let dailyEntryContainerStyle = "flashnote.dailyEntryContainerStyle"
     static let dailyCardTheme = "flashnote.dailyCardTheme"
+    static let threadConfigs = "flashnote.threadConfigs"
 }
 
 enum NoteWriteMode: String, CaseIterable, Identifiable {
     case dimension
     case file
+    case thread
 
     var id: String { rawValue }
 
@@ -96,13 +101,15 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
         switch self {
         case .dimension: return L10n.writeModeDailyTitle
         case .file: return L10n.writeModeDocumentTitle
+        case .thread: return L10n.writeModeThreadTitle
         }
     }
 
     var compactTitle: String {
         switch self {
-        case .dimension: return L10n.writeModeDailyTitle
-        case .file: return L10n.writeModeDocumentTitle
+        case .dimension: return L10n.writeModeDailyCompact
+        case .file: return L10n.writeModeDocumentCompact
+        case .thread: return L10n.writeModeThreadCompact
         }
     }
 
@@ -112,6 +119,8 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
             return "square.grid.2x2"
         case .file:
             return "doc.text"
+        case .thread:
+            return "text.bubble"
         }
     }
 
@@ -119,6 +128,7 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
         switch self {
         case .dimension: return L10n.writeModeDailyDestination
         case .file: return L10n.writeModeDocumentDestination
+        case .thread: return L10n.writeModeThreadDestination
         }
     }
 
@@ -126,6 +136,7 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
         switch self {
         case .dimension: return L10n.writeModeDailySummary
         case .file: return L10n.writeModeDocumentSummary
+        case .thread: return L10n.writeModeThreadSummary
         }
     }
 
@@ -133,15 +144,23 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
         switch self {
         case .dimension: return L10n.writeModeDailyTarget
         case .file: return L10n.writeModeDocumentTarget
+        case .thread: return L10n.writeModeThreadTarget
         }
     }
 
-    var toggled: NoteWriteMode {
+    func next() -> NoteWriteMode {
         switch self {
-        case .dimension:
-            return .file
-        case .file:
-            return .dimension
+        case .dimension: return .file
+        case .file: return .thread
+        case .thread: return .dimension
+        }
+    }
+
+    func previous() -> NoteWriteMode {
+        switch self {
+        case .dimension: return .thread
+        case .file: return .dimension
+        case .thread: return .file
         }
     }
 }

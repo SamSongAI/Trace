@@ -1,0 +1,47 @@
+{% extends "admin/base.html" %}
+{% set title = kind|title ~ " | SOTA SYNC Admin" %}
+
+{% block body %}
+  <section class="admin-panel">
+    <div class="admin-panel-head">
+      <div>
+        <p class="eyebrow">{{ kind }}</p>
+        <h1>{{ "Blog" if kind == "blog" else "Resources" }}</h1>
+      </div>
+      <a class="admin-button admin-button-primary" href="{{ url_for('content_new', kind=kind) }}">New {{ "Post" if kind == "blog" else "Resource" }}</a>
+    </div>
+
+    <div class="filter-row">
+      <a class="{% if status_filter == 'all' %}active{% endif %}" href="{{ url_for('content_list', kind=kind, status='all') }}">All</a>
+      <a class="{% if status_filter == 'draft' %}active{% endif %}" href="{{ url_for('content_list', kind=kind, status='draft') }}">Draft</a>
+      <a class="{% if status_filter == 'published' %}active{% endif %}" href="{{ url_for('content_list', kind=kind, status='published') }}">Published</a>
+    </div>
+
+    {% if entries %}
+      <div class="admin-list">
+        {% for entry in entries %}
+          <article class="admin-list-item">
+            <div class="admin-list-main">
+              <div class="admin-meta">
+                <span class="status-pill status-{{ entry.status }}">{{ entry.status }}</span>
+                <span>{{ entry.published_at or "No publish date" }}</span>
+                <span>{{ entry.updated_label or "No edits yet" }}</span>
+              </div>
+              <h2>{{ entry.title or entry.slug }}</h2>
+              <p>{{ entry.excerpt if kind == 'blog' else entry.summary }}</p>
+            </div>
+            <div class="admin-list-actions">
+              <a class="admin-button" href="{{ url_for('content_edit', kind=kind, slug=entry.slug) }}">Edit</a>
+              <a class="admin-button" href="{{ url_for('content_preview', kind=kind, slug=entry.slug) }}" target="_blank" rel="noreferrer">Preview</a>
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <article class="empty-panel">
+        <h2>还没有内容</h2>
+        <p>创建第一条 {{ "Blog 草稿" if kind == "blog" else "Resource 草稿" }} 后，这里会出现内容列表。</p>
+      </article>
+    {% endif %}
+  </section>
+{% endblock %}

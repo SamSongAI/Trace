@@ -116,6 +116,45 @@ enum L10n {
           "Create a standalone file with optional title, saved to the specified folder.")
     }
 
+    // MARK: - Thread Mode
+
+    static var writeModeDailyCompact: String { s("Daily", "Daily", "Daily") }
+    static var writeModeDocumentCompact: String { s("文档", "ドキュメント", "Doc") }
+    static var writeModeThreadTitle: String { s("线程", "スレッド", "Thread") }
+    static var writeModeThreadCompact: String { s("线程", "スレッド", "Thread") }
+    static var writeModeThreadDestination: String { s("追加到线程", "スレッドに追加", "Append to thread") }
+    static var writeModeThreadSummary: String {
+        s("按主题追加到对应线程文件，适合连续追踪同一话题。",
+          "テーマごとに対応するスレッドファイルに追加。同じトピックの継続的なトラッキングに最適。",
+          "Append to corresponding thread file by topic. Great for continuous tracking of the same topic.")
+    }
+    static var writeModeThreadTarget: String {
+        s("按主题追加到对应线程文件，方便连续追踪。",
+          "テーマごとに対応するスレッドファイルに追加。継続的なトラッキングに最適。",
+          "Append to corresponding thread file by topic for continuous tracking.")
+    }
+    static var threadPlaceholder: String {
+        s("输入想法，追加到选中线程...",
+          "アイデアを入力してスレッドに追加...",
+          "Type your thought to append to thread...")
+    }
+    static var noThreadSelected: String {
+        s("请选择一个线程",
+          "スレッドを選択してください",
+          "Please select a thread")
+    }
+    static var vaultHintThread: String {
+        s("线程文件将保存在此目录",
+          "スレッドファイルはここに保存されます",
+          "Thread files will be saved here")
+    }
+    static var threadManagement: String { s("线程管理", "スレッド管理", "Thread Management") }
+    static var newThreadDefaultName: String { s("新线程", "新しいスレッド", "New Thread") }
+    static var addThread: String { s("添加线程", "スレッドを追加", "Add Thread") }
+    static var deleteThread: String { s("删除线程", "スレッドを削除", "Delete Thread") }
+    static var threadName: String { s("名称", "名前", "Name") }
+    static var threadTargetFile: String { s("目标文件路径", "対象ファイルパス", "Target file path") }
+
     // MARK: - Entry Theme Presets
 
     static var entryCodeBlock: String { s("代码块（推荐）", "コードブロック（推奨）", "Code Block (Recommended)") }
