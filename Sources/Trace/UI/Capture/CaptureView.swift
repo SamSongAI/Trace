@@ -11,6 +11,14 @@ private struct SectionGridWidthPreferenceKey: PreferenceKey {
     }
 }
 
+private struct ThreadGridWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct CaptureView: View {
     @ObservedObject var viewModel: CaptureViewModel
     @ObservedObject var settings: AppSettings
@@ -18,6 +26,7 @@ struct CaptureView: View {
 
     @State private var inputFocused = false
     @State private var sectionGridWidth: CGFloat = 0
+    @State private var threadGridWidth: CGFloat = 0
 
     private let sectionGridSpacing: CGFloat = 6
     private let minimumSectionButtonWidth: CGFloat = 92
@@ -50,7 +59,7 @@ struct CaptureView: View {
             case .file:
                 documentFooter
             case .thread:
-                modeFooter
+                threadFooter
             }
         }
         .frame(minWidth: 360, minHeight: 220)
@@ -149,6 +158,78 @@ struct CaptureView: View {
     private var modeFooter: some View {
         sectionBar
             .background(theme.chromeBackground)
+    }
+
+    private var threadFooter: some View {
+        threadBar
+            .background(theme.chromeBackground)
+    }
+
+    private var threadBar: some View {
+        VStack(spacing: 0) {
+            Divider().overlay(theme.border)
+
+            threadButtons
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+        }
+        .onPreferenceChange(ThreadGridWidthPreferenceKey.self) { width in
+            threadGridWidth = width
+        }
+    }
+
+    private var threadButtons: some View {
+        LazyVGrid(columns: threadGridColumns, spacing: sectionGridSpacing) {
+            ForEach(settings.threadConfigs.sorted(by: { $0.order < $1.order })) { thread in
+                Button {
+                    viewModel.selectedThread = thread
+                } label: {
+                    HStack(spacing: 4) {
+                        if let icon = thread.icon {
+                            Image(systemName: icon)
+                                .font(.system(size: 11))
+                        }
+                        Text(thread.name)
+                            .lineLimit(1)
+                    }
+                    .font(.system(size: 12, weight: viewModel.selectedThread?.id == thread.id ? .semibold : .medium))
+                    .foregroundStyle(viewModel.selectedThread?.id == thread.id ? theme.selectedText : theme.textSecondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 34)
+                    .background(viewModel.selectedThread?.id == thread.id ? theme.accentStrong : theme.surface.opacity(0.6))
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: ThreadGridWidthPreferenceKey.self, value: proxy.size.width)
+            }
+        )
+    }
+
+    private var threadGridColumns: [GridItem] {
+        let columnCount = threadColumnCount(for: threadGridWidth, itemCount: settings.threadConfigs.count)
+        return Array(
+            repeating: GridItem(.flexible(), spacing: sectionGridSpacing, alignment: .top),
+            count: columnCount
+        )
+    }
+
+    private func threadColumnCount(for width: CGFloat, itemCount: Int) -> Int {
+        guard itemCount > 0 else { return 1 }
+
+        let minimumColumnsForThreeRows = Int(ceil(Double(itemCount) / Double(maximumSectionRows)))
+        guard width > 0 else { return min(itemCount, max(1, minimumColumnsForThreeRows)) }
+
+        let widthBasedColumns = max(
+            1,
+            Int((width + sectionGridSpacing) / (minimumSectionButtonWidth + sectionGridSpacing))
+        )
+        return min(itemCount, max(minimumColumnsForThreeRows, widthBasedColumns))
     }
 
     private var sectionBar: some View {

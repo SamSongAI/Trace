@@ -53,6 +53,7 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
 
         rememberFrontmostApplicationBeforeShowing()
         viewModel.selectedSection = settings.defaultSection
+        viewModel.selectedThread = settings.defaultThread
         applySavedFrameIfNeeded(on: panel)
 
         NSApp.activate(ignoringOtherApps: true)
@@ -281,15 +282,25 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
             return
         }
 
+        // Validate thread selection for thread mode
+        if settings.noteWriteMode == .thread && viewModel.selectedThread == nil {
+            viewModel.showToast(L10n.noThreadSelected)
+            return
+        }
+
         do {
             let targetSection: NoteSection = settings.noteWriteMode == .dimension ? viewModel.selectedSection : .note
             try writer.save(
                 text: trimmedText,
                 to: targetSection,
                 mode: mode,
-                documentTitle: viewModel.fileTitle
+                documentTitle: viewModel.fileTitle,
+                thread: viewModel.selectedThread
             )
             settings.lastUsedSectionIndex = viewModel.selectedSection.index
+            if let thread = viewModel.selectedThread {
+                settings.setLastUsedThread(thread)
+            }
             if viewModel.pinned {
                 viewModel.resetInput()
                 NotificationCenter.default.post(name: .traceFocusInput, object: nil)

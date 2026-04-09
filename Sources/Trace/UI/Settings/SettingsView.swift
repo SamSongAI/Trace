@@ -428,6 +428,29 @@ struct SettingsView: View {
                                 }
                             }
                         }
+
+                        if settings.noteWriteMode == .thread {
+                            SettingRow(label: L10n.vault, hint: L10n.vaultHintThread, palette: palette) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(spacing: 8) {
+                                        TextField("/Users/you/Vault", text: $settings.threadVaultPath)
+                                            .textFieldStyle(.plain)
+                                            .settingsFieldChrome(palette)
+
+                                        Button(L10n.browse) {
+                                            chooseFolderPath(binding: $settings.threadVaultPath)
+                                        }
+                                        .buttonStyle(SettingsPrimaryButtonStyle(palette: palette))
+                                    }
+
+                                    if let issue = settings.threadVaultPathValidationIssue {
+                                        Text(issue.message)
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundStyle(palette.warningText)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -455,6 +478,39 @@ struct SettingsView: View {
 
                             Button(L10n.save) {
                                 // Resign first responder to commit all pending drafts
+                                NSApp.keyWindow?.makeFirstResponder(nil)
+                            }
+                            .buttonStyle(SettingsPrimaryButtonStyle(palette: palette))
+                        }
+                    }
+                }
+
+                // Thread Management
+                SectionCard(title: L10n.threadManagement, palette: palette) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(settings.threadConfigs.sorted(by: { $0.order < $1.order })) { thread in
+                            ThreadConfigRow(
+                                thread: thread,
+                                settings: settings,
+                                palette: palette
+                            )
+                        }
+
+                        HStack {
+                            Button {
+                                settings.addThread(
+                                    name: L10n.newThreadDefaultName,
+                                    targetFile: "Threads/\(L10n.newThreadDefaultName).md"
+                                )
+                            } label: {
+                                Label(L10n.addThread, systemImage: "plus")
+                            }
+                            .buttonStyle(SettingsSecondaryButtonStyle(palette: palette))
+                            .disabled(!settings.canAddThread)
+
+                            Spacer()
+
+                            Button(L10n.save) {
                                 NSApp.keyWindow?.makeFirstResponder(nil)
                             }
                             .buttonStyle(SettingsPrimaryButtonStyle(palette: palette))
@@ -755,6 +811,85 @@ private struct SectionTitleRow: View {
         } else {
             settings.setTitle(trimmed, for: section)
             draft = settings.title(for: section)
+        }
+    }
+}
+
+// MARK: - Thread Config Row
+
+private struct ThreadConfigRow: View {
+    let thread: ThreadConfig
+    @ObservedObject var settings: AppSettings
+    let palette: SettingsPalette
+
+    @State private var nameDraft: String = ""
+    @State private var fileDraft: String = ""
+    @FocusState private var isNameFocused: Bool
+    @FocusState private var isFileFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            TextField(L10n.threadName, text: $nameDraft)
+                .textFieldStyle(.plain)
+                .settingsFieldChrome(palette)
+                .focused($isNameFocused)
+                .onSubmit { commitName() }
+                .onChange(of: isNameFocused) { focused in
+                    if !focused { commitName() }
+                }
+                .frame(width: 120)
+
+            TextField(L10n.threadTargetFile, text: $fileDraft)
+                .textFieldStyle(.plain)
+                .settingsFieldChrome(palette)
+                .focused($isFileFocused)
+                .onSubmit { commitFile() }
+                .onChange(of: isFileFocused) { focused in
+                    if !focused { commitFile() }
+                }
+
+            Button {
+                settings.removeThread(thread)
+            } label: {
+                Image(systemName: "minus.circle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(settings.canRemoveThread ? palette.warningText : palette.mutedText)
+            }
+            .buttonStyle(.plain)
+            .help(L10n.deleteThread)
+            .disabled(!settings.canRemoveThread)
+        }
+        .onAppear {
+            nameDraft = thread.name
+            fileDraft = thread.targetFile
+        }
+        .onChange(of: settings.threadConfigs) { _ in
+            if !isNameFocused && !isFileFocused {
+                nameDraft = thread.name
+                fileDraft = thread.targetFile
+            }
+        }
+    }
+
+    private func commitName() {
+        let trimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            nameDraft = thread.name
+        } else {
+            var updated = thread
+            updated.name = trimmed
+            settings.updateThread(updated)
+        }
+    }
+
+    private func commitFile() {
+        let trimmed = fileDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            fileDraft = thread.targetFile
+        } else {
+            var updated = thread
+            updated.targetFile = trimmed
+            settings.updateThread(updated)
         }
     }
 }

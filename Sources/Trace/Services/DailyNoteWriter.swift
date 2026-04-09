@@ -1,13 +1,12 @@
 import Foundation
 
-protocol DailyNoteSettingsProviding {
+protocol DailyNoteSettingsProviding: ThreadSettingsProviding {
     var vaultPath: String { get }
     var inboxVaultPath: String { get }
     var dailyFolderName: String { get }
     var dailyFileDateFormat: String { get }
     var noteWriteMode: NoteWriteMode { get }
     var inboxFolderName: String { get }
-    var dailyEntryThemePreset: DailyEntryThemePreset { get }
     var markdownEntrySeparatorStyle: MarkdownEntrySeparatorStyle { get }
     func title(for section: NoteSection) -> String
     func header(for section: NoteSection) -> String
@@ -45,6 +44,7 @@ final class DailyNoteWriter {
         mode: DailyNoteSaveMode = .createNewEntry,
         documentTitle: String? = nil,
         fileTargetFolder: String? = nil,
+        thread: ThreadConfig? = nil,
         now: Date = Date()
     ) throws {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -61,8 +61,11 @@ final class DailyNoteWriter {
                 now: now
             )
         case .thread:
-            // Thread 模式将在后续 Task 中实现
-            throw DailyNoteWriterError.invalidTargetFolderPath
+            guard let thread = thread else {
+                throw DailyNoteWriterError.invalidTargetFolderPath
+            }
+            let threadWriter = ThreadWriter(settings: settings)
+            try threadWriter.save(text: trimmedText, to: thread, mode: mode, now: now)
         }
     }
 

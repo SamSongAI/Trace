@@ -388,6 +388,7 @@ private struct TestSettings: DailyNoteSettingsProviding {
     }
     var dailyEntryThemePreset: DailyEntryThemePreset = .plainTextTimestamp
     var markdownEntrySeparatorStyle: MarkdownEntrySeparatorStyle = .horizontalRule
+    var threadVaultPath: String { vaultPath }
 
     func title(for section: NoteSection) -> String {
         section.title
