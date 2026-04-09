@@ -180,15 +180,14 @@ struct CaptureView: View {
 
     private var threadButtons: some View {
         LazyVGrid(columns: threadGridColumns, spacing: sectionGridSpacing) {
-            ForEach(settings.threadConfigs.sorted(by: { $0.order < $1.order })) { thread in
+            ForEach(Array(settings.threadConfigs.sorted(by: { $0.order < $1.order }).enumerated()), id: \.element.id) { index, thread in
                 Button {
                     viewModel.selectedThread = thread
                 } label: {
                     HStack(spacing: 4) {
-                        if let icon = thread.icon {
-                            Image(systemName: icon)
-                                .font(.system(size: 11))
-                        }
+                        Text("\(index + 1)")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(viewModel.selectedThread?.id == thread.id ? theme.selectedText.opacity(0.7) : theme.textSecondary.opacity(0.5))
                         Text(thread.name)
                             .lineLimit(1)
                     }

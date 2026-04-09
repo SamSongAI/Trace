@@ -159,9 +159,18 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
                     viewModel.pinned.toggle()
                     return nil
                 }
-                if let section = selectSection(forShortcutKey: key) {
-                    viewModel.selectedSection = section
-                    return nil
+                // Thread mode: Command+number switches threads
+                if settings.noteWriteMode == .thread {
+                    if let thread = selectThread(forShortcutKey: key) {
+                        viewModel.selectedThread = thread
+                        return nil
+                    }
+                } else {
+                    // Daily mode: Command+number switches sections
+                    if let section = selectSection(forShortcutKey: key) {
+                        viewModel.selectedSection = section
+                        return nil
+                    }
                 }
                 return event
             }
@@ -360,6 +369,19 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
         }
 
         return settings.section(atShortcutIndex: shortcutNumber - 1)
+    }
+
+    private func selectThread(forShortcutKey key: String) -> ThreadConfig? {
+        guard let shortcutNumber = Int(key), shortcutNumber >= 1 else {
+            return nil
+        }
+
+        let sortedThreads = settings.threadConfigs.sorted(by: { $0.order < $1.order })
+        guard sortedThreads.indices.contains(shortcutNumber - 1) else {
+            return nil
+        }
+
+        return sortedThreads[shortcutNumber - 1]
     }
 
     func windowDidMove(_ notification: Notification) {

@@ -564,10 +564,10 @@ final class AppSettings: ObservableObject {
 
     private static var defaultThreadConfigs: [ThreadConfig] {
         [
-            ThreadConfig(name: "想法", targetFile: "Threads/想法.md", icon: "lightbulb", order: 0),
-            ThreadConfig(name: "读书笔记", targetFile: "Threads/读书笔记.md", icon: "book", order: 1),
-            ThreadConfig(name: "产品设计", targetFile: "Threads/产品设计.md", icon: "pencil", order: 2),
-            ThreadConfig(name: "技术研究", targetFile: "Threads/技术研究.md", icon: "cpu", order: 3)
+            ThreadConfig(name: "想法", targetFile: "想法.md", order: 0),
+            ThreadConfig(name: "读书笔记", targetFile: "读书笔记.md", order: 1),
+            ThreadConfig(name: "产品设计", targetFile: "产品设计.md", order: 2),
+            ThreadConfig(name: "技术研究", targetFile: "技术研究.md", order: 3)
         ]
     }
 
@@ -659,9 +659,28 @@ final class AppSettings: ObservableObject {
 
     func addThread(name: String, targetFile: String, icon: String? = nil) {
         let maxOrder = threadConfigs.map(\.order).max() ?? 0
+
+        // Auto-increment name if duplicate
+        var finalName = name
+        var sequence = 1
+        let baseName = name
+        while threadConfigs.contains(where: { $0.name == finalName }) {
+            sequence += 1
+            finalName = "\(baseName)\(sequence)"
+        }
+
+        // Auto-increment filename if duplicate
+        var finalTargetFile = targetFile
+        var fileSequence = 1
+        let baseFileName = targetFile.replacingOccurrences(of: ".md", with: "")
+        while threadConfigs.contains(where: { $0.targetFile == finalTargetFile }) {
+            fileSequence += 1
+            finalTargetFile = "\(baseFileName)\(fileSequence).md"
+        }
+
         let config = ThreadConfig(
-            name: name,
-            targetFile: targetFile,
+            name: finalName,
+            targetFile: finalTargetFile,
             icon: icon,
             order: maxOrder + 1
         )

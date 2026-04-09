@@ -500,7 +500,7 @@ struct SettingsView: View {
                             Button {
                                 settings.addThread(
                                     name: L10n.newThreadDefaultName,
-                                    targetFile: "Threads/\(L10n.newThreadDefaultName).md"
+                                    targetFile: "\(L10n.newThreadDefaultName).md"
                                 )
                             } label: {
                                 Label(L10n.addThread, systemImage: "plus")
