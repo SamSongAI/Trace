@@ -112,11 +112,6 @@ The name changed because the mission became clearer. This isn't about "flash not
 Built by **Sam Song**.
 
 - X / Twitter: [@SamSongAI](https://twitter.com/SamSongAI)
-- WeChat: scan to connect 👇
-
-<p align="center">
-  <img src="Sources/Trace/Resources/wechat-qr.jpg" width="200" alt="WeChat QR" />
-</p>
 
 ## License
 

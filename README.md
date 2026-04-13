@@ -116,11 +116,6 @@ Trace 的前身是 [ObsidianFlashNote](https://github.com/SamSongAI/ObsidianFlas
 作者：**Sam Song**
 
 - X / Twitter: [@SamSongAI](https://twitter.com/SamSongAI)
-- WeChat: 扫码添加 👇
-
-<p align="center">
-  <img src="Sources/Trace/Resources/wechat-qr.jpg" width="200" alt="WeChat QR" />
-</p>
 
 ## License
 
