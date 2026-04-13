@@ -16,3 +16,19 @@ dist/
 
 # === Development only ===
 CLAUDE.md
+
+# === Private / Local documents ===
+PRD.md
+Threads.md
+*_PRD.md
+*_local.md
+docs/*.md
+!docs/README.md
+
+# === Personal assets ===
+个人微信二维码.jpg
+*.wechat.jpg
+*.personal.jpg
+*.private.jpg
+*.qrcode.jpg
+*.qrcode.png
