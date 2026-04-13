@@ -22,12 +22,16 @@ struct ThreadConfig: Identifiable, Codable, Equatable {
     }
 
     static func == (lhs: ThreadConfig, rhs: ThreadConfig) -> Bool {
-        lhs.id == rhs.id
+        lhs.id == rhs.id &&
+        lhs.name == rhs.name &&
+        lhs.targetFile == rhs.targetFile &&
+        lhs.icon == rhs.icon &&
+        lhs.order == rhs.order
     }
 
     static let `default` = ThreadConfig(
         name: "想法",
-        targetFile: "Threads/想法.md",
+        targetFile: "想法.md",
         icon: "lightbulb"
     )
 }

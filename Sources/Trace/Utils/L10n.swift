@@ -48,7 +48,7 @@ enum L10n {
     // MARK: - Settings Buttons
 
     static var browse: String { s("选择", "選択", "Browse") }
-    static var chooseFolder: String { s("选择文件夹", "フォルダを選択", "Choose Folder") }
+    static var chooseFolder: String { s("指定位置", "場所を指定", "Set Location") }
     static var addSection: String { s("新增模块", "セクションを追加", "Add Section") }
     static var save: String { s("保存", "保存", "Save") }
     static var deleteSection: String { s("删除模块", "セクションを削除", "Delete Section") }
@@ -63,7 +63,12 @@ enum L10n {
     static var shortcutToggleMode: String { s("切换写入模式", "書き込みモード切替", "Toggle Write Mode") }
     static var shortcutClosePanel: String { s("关闭面板", "パネルを閉じる", "Close Panel") }
     static var shortcutPinPanel: String { s("固定面板", "パネルを固定", "Pin Panel") }
-    static var shortcutSwitchSection: String { s("切换模块", "セクション切替", "Switch Section") }
+    static var shortcutSwitchSection: String { s("切换模块/线程", "セクション/スレッド切替", "Switch Section/Thread") }
+
+    // MARK: - Shortcut Categories
+
+    static var shortcutCategoryGlobal: String { s("全局", "グローバル", "Global") }
+    static var shortcutCategoryPanel: String { s("面板内", "パネル内", "Panel") }
 
     // MARK: - Shortcut Recorder
 
@@ -154,6 +159,9 @@ enum L10n {
     static var deleteThread: String { s("删除线程", "スレッドを削除", "Delete Thread") }
     static var threadName: String { s("名称", "名前", "Name") }
     static var threadTargetFile: String { s("目标文件路径", "対象ファイルパス", "Target file path") }
+    static var folderPath: String { s("文件夹", "フォルダ", "Folder") }
+    static var fileName: String { s("文件名", "ファイル名", "Filename") }
+    static var rootFolder: String { s("根目录", "ルート", "Root") }
 
     // MARK: - Entry Theme Presets
 

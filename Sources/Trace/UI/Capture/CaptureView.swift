@@ -145,14 +145,14 @@ struct CaptureView: View {
     }
 
     private var documentTitleField: some View {
-        TextField(L10n.documentTitlePlaceholder, text: $viewModel.fileTitle)
-            .textFieldStyle(.plain)
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(theme.textPrimary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(theme.surface.opacity(0.8))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        ThemedTextField(
+            placeholder: L10n.documentTitlePlaceholder,
+            text: $viewModel.fileTitle,
+            textColor: theme.textPrimary,
+            font: .systemFont(ofSize: 13, weight: .medium),
+            backgroundColor: theme.surface
+        )
+        .frame(height: 38)
     }
 
     private var modeFooter: some View {
@@ -184,13 +184,8 @@ struct CaptureView: View {
                 Button {
                     viewModel.selectedThread = thread
                 } label: {
-                    HStack(spacing: 4) {
-                        Text("\(index + 1)")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(viewModel.selectedThread?.id == thread.id ? theme.selectedText.opacity(0.7) : theme.textSecondary.opacity(0.5))
-                        Text(thread.name)
-                            .lineLimit(1)
-                    }
+                    Text(thread.name)
+                        .lineLimit(1)
                     .font(.system(size: 12, weight: viewModel.selectedThread?.id == thread.id ? .semibold : .medium))
                     .foregroundStyle(viewModel.selectedThread?.id == thread.id ? theme.selectedText : theme.textSecondary)
                     .padding(.horizontal, 8)
@@ -297,6 +292,61 @@ struct CaptureView: View {
     private func focusInputSoon() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             inputFocused = true
+        }
+    }
+}
+
+// MARK: - Themed TextField
+
+private struct ThemedTextField: NSViewRepresentable {
+    let placeholder: String
+    @Binding var text: String
+    let textColor: Color
+    let font: NSFont
+    let backgroundColor: Color
+
+    func makeNSView(context: Context) -> NSTextField {
+        let textField = NSTextField()
+        textField.isBordered = false
+        textField.drawsBackground = true
+        textField.backgroundColor = NSColor(backgroundColor).withAlphaComponent(0.8)
+        textField.textColor = NSColor(textColor)
+        textField.font = font
+        textField.placeholderString = placeholder
+        textField.delegate = context.coordinator
+        textField.layer?.cornerRadius = 8
+        textField.layer?.masksToBounds = true
+
+        // Add padding
+        textField.cell?.usesSingleLineMode = true
+        textField.cell?.wraps = false
+        textField.cell?.isScrollable = true
+
+        return textField
+    }
+
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+        nsView.textColor = NSColor(textColor)
+        nsView.backgroundColor = NSColor(backgroundColor).withAlphaComponent(0.8)
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    class Coordinator: NSObject, NSTextFieldDelegate {
+        @Binding var text: String
+
+        init(text: Binding<String>) {
+            _text = text
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard let textField = obj.object as? NSTextField else { return }
+            text = textField.stringValue
         }
     }
 }

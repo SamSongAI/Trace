@@ -1,7 +1,7 @@
 import Foundation
 
 protocol ThreadSettingsProviding {
-    var threadVaultPath: String { get }
+    var vaultPath: String { get }
     var dailyEntryThemePreset: DailyEntryThemePreset { get }
 }
 
@@ -20,6 +20,7 @@ enum ThreadWriterError: LocalizedError, Equatable {
 final class ThreadWriter {
     private let settings: ThreadSettingsProviding
     private let fileManager: FileManager
+    private let coordinator = NSFileCoordinator(filePresenter: nil)
 
     init(settings: ThreadSettingsProviding, fileManager: FileManager = .default) {
         self.settings = settings
@@ -38,49 +39,96 @@ final class ThreadWriter {
         let fileURL = try threadFileURL(for: thread)
         try ensureDirectoryExists(at: fileURL.deletingLastPathComponent())
 
-        let content = try loadOrCreateContent(for: fileURL)
-        let updated: String
+        // Use file coordinator for thread-safe access
+        var nsError: NSError?
+        var writeError: Error?
+        coordinator.coordinate(writingItemAt: fileURL, options: .forMerging, error: &nsError) { url in
+            do {
+                let content = try loadOrCreateContent(for: url)
+                let updated: String
 
-        switch mode {
-        case .createNewEntry:
-            updated = append(entryForText(trimmedText, at: now), to: content, for: thread)
-        case .appendToLatestEntry:
-            if let appended = tryAppendToLatestEntry(trimmedText, at: now, into: content) {
-                updated = appended
-            } else {
-                updated = append(entryForText(trimmedText, at: now), to: content, for: thread)
+                switch mode {
+                case .createNewEntry:
+                    updated = append(entryForText(trimmedText, at: now), to: content, for: thread)
+                case .appendToLatestEntry:
+                    if let appended = tryAppendToLatestEntry(trimmedText, at: now, into: content) {
+                        updated = appended
+                    } else {
+                        updated = append(entryForText(trimmedText, at: now), to: content, for: thread)
+                    }
+                }
+
+                try updated.write(to: url, atomically: true, encoding: .utf8)
+            } catch {
+                writeError = error
             }
         }
 
-        try updated.write(to: fileURL, atomically: true, encoding: .utf8)
+        if let error = writeError ?? nsError {
+            throw error
+        }
     }
 
     func threadFileURL(for thread: ThreadConfig) throws -> URL {
         let vaultURL = try vaultURL()
         let normalizedPath = thread.targetFile
             .replacingOccurrences(of: "\\", with: "/")
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !normalizedPath.isEmpty else {
             throw ThreadWriterError.invalidTargetFilePath
         }
 
-        // Security: prevent path traversal
-        let components = normalizedPath.split(separator: "/").map(String.init)
+        // Handle absolute path (outside vault)
+        if normalizedPath.hasPrefix("/") {
+            // Security: resolve symlinks and check for path traversal
+            let fileURL = URL(fileURLWithPath: normalizedPath, isDirectory: false)
+            let resolvedURL = fileURL.resolvingSymlinksInPath()
+            let resolvedPath = resolvedURL.path
+
+            // Security: verify no ".." components in the original path
+            let components = normalizedPath.split(separator: "/").map(String.init)
+            for component in components {
+                if component == "." || component == ".." || component.isEmpty {
+                    throw ThreadWriterError.invalidTargetFilePath
+                }
+            }
+
+            // Ensure .md extension
+            let finalPath = resolvedPath.hasSuffix(".md") ? resolvedPath : "\(resolvedPath).md"
+            return URL(fileURLWithPath: finalPath, isDirectory: false)
+        }
+
+        // Handle relative path (within vault)
+        let fileURL = vaultURL.appendingPathComponent(normalizedPath, isDirectory: false)
+        let resolvedURL = fileURL.resolvingSymlinksInPath()
+        let resolvedVaultURL = vaultURL.resolvingSymlinksInPath()
+
+        // Ensure resolved path is within vault
+        let resolvedPath = resolvedURL.path
+        let vaultPath = resolvedVaultURL.path
+
+        guard resolvedPath.hasPrefix(vaultPath + "/") || resolvedPath == vaultPath else {
+            throw ThreadWriterError.invalidTargetFilePath
+        }
+
+        // Security: verify no ".." components after resolution
+        let relativePath = String(resolvedPath.dropFirst(vaultPath.count))
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let components = relativePath.split(separator: "/").map(String.init)
         for component in components {
-            if component == "." || component == ".." {
+            if component == "." || component == ".." || component.isEmpty {
                 throw ThreadWriterError.invalidTargetFilePath
             }
         }
 
         // Ensure .md extension
-        let fileName = normalizedPath.hasSuffix(".md") ? normalizedPath : "\(normalizedPath).md"
-
-        return vaultURL.appendingPathComponent(fileName, isDirectory: false)
+        let finalPath = resolvedPath.hasSuffix(".md") ? resolvedPath : "\(resolvedPath).md"
+        return URL(fileURLWithPath: finalPath, isDirectory: false)
     }
 
     private func vaultURL() throws -> URL {
-        let trimmedVaultPath = settings.threadVaultPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedVaultPath = settings.vaultPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedVaultPath.isEmpty else {
             throw ThreadWriterError.invalidVaultPath
         }

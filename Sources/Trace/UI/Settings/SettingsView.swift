@@ -18,6 +18,14 @@ private enum ShortcutTarget {
         case .toggleWriteMode: return L10n.shortcutToggleMode
         }
     }
+
+    var category: String? {
+        switch self {
+        case .create: return L10n.shortcutCategoryGlobal
+        case .send, .append: return L10n.shortcutCategoryPanel
+        case .toggleWriteMode: return L10n.shortcutCategoryPanel
+        }
+    }
 }
 
 // MARK: - Section Card (simplified)
@@ -86,34 +94,6 @@ private struct SettingRow<Content: View>: View {
             content
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-    }
-}
-
-// MARK: - Field modifier
-
-private struct SettingsFieldChrome: ViewModifier {
-    let palette: SettingsPalette
-
-    func body(content: Content) -> some View {
-        content
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(palette.fieldText)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(palette.fieldBackground)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(palette.fieldBorder, lineWidth: 1)
-            )
-    }
-}
-
-private extension View {
-    func settingsFieldChrome(_ palette: SettingsPalette) -> some View {
-        modifier(SettingsFieldChrome(palette: palette))
     }
 }
 
@@ -429,32 +409,11 @@ struct SettingsView: View {
                             }
                         }
 
-                        if settings.noteWriteMode == .thread {
-                            SettingRow(label: L10n.vault, hint: L10n.vaultHintThread, palette: palette) {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack(spacing: 8) {
-                                        TextField("/Users/you/Vault", text: $settings.threadVaultPath)
-                                            .textFieldStyle(.plain)
-                                            .settingsFieldChrome(palette)
-
-                                        Button(L10n.browse) {
-                                            chooseFolderPath(binding: $settings.threadVaultPath)
-                                        }
-                                        .buttonStyle(SettingsPrimaryButtonStyle(palette: palette))
-                                    }
-
-                                    if let issue = settings.threadVaultPathValidationIssue {
-                                        Text(issue.message)
-                                            .font(.system(size: 11, weight: .medium))
-                                            .foregroundStyle(palette.warningText)
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
 
-                // Modules
+                // Modules (only for Daily mode)
+                if settings.noteWriteMode == .dimension {
                 SectionCard(title: L10n.quickSections, palette: palette) {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(settings.sections) { section in
@@ -484,10 +443,35 @@ struct SettingsView: View {
                         }
                     }
                 }
+                }
 
-                // Thread Management
+                // Thread Management (only for Thread mode)
+                if settings.noteWriteMode == .thread {
                 SectionCard(title: L10n.threadManagement, palette: palette) {
                     VStack(alignment: .leading, spacing: 8) {
+                        // Column headers
+                        HStack(spacing: 8) {
+                            Text(L10n.threadName)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(palette.mutedText)
+                                .frame(width: 100, alignment: .leading)
+
+                            Text(L10n.folderPath)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(palette.mutedText)
+                                .frame(minWidth: 380, maxWidth: .infinity, alignment: .leading)
+
+                            Text(L10n.fileName)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(palette.mutedText)
+                                .frame(width: 120, alignment: .leading)
+
+                            // Delete button placeholder
+                            Color.clear
+                                .frame(width: 28)
+                        }
+                        .padding(.bottom, 4)
+
                         ForEach(settings.threadConfigs.sorted(by: { $0.order < $1.order })) { thread in
                             ThreadConfigRow(
                                 thread: thread,
@@ -498,10 +482,7 @@ struct SettingsView: View {
 
                         HStack {
                             Button {
-                                settings.addThread(
-                                    name: L10n.newThreadDefaultName,
-                                    targetFile: "\(L10n.newThreadDefaultName).md"
-                                )
+                                settings.addThread()
                             } label: {
                                 Label(L10n.addThread, systemImage: "plus")
                             }
@@ -516,6 +497,7 @@ struct SettingsView: View {
                             .buttonStyle(SettingsPrimaryButtonStyle(palette: palette))
                         }
                     }
+                }
                 }
 
                 // Shortcuts
@@ -543,15 +525,24 @@ struct SettingsView: View {
 
                 // System
                 SectionCard(title: L10n.system, palette: palette) {
-                    HStack {
-                        Text(L10n.launchAtLogin)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(palette.sectionTitle)
-                        Spacer()
-                        Toggle("", isOn: $settings.launchAtLogin)
-                            .labelsHidden()
-                            .toggleStyle(.switch)
-                            .tint(palette.accent)
+                    VStack(spacing: 12) {
+                        HStack {
+                            Text(L10n.launchAtLogin)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(palette.sectionTitle)
+                            Spacer()
+                            Toggle("", isOn: $settings.launchAtLogin)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .tint(palette.accent)
+                        }
+
+                        HStack {
+                            Spacer()
+                            Text("Trace v\(BrandAssets.version)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(palette.mutedText)
+                        }
                     }
                 }
             }
@@ -561,7 +552,7 @@ struct SettingsView: View {
         }
         .scrollIndicators(.hidden)
         .background(shellBackground)
-        .frame(width: 520, height: 720)
+        .frame(minWidth: 900, minHeight: 720)
         .onDisappear {
             stopRecording(clearMessage: false)
         }
@@ -575,10 +566,17 @@ struct SettingsView: View {
         let isRecording = recordingTarget == target
 
         HStack(spacing: 0) {
-            Text(target.name)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(palette.sectionTitle)
-                .frame(width: 100, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                if let category = target.category {
+                    Text(category)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(palette.mutedText)
+                }
+                Text(target.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(palette.sectionTitle)
+            }
+            .frame(width: 100, alignment: .leading)
 
             Text(isRecording ? L10n.recording : currentShortcut.displayLabel)
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
@@ -815,81 +813,34 @@ private struct SectionTitleRow: View {
     }
 }
 
-// MARK: - Thread Config Row
+// MARK: - Settings Field Chrome
 
-private struct ThreadConfigRow: View {
-    let thread: ThreadConfig
-    @ObservedObject var settings: AppSettings
+private struct SettingsFieldChrome: ViewModifier {
     let palette: SettingsPalette
 
-    @State private var nameDraft: String = ""
-    @State private var fileDraft: String = ""
-    @FocusState private var isNameFocused: Bool
-    @FocusState private var isFileFocused: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            TextField(L10n.threadName, text: $nameDraft)
-                .textFieldStyle(.plain)
-                .settingsFieldChrome(palette)
-                .focused($isNameFocused)
-                .onSubmit { commitName() }
-                .onChange(of: isNameFocused) { focused in
-                    if !focused { commitName() }
-                }
-                .frame(width: 120)
-
-            TextField(L10n.threadTargetFile, text: $fileDraft)
-                .textFieldStyle(.plain)
-                .settingsFieldChrome(palette)
-                .focused($isFileFocused)
-                .onSubmit { commitFile() }
-                .onChange(of: isFileFocused) { focused in
-                    if !focused { commitFile() }
-                }
-
-            Button {
-                settings.removeThread(thread)
-            } label: {
-                Image(systemName: "minus.circle.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(settings.canRemoveThread ? palette.warningText : palette.mutedText)
-            }
-            .buttonStyle(.plain)
-            .help(L10n.deleteThread)
-            .disabled(!settings.canRemoveThread)
-        }
-        .onAppear {
-            nameDraft = thread.name
-            fileDraft = thread.targetFile
-        }
-        .onChange(of: settings.threadConfigs) { _ in
-            if !isNameFocused && !isFileFocused {
-                nameDraft = thread.name
-                fileDraft = thread.targetFile
-            }
-        }
-    }
-
-    private func commitName() {
-        let trimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            nameDraft = thread.name
-        } else {
-            var updated = thread
-            updated.name = trimmed
-            settings.updateThread(updated)
-        }
-    }
-
-    private func commitFile() {
-        let trimmed = fileDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            fileDraft = thread.targetFile
-        } else {
-            var updated = thread
-            updated.targetFile = trimmed
-            settings.updateThread(updated)
-        }
+    func body(content: Content) -> some View {
+        content
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(palette.fieldText)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(palette.fieldBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(palette.fieldBorder, lineWidth: 1)
+            )
     }
 }
+
+private extension View {
+    func settingsFieldChrome(_ palette: SettingsPalette) -> some View {
+        modifier(SettingsFieldChrome(palette: palette))
+    }
+}
+
+// MARK: - Thread Config Row
+
+// ThreadConfigRow is defined in ThreadConfigRow.swift

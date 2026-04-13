@@ -56,7 +56,6 @@ enum SettingKeys {
     static let inboxVaultPath = "trace.inboxVaultPath"
     static let threadConfigs = "trace.threadConfigs"
     static let lastUsedThreadId = "trace.lastUsedThreadId"
-    static let threadVaultPath = "trace.threadVaultPath"
 }
 
 enum LegacySettingKeys {
@@ -92,8 +91,8 @@ enum LegacySettingKeys {
 
 enum NoteWriteMode: String, CaseIterable, Identifiable {
     case dimension
-    case file
     case thread
+    case file
 
     var id: String { rawValue }
 
@@ -150,17 +149,17 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
 
     func next() -> NoteWriteMode {
         switch self {
-        case .dimension: return .file
-        case .file: return .thread
-        case .thread: return .dimension
+        case .dimension: return .thread
+        case .thread: return .file
+        case .file: return .dimension
         }
     }
 
     func previous() -> NoteWriteMode {
         switch self {
-        case .dimension: return .thread
-        case .file: return .dimension
-        case .thread: return .file
+        case .dimension: return .file
+        case .thread: return .dimension
+        case .file: return .thread
         }
     }
 }
@@ -448,12 +447,6 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    @Published var threadVaultPath: String {
-        didSet {
-            defaults.set(threadVaultPath, forKey: SettingKeys.threadVaultPath)
-        }
-    }
-
     var lastUsedSectionIndex: Int {
         get { defaults.integer(forKey: SettingKeys.lastUsedSectionIndex) }
         set { defaults.set(newValue, forKey: SettingKeys.lastUsedSectionIndex) }
@@ -557,7 +550,6 @@ final class AppSettings: ObservableObject {
         } else {
             threadConfigs = Self.defaultThreadConfigs
         }
-        threadVaultPath = defaults.string(forKey: SettingKeys.threadVaultPath) ?? ""
 
         normalizePanelShortcutCollisionsIfNeeded()
     }
@@ -623,30 +615,6 @@ final class AppSettings: ObservableObject {
         inboxVaultPathValidationIssue == nil
     }
 
-    var hasValidThreadVaultPath: Bool {
-        threadVaultPathValidationIssue == nil
-    }
-
-    var threadVaultPathValidationIssue: VaultPathValidationIssue? {
-        let trimmedPath = threadVaultPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPath.isEmpty else { return .empty }
-
-        var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: trimmedPath, isDirectory: &isDirectory) else {
-            return .doesNotExist
-        }
-
-        guard isDirectory.boolValue else {
-            return .notDirectory
-        }
-
-        guard fileManager.isWritableFile(atPath: trimmedPath) else {
-            return .notWritable
-        }
-
-        return nil
-    }
-
     var defaultThread: ThreadConfig? {
         let savedId = defaults.string(forKey: SettingKeys.lastUsedThreadId)
         if let savedId = savedId,
@@ -657,26 +625,22 @@ final class AppSettings: ObservableObject {
         return threadConfigs.first
     }
 
-    func addThread(name: String, targetFile: String, icon: String? = nil) {
+    func addThread(name: String? = nil, targetFile: String? = nil, icon: String? = nil) {
         let maxOrder = threadConfigs.map(\.order).max() ?? 0
+        let baseName = name ?? L10n.newThreadDefaultName
 
-        // Auto-increment name if duplicate
-        var finalName = name
         var sequence = 1
-        let baseName = name
-        while threadConfigs.contains(where: { $0.name == finalName }) {
-            sequence += 1
-            finalName = "\(baseName)\(sequence)"
-        }
+        var finalName = baseName
+        var finalTargetFile: String
 
-        // Auto-increment filename if duplicate
-        var finalTargetFile = targetFile
-        var fileSequence = 1
-        let baseFileName = targetFile.replacingOccurrences(of: ".md", with: "")
-        while threadConfigs.contains(where: { $0.targetFile == finalTargetFile }) {
-            fileSequence += 1
-            finalTargetFile = "\(baseFileName)\(fileSequence).md"
-        }
+        repeat {
+            if sequence > 1 {
+                finalName = "\(baseName)\(sequence)"
+            }
+            let folderName = sequence == 1 ? baseName : "\(baseName)\(sequence)"
+            finalTargetFile = "\(folderName)/Threads.md"
+            sequence += 1
+        } while threadConfigs.contains(where: { $0.name == finalName || $0.targetFile == finalTargetFile })
 
         let config = ThreadConfig(
             name: finalName,
@@ -693,7 +657,9 @@ final class AppSettings: ObservableObject {
 
     func updateThread(_ config: ThreadConfig) {
         if let index = threadConfigs.firstIndex(where: { $0.id == config.id }) {
-            threadConfigs[index] = config
+            var newConfigs = threadConfigs
+            newConfigs[index] = config
+            threadConfigs = newConfigs
         }
     }
 
