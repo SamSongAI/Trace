@@ -9,6 +9,12 @@ final class CapturePanel: NSPanel {
 }
 
 final class CapturePanelController: NSObject, NSWindowDelegate {
+    static let defaultPanelCollectionBehavior: NSWindow.CollectionBehavior = [
+        .canJoinAllSpaces,
+        .fullScreenAuxiliary,
+        .moveToActiveSpace
+    ]
+
     private let settings: AppSettings
     private let writer: DailyNoteWriter
     private lazy var clipboardImageWriter = ClipboardImageWriter(settings: settings)
@@ -83,7 +89,8 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
         panel.isMovableByWindowBackground = true
         panel.isFloatingPanel = true
         panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        // Keep the capture panel in the user's current Space instead of surfacing on the desktop.
+        panel.collectionBehavior = Self.defaultPanelCollectionBehavior
         panel.hidesOnDeactivate = !viewModel.pinned
         panel.delegate = self
 
