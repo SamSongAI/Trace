@@ -243,7 +243,7 @@ struct TraceTheme {
                 ),
                 editor: makeEditorTheme(
                     text: 0xF5F5F5,
-                    placeholder: 0x8F8F8F,
+                    placeholder: 0xB0B0B0,
                     insertion: 0xFFFFFF
                 ),
                 previewSwatches: [
