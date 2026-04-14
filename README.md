@@ -119,6 +119,7 @@ Trace 的前身是 [ObsidianFlashNote](https://github.com/SamSongAI/ObsidianFlas
 作者：**Sam Song**
 
 - X / Twitter: [@SamSongAI](https://twitter.com/SamSongAI)
+- Telegram: [Trace 交流群](https://t.me/+udvzWZVJtnZkYzg1)
 
 ## License
 
