@@ -52,15 +52,13 @@ export SESSION_SECRET='your-long-random-secret'
 ```bash
 ./scripts/trace.sh build-dmg
 ```
-2. Package download artifact:
-```bash
-./scripts/package-downloads.sh
-```
+2. Publish the release artifact to GitHub Releases.
 3. Update `website/release-data.js`:
 - `current.version`
 - `current.releasedAt`
 - `current.releaseTitle`
 - `current.notes`
+- `current.platforms.macos.url` to the GitHub Release asset or release page
 - `current.platforms.macos.sha256`
 - `current.platforms.windows.status/url/sha256`
 4. Append release item to `history`.

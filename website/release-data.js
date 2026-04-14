@@ -11,13 +11,13 @@ window.TRACE_SITE = {
     notes: [
       "修复了在全屏或非桌面界面下，通过快捷键唤起后捕获面板没有出现在当前界面的问题。",
       "暗色主题输入框占位文字提亮，保证界面可读性并恢复测试通过。",
-      "更新 macOS 下载包与站点版本信息，保持应用内版本、下载页和 GitHub Release 一致。"
+      "更新 macOS 发布信息，保持应用内版本、下载页和 GitHub Release 一致。"
     ],
     platforms: {
       macos: {
         status: "available",
         label: "Available",
-        url: "./downloads/Trace.dmg",
+        url: "https://github.com/SamSongAI/Trace/releases/download/v1.0.3/Trace.dmg",
         sha256: "fb708fe332075ce199b8f86336eb65ed767244a8d334a4f81e041f64332891f7",
         size: "612 KB",
         architecture: "Apple Silicon",
@@ -43,7 +43,7 @@ window.TRACE_SITE = {
       highlights: [
         "修复全屏或非桌面界面下，捕获面板未显示在当前界面的问题",
         "提亮暗色主题输入框占位文字，恢复可读性和测试稳定性",
-        "对齐应用版本、下载包和站点发布信息"
+        "对齐应用版本与 GitHub 发布信息"
       ]
     },
     {
