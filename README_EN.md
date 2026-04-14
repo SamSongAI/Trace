@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="#1-why-trace">Why</a> · <a href="#2-features">Features</a> · <a href="#3-use-with-obsidian">Obsidian Setup</a> · <a href="https://github.com/SamSongAI/Trace/releases/latest">Download</a> · <a href="README.md">中文</a>
+  <a href="#1-why-trace">Why</a> · <a href="#2-features">Features</a> · <a href="#3-use-with-obsidian">Obsidian Setup</a> · <a href="CHANGELOG.md">Changelog</a> · <a href="https://github.com/SamSongAI/Trace/releases/latest">Download</a> · <a href="README.md">中文</a>
 </p>
 
 ---

@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="#1-为什么做-trace">产品灵感</a> · <a href="#2-功能">功能</a> · <a href="#3-配合-obsidian-使用">Obsidian 配置</a> · <a href="https://github.com/SamSongAI/Trace/releases/latest">下载</a> · <a href="README_EN.md">English</a>
+  <a href="#1-为什么做-trace">产品灵感</a> · <a href="#2-功能">功能</a> · <a href="#3-配合-obsidian-使用">Obsidian 配置</a> · <a href="CHANGELOG.md">更新日志</a> · <a href="https://github.com/SamSongAI/Trace/releases/latest">下载</a> · <a href="README_EN.md">English</a>
 </p>
 
 ---
