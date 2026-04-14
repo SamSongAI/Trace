@@ -40,8 +40,9 @@ Any App  ──hotkey──▶  Trace Panel  ──⌘Enter──▶  Local .md 
 ```
 
 - **Global hotkey** — Summon the capture panel from any app, fully customizable
-- **Diary / Document mode** — Diary appends to today's file; Document creates a standalone .md. Toggle with `⇧Tab`
+- **Diary / Thread / Document mode** — Diary appends to today's file; Thread appends by topic to a chosen thread file; Document creates a standalone .md. Cycle modes with `⇧Tab`
 - **Custom categories** — Configurable buttons (e.g. "Ideas", "Tasks", "Links") that map to headings in your daily file
+- **Thread management** — Preconfigure thread targets for ongoing topics, projects, or problem tracks
 - **Separate paths** — Diary and documents can point to different folders
 - **Pin mode** — Panel stays open after save for rapid-fire capture
 - **Native macOS** — SwiftUI + AppKit. Not Electron, not a web wrapper
@@ -75,6 +76,8 @@ Match these with your Obsidian Daily Notes plugin:
 
 Once aligned, press `⌘D` in Obsidian to open today's note — you'll see what Trace just wrote.
 
+If you use Thread mode, you can also point thread files at any Markdown path inside the same vault, so diary entries, topic threads, and standalone documents can live in one local workflow.
+
 > Trace doesn't require Obsidian. Any local Markdown system (Logseq, Typora, iA Writer, etc.) works. Obsidian doesn't need to be running. No plugins required.
 
 ## 4. Keyboard Shortcuts
@@ -84,9 +87,9 @@ Once aligned, press `⌘D` in Obsidian to open today's note — you'll see what 
 | `⌘N` | Open capture panel (customizable) |
 | `⌘Enter` | Save |
 | `⌘⇧Enter` | Append to last entry |
-| `⇧Tab` | Toggle Diary / Document mode |
+| `⇧Tab` | Cycle Diary / Thread / Document mode |
 | `⌘P` | Toggle Pin mode |
-| `⌘1-9` | Switch categories |
+| `⌘1-9` | Switch categories or threads |
 | `Esc` | Dismiss |
 
 ## 5. Download
