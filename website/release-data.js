@@ -5,24 +5,22 @@ window.TRACE_SITE = {
     summary: "Trace 把一闪而过的想法变成可检索、可执行、可路由的 Markdown 痕迹。它是工作流里最薄的一层输入接口，而不是另一个封闭笔记箱。"
   },
   current: {
-    version: "0.1.0",
-    releasedAt: "2026-02-28",
-    releaseTitle: "Foundation Release",
+    version: "1.0.3",
+    releasedAt: "2026-04-14",
+    releaseTitle: "Active Space Fix",
     notes: [
-      "Trace 现在支持两条稳定落地路径：写入 Daily 分区，或直接新建 Inbox Markdown 文档。",
-      "默认捕捉结构升级为 Note / Clip / Link / Task / Project，让每条痕迹更容易被后续路由。",
-      "设置页与桌面界面完成层级化重构，输入层、主题和字段结构更清晰。",
-      "保存后清空逻辑修复，覆盖中文输入法组合态，降低高频捕捉时的误触风险。",
-      "Windows 客户端 MVP 已落地并开放候补，跨平台 Trace 工作流正在补齐。"
+      "修复了在全屏或非桌面界面下，通过快捷键唤起后捕获面板没有出现在当前界面的问题。",
+      "暗色主题输入框占位文字提亮，保证界面可读性并恢复测试通过。",
+      "更新 macOS 下载包与站点版本信息，保持应用内版本、下载页和 GitHub Release 一致。"
     ],
     platforms: {
       macos: {
         status: "available",
         label: "Available",
-        url: "./downloads/Trace-macOS-universal.zip",
-        sha256: "7fd6706539cfa94318818681b3b12109ff4d978d5c4c91961bba667bcdf15127",
-        size: "~163 KB",
-        architecture: "Apple Silicon + Intel",
+        url: "./downloads/Trace.dmg",
+        sha256: "fb708fe332075ce199b8f86336eb65ed767244a8d334a4f81e041f64332891f7",
+        size: "612 KB",
+        architecture: "Apple Silicon",
         minOS: "macOS 13+"
       },
       windows: {
@@ -38,6 +36,16 @@ window.TRACE_SITE = {
     }
   },
   history: [
+    {
+      version: "1.0.3",
+      releasedAt: "2026-04-14",
+      title: "Active Space Fix",
+      highlights: [
+        "修复全屏或非桌面界面下，捕获面板未显示在当前界面的问题",
+        "提亮暗色主题输入框占位文字，恢复可读性和测试稳定性",
+        "对齐应用版本、下载包和站点发布信息"
+      ]
+    },
     {
       version: "0.1.0",
       releasedAt: "2026-02-28",

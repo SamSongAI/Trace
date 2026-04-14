@@ -122,7 +122,7 @@ build_app_bundle() {
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.0.2</string>
+  <string>1.0.3</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>LSMinimumSystemVersion</key>
@@ -229,7 +229,7 @@ EOF
 build_dmg() {
   require_command hdiutil
 
-  [[ -d "${BUNDLE_DIR}" ]] || build_app_bundle
+  build_app_bundle
 
   prepare_dmg_staging
   rm -f "${DMG_RW_PATH}" "${DMG_PATH}"
