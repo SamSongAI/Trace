@@ -117,7 +117,7 @@ enum BrandAssets {
         let candidates: [URL?] = [
             Bundle.main.url(forResource: "Trace", withExtension: "icns"),
             Bundle.main.resourceURL?.appendingPathComponent("Trace.icns"),
-            Bundle.module.url(forResource: "Trace", withExtension: "icns")
+            AppResourceBundle.url(forResource: "Trace", withExtension: "icns")
         ]
 
         for candidate in candidates {
@@ -134,7 +134,7 @@ enum BrandAssets {
 
     private static func bundledPNG(named name: String) -> NSImage? {
         let candidates: [URL?] = [
-            Bundle.module.url(forResource: name, withExtension: "png"),
+            AppResourceBundle.url(forResource: name, withExtension: "png"),
             Bundle.main.url(forResource: name, withExtension: "png"),
             Bundle.main.resourceURL?.appendingPathComponent("\(name).png")
         ]
@@ -152,12 +152,12 @@ enum BrandAssets {
     }
 
     private static func moduleLogo() -> NSImage? {
-        if let svgURL = Bundle.module.url(forResource: "trace-app-icon", withExtension: "svg"),
+        if let svgURL = AppResourceBundle.url(forResource: "trace-app-icon", withExtension: "svg"),
            let svgImage = NSImage(contentsOf: svgURL) {
             return svgImage
         }
 
-        if let pngURL = Bundle.module.url(forResource: "logo", withExtension: "png"),
+        if let pngURL = AppResourceBundle.url(forResource: "logo", withExtension: "png"),
            let pngImage = NSImage(contentsOf: pngURL) {
             return pngImage
         }

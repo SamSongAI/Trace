@@ -10,9 +10,8 @@ final class CapturePanel: NSPanel {
 
 final class CapturePanelController: NSObject, NSWindowDelegate {
     static let defaultPanelCollectionBehavior: NSWindow.CollectionBehavior = [
-        .canJoinAllSpaces,
-        .fullScreenAuxiliary,
-        .moveToActiveSpace
+        .moveToActiveSpace,
+        .fullScreenAuxiliary
     ]
 
     private let settings: AppSettings
