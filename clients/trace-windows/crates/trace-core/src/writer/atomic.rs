@@ -1,5 +1,12 @@
 //! Atomic file writes.
 //!
+//! Provides an atomic-replace write primitive analogous to Swift's
+//! `String.write(to:atomically:true)`. Built on `std::fs::rename`, which on
+//! Windows (Rust ≥1.70) uses `MOVEFILE_REPLACE_EXISTING` semantics internally
+//! — a same-directory temp→final replace is atomic on NTFS. If a future bug
+//! surfaces on network drives or legacy FAT32, the platform-specific fix
+//! belongs in `trace-platform`, not here.
+//!
 //! Mac Trace uses `Data.write(to:options:.atomic)`, which writes to a
 //! temporary file in the same directory and then `rename(2)`s it over the
 //! target. We mirror the same semantics:
@@ -100,6 +107,7 @@ fn temp_sibling_path(target: &Path) -> PathBuf {
 
 /// RAII helper that deletes the temp file if the caller does not call
 /// `disarm()`. Prevents leaked temp files when a write fails mid-flight.
+#[must_use = "TempFileGuard must be bound to a variable; dropping it immediately will remove the temp file before the atomic write completes"]
 struct TempFileGuard {
     path: PathBuf,
     armed: bool,

@@ -1,5 +1,15 @@
 //! Path-traversal safety for user-provided relative paths.
 //!
+//! Vault-path containment checks. Provides path-escape protection by
+//! canonicalizing the existing prefix and re-resolving the rest lexically.
+//!
+//! **TOCTOU caveat**: checks happen before the writer opens the file. A
+//! concurrent mutation of an intermediate directory (e.g. replacing
+//! `vault/foo/` with a symlink after the check but before the write) can
+//! still escape. This matches the Mac version's threat model — Trace does
+//! not guard against a local attacker with write access to the user's own
+//! vault directory.
+//!
 //! Mac Trace relies on `URL.resolvingSymlinksInPath()` plus a manual prefix
 //! check (see `ThreadWriter.threadFileURL`). We reproduce the same contract in
 //! Rust: given a vault root and a user-supplied relative fragment, produce an
@@ -197,6 +207,24 @@ mod tests {
     fn allows_unicode_folder_names() {
         let resolved = resolve_within_vault(&vault(), "想法/note.md").unwrap();
         assert_eq!(resolved, PathBuf::from("/tmp/trace-vault/想法/note.md"));
+    }
+
+    #[test]
+    fn rejects_unc_path_windows() {
+        // On Windows this is a UNC server-share path; on Unix the backslashes
+        // are literal, but the normalize step rewrites `\\` → `//` and the
+        // resulting `//server/share/note.md` is rejected as absolute.
+        let err = resolve_within_vault(&vault(), "\\\\server\\share\\note.md").unwrap_err();
+        assert!(matches!(err, TraceError::PathEscapesVault(_)));
+    }
+
+    #[test]
+    fn rejects_extended_length_prefix() {
+        // Windows extended-length path prefix `\\?\C:\...`. Same logic: after
+        // separator normalization it becomes an absolute-like path and is
+        // rejected on both platforms.
+        let err = resolve_within_vault(&vault(), "\\\\?\\C:\\note.md").unwrap_err();
+        assert!(matches!(err, TraceError::PathEscapesVault(_)));
     }
 
     #[test]

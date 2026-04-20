@@ -1,5 +1,13 @@
 //! Swift `DateFormatter` pattern → chrono pattern translation.
 //!
+//! Translates a **bounded subset** of Swift Unicode TR 35 date-format
+//! patterns to chrono strftime patterns — only the tokens used by the five
+//! `MAC_DATE_FORMAT_PRESETS` constants. Tokens outside that bounded subset
+//! (e.g. `y` alone, `yyy`, `QQQ`, weekday-of-month, era) return
+//! `TraceError::UnsupportedDatePatternToken` by design; this crate is not a
+//! general-purpose TR 35 translator. If a new preset is ever added to Mac,
+//! it must be added to `MAC_DATE_FORMAT_PRESETS` here too, with a test.
+//!
 //! Mac Trace persists date format strings using Unicode TR 35 tokens
 //! (`yyyy`, `M`, `d`, `EEEE`, `MM`, `dd`). chrono uses strftime tokens
 //! (`%Y`, `%-m`, `%-d`, `%A`, `%m`, `%d`). To achieve byte-level output
@@ -428,5 +436,15 @@ mod tests {
                 "preset {preset} produced empty pattern"
             );
         }
+    }
+
+    #[test]
+    fn leap_year_feb_29_formats_correctly() {
+        // 2024-02-29 is a valid leap-year date and a Thursday. Using the full
+        // Chinese preset (year/month/day + weekday) verifies that the entire
+        // date pipeline handles Feb 29 without off-by-one errors.
+        let leap_day = NaiveDate::from_ymd_opt(2024, 2, 29).unwrap();
+        let out = format_date("yyyy M月d日 EEEE", &leap_day, Locale::ZhCn).unwrap();
+        assert_eq!(out, "2024 2月29日 星期四");
     }
 }

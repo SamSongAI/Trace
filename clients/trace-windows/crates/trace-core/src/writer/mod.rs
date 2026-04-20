@@ -22,7 +22,7 @@ pub struct WrittenNote {
     pub path: PathBuf,
     /// Number of bytes written to `path` (i.e. the total file size after the
     /// write completed, not merely the size of the new entry).
-    pub bytes_written: usize,
+    pub bytes_written: u64,
 }
 
 /// Common contract shared by all writers. Later sub-tasks add concrete
@@ -44,7 +44,7 @@ mod tests {
         fn write(&self, entry: &Entry) -> Result<WrittenNote, TraceError> {
             Ok(WrittenNote {
                 path: PathBuf::from("/tmp/trace/test.md"),
-                bytes_written: entry.content.len(),
+                bytes_written: entry.content.len() as u64,
             })
         }
     }

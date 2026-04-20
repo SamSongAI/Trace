@@ -41,8 +41,6 @@ pub fn sanitize_filename(raw: &str) -> Result<String, TraceError> {
         .map(|c| {
             if ILLEGAL_CHARS.contains(&c) || c.is_control() {
                 '-'
-            } else if c == '\n' || c == '\r' {
-                ' '
             } else {
                 c
             }
@@ -82,6 +80,10 @@ pub fn sanitize_filename_preserve_extension(
     }
 }
 
+// Whitespace and `-` share a single "run" — two whitespace chars collapse
+// to one `-`, and a whitespace adjacent to an existing `-` does not inject
+// a second `-`. This matches the Swift pipeline (`\s+ → -` then `-{2,}→-`)
+// in observable output; the single-pass implementation avoids a second scan.
 fn collapse_runs(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let mut last_was_dash = false;
@@ -208,5 +210,15 @@ mod tests {
     fn preserve_extension_works_without_extension() {
         let result = sanitize_filename_preserve_extension("note", None).unwrap();
         assert_eq!(result, "note");
+    }
+
+    #[test]
+    fn fullwidth_space_collapses_to_dash() {
+        // U+3000 ideographic space is part of `char::is_whitespace()` in Rust,
+        // matching Swift's `CharacterSet.whitespaces`. The normalizer must
+        // convert it to `-` rather than pass it through as a literal char.
+        let result = sanitize_filename("hello\u{3000}world").unwrap();
+        assert_eq!(result, "hello-world");
+        assert!(!result.contains('\u{3000}'));
     }
 }
