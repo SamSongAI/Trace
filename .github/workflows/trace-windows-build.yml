@@ -17,6 +17,32 @@ defaults:
     working-directory: clients/trace-windows
 
 jobs:
+  # Cheap static analysis gates. Runs on Linux because neither `cargo fmt` nor
+  # clippy on `trace-core` depends on Windows-only crates. Kept separate so
+  # formatting/lint failures fail fast without waiting on the full matrix.
+  lint:
+    name: fmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/trace-windows -> target
+
+      - name: cargo fmt --all --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy -p trace-core
+        run: cargo clippy -p trace-core --all-targets -- -D warnings
+
   # Cross-platform sanity check for the domain layer. `trace-core` deliberately
   # has no Windows dependencies so it must build and test on Linux too.
   core-tests:
