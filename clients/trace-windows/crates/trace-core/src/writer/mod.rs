@@ -7,6 +7,7 @@
 //! sibling sub-modules.
 
 pub mod atomic;
+pub mod clipboard_image;
 pub mod daily;
 pub mod file;
 pub mod thread;
@@ -19,6 +20,7 @@ use crate::error::TraceError;
 use crate::models::Entry;
 
 pub use atomic::write_atomic;
+pub use clipboard_image::{ClipboardImageWriter, ClipboardImageWriterSettings, ImageWritePlan};
 pub use daily::{DailyNoteSettings, DailyNoteWriter};
 pub use file::{FileWriter, FileWriterSettings};
 pub use thread::{ThreadSettings, ThreadWriter};

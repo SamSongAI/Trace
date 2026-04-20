@@ -23,6 +23,9 @@ pub enum TraceError {
     #[error("atomic write failed: {0}")]
     AtomicWriteFailed(String),
 
+    #[error("image encoding failed: {0}")]
+    ImageEncodingFailed(String),
+
     #[error("serialization failed: {0}")]
     SerializationFailed(#[from] serde_json::Error),
 
@@ -74,6 +77,15 @@ mod tests {
     fn display_formats_atomic_write_failed() {
         let err = TraceError::AtomicWriteFailed("rename aborted".into());
         assert_eq!(err.to_string(), "atomic write failed: rename aborted");
+    }
+
+    #[test]
+    fn display_formats_image_encoding_failed() {
+        let err = TraceError::ImageEncodingFailed("png encoder refused".into());
+        assert_eq!(
+            err.to_string(),
+            "image encoding failed: png encoder refused"
+        );
     }
 
     #[test]
