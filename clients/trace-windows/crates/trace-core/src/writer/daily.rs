@@ -134,6 +134,10 @@ impl<S: DailyNoteSettings> DailyNoteWriter<S> {
 
     fn validated_vault_path(&self) -> Result<PathBuf, TraceError> {
         let raw = self.settings.vault_path();
+        // `to_string_lossy` is only used for the blank-string check: non-UTF-8
+        // path bytes cannot equal `""` or pure whitespace after substitution,
+        // so lossy replacement here cannot flip a non-empty path into empty.
+        // The PathBuf we return below still carries the original bytes.
         let as_str = raw.to_string_lossy();
         if as_str.trim().is_empty() {
             return Err(TraceError::InvalidVaultPath(
@@ -207,7 +211,11 @@ fn load_or_empty(path: &Path) -> Result<String, TraceError> {
     match fs::read_to_string(path) {
         Ok(text) => Ok(text),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(e) => Err(TraceError::Io(e)),
+        Err(e) => {
+            let kind = e.kind();
+            let wrapped = std::io::Error::new(kind, format!("reading {}: {}", path.display(), e));
+            Err(TraceError::Io(wrapped))
+        }
     }
 }
 
@@ -365,7 +373,7 @@ mod tests {
         fs::write(&file_path, "# Note\n\n# Clip\n").unwrap();
 
         let section = NoteSection::new(1, "Clip");
-        writer
+        let _note = writer
             .save_new_entry("clip text", &section, now)
             .unwrap()
             .unwrap();
@@ -388,7 +396,7 @@ mod tests {
         fs::write(&file_path, "# Note\n\nmanual text\n").unwrap();
 
         let section = NoteSection::new(1, "Clip");
-        writer
+        let _note = writer
             .save_new_entry("new clip", &section, now)
             .unwrap()
             .unwrap();
@@ -602,7 +610,7 @@ mod tests {
         let t2 = fixed_time(2026, 4, 20, 12, 5);
         let section = NoteSection::new(0, "Note");
 
-        writer.save_new_entry("one", &section, t1).unwrap().unwrap();
+        let _first = writer.save_new_entry("one", &section, t1).unwrap().unwrap();
         let written = writer.save_new_entry("two", &section, t2).unwrap().unwrap();
 
         let actual = fs::read_to_string(&written.path).unwrap();

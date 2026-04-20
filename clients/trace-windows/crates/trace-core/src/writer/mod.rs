@@ -18,6 +18,7 @@ pub use daily::{DailyNoteSettings, DailyNoteWriter};
 /// Result of a successful note write. Callers use this to validate that the
 /// expected path was touched and to assert byte-length parity against the
 /// Mac implementation.
+#[must_use = "WrittenNote records the path and byte count of the write; drop it only if you are certain you need neither"]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WrittenNote {
     /// Absolute path of the file that was written.
