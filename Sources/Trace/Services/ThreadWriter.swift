@@ -147,23 +147,20 @@ final class ThreadWriter {
     }
 
     private func append(_ entry: String, to content: String, for thread: ThreadConfig) -> String {
-        var mutableContent = content
-
-        // If file is empty or doesn't have a header, add one
-        if mutableContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "# \(thread.name)\n\n\(entry)"
         }
 
-        // Ensure there's a blank line before new entry
-        if !mutableContent.hasSuffix("\n") {
-            mutableContent.append("\n")
-        }
-        if !mutableContent.hasSuffix("\n\n") {
-            mutableContent.append("\n")
+        // Place the newest entry right after the top-level heading so it appears at the top.
+        if let headingRange = content.range(of: #"(?m)^#\s+[^\n]*\n"#, options: .regularExpression) {
+            let heading = content[..<headingRange.upperBound]
+            let body = content[headingRange.upperBound...].drop(while: { $0 == "\n" })
+            return "\(heading)\n\(entry)\(body)"
         }
 
-        mutableContent.append(entry)
-        return mutableContent
+        // No heading found — synthesize one and keep the newest entry on top.
+        let body = content.drop(while: { $0 == "\n" })
+        return "# \(thread.name)\n\n\(entry)\(body)"
     }
 
     private func entryForText(_ text: String, at date: Date) -> String {
@@ -176,7 +173,6 @@ final class ThreadWriter {
             \(text)
             ```
 
-            ---
 
             """
         case .plainTextTimestamp:
@@ -185,7 +181,6 @@ final class ThreadWriter {
 
             \(text)
 
-            ---
 
             """
         case .markdownQuote:
@@ -200,39 +195,23 @@ final class ThreadWriter {
 
             \(quotedText)
 
-            ---
 
             """
         }
     }
 
     private func tryAppendToLatestEntry(_ text: String, at date: Date, into content: String) -> String? {
-        // Find the last entry and append to it
-        // Look for the last "---" separator and append before it
-        guard let lastSeparatorRange = content.range(of: "\n---\n", options: .backwards) else {
+        // Newest entry is the first "## " heading after the title (reverse chronological order).
+        // Insert the new block right before that heading so it becomes the new top entry.
+        guard let firstEntryRange = content.range(of: #"(?m)^##\s"#, options: .regularExpression) else {
             return nil
         }
 
-        let insertIndex = lastSeparatorRange.lowerBound
-
-        let appendedContent: String
-        switch settings.dailyEntryThemePreset {
-        case .codeBlockClassic:
-            appendedContent = "\n\n## \(timestamp(for: date))\n\n```\n\(text)\n```"
-        case .plainTextTimestamp:
-            appendedContent = "\n\n## \(timestamp(for: date))\n\n\(text)"
-        case .markdownQuote:
-            let quotedText = text
-                .components(separatedBy: .newlines)
-                .map { line in
-                    line.isEmpty ? ">" : "> \(line)"
-                }
-                .joined(separator: "\n")
-            appendedContent = "\n\n## \(timestamp(for: date))\n\n\(quotedText)"
-        }
+        let insertIndex = firstEntryRange.lowerBound
+        let newEntry = entryForText(text, at: date)
 
         var mutableContent = content
-        mutableContent.insert(contentsOf: appendedContent, at: insertIndex)
+        mutableContent.insert(contentsOf: newEntry, at: insertIndex)
         return mutableContent
     }
 
