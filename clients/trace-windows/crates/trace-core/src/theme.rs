@@ -105,8 +105,11 @@ pub struct CapturePalette {
     pub accent_strong: TraceColor,
     pub selected_surface: TraceColor,
     pub selected_text: TraceColor,
+    /// Text color Swift passes into `CaptureTextEditor.Theme`. Phase 10 derives the iced editor style from this.
     pub editor_text: TraceColor,
+    /// Placeholder color Swift passes into `CaptureTextEditor.Theme`. Phase 10 derives the iced editor style from this.
     pub editor_placeholder: TraceColor,
+    /// Insertion-point (caret) color Swift passes into `CaptureTextEditor.Theme`. Phase 10 derives the iced editor style from this.
     pub editor_insertion: TraceColor,
 }
 
@@ -157,9 +160,9 @@ pub struct TraceTheme {
 }
 
 impl TraceTheme {
-    /// Produces the full palette for a preset. Values are byte-identical to
-    /// `Sources/Trace/Utils/TraceTheme.swift` `TraceTheme.make(for:)`.
-    pub fn for_preset(preset: ThemePreset) -> Self {
+    /// Resolves the full palette for `preset`. Values are byte-identical to
+    /// `TraceTheme.make(for:)` in the Swift source.
+    pub const fn for_preset(preset: ThemePreset) -> Self {
         match preset {
             ThemePreset::Light => Self::light(),
             ThemePreset::Dark => Self::dark(),
@@ -727,5 +730,11 @@ mod tests {
             TraceTheme::for_preset(ThemePreset::Dune).preset,
             ThemePreset::Dune
         );
+    }
+
+    #[test]
+    fn for_preset_is_usable_in_const_context() {
+        const DARK: TraceTheme = TraceTheme::for_preset(ThemePreset::Dark);
+        assert_eq!(DARK, TraceTheme::for_preset(ThemePreset::Dark));
     }
 }
