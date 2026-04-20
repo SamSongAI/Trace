@@ -486,7 +486,12 @@ fn find_first_timestamp_line(section: &str) -> Option<Range<usize>> {
 
     while line_start < section.len() {
         let rel_break = bytes[line_start..].iter().position(|&b| b == b'\n');
-        let line_end = rel_break.map(|r| line_start + r).unwrap_or(section.len());
+        let line_end_with_cr = rel_break.map(|r| line_start + r).unwrap_or(section.len());
+        let line_end = if line_end_with_cr > line_start && bytes[line_end_with_cr - 1] == b'\r' {
+            line_end_with_cr - 1
+        } else {
+            line_end_with_cr
+        };
 
         if is_timestamp_line(&section[line_start..line_end]) {
             return Some(line_start..line_end);
@@ -1093,6 +1098,41 @@ mod tests {
     }
 
     #[test]
+    fn append_plain_text_handles_crlf_seed() {
+        // Regression: a CRLF-saved daily note (Windows-native or imported
+        // from Git-for-Windows) must still be recognised as having a prior
+        // timestamp line. If we failed to strip the `\r` before matching
+        // the 16-byte shape, the parser returned None and the writer
+        // silently fell back to `CreateNewEntry`, producing a duplicate
+        // `## HH:MM` block at the top instead of appending under the
+        // existing one.
+        let now = fixed_time(2026, 4, 20, 12, 5);
+        let section = NoteSection::new(0, "Note");
+        let seed = "# Note\r\n\r\nhello\r\n2026-04-20 12:00\r\n\r\n";
+
+        let (_tmp, actual) = run_save(
+            EntryTheme::PlainTextTimestamp,
+            Some(seed),
+            "follow up",
+            &section,
+            SaveMode::AppendToLatestEntry,
+            now,
+        );
+
+        // Existing CRLF bytes are preserved verbatim; the spliced chunk
+        // uses LF (matching Swift, whose `String(contentsOf:)` loads and
+        // writes bytes unchanged and whose appended chunk is LF-only).
+        let expected = concat!(
+            "# Note\r\n\r\n",
+            "hello\r\n",
+            "2026-04-20 12:00",
+            "\n---\nfollow up\n2026-04-20 12:05",
+            "\r\n\r\n",
+        );
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn append_plain_text_first_timestamp_wins_when_multiple() {
         // Two timestamps present. Swift's regex matches the first one
         // (earliest line offset), and we must mirror that — even if the
@@ -1464,6 +1504,19 @@ mod tests {
         // Suffix/prefix junk on the same line disqualifies it.
         assert_eq!(find_first_timestamp_line("2026-04-20 12:00 x\n"), None);
         assert_eq!(find_first_timestamp_line("x 2026-04-20 12:00\n"), None);
+    }
+
+    #[test]
+    fn find_first_timestamp_line_handles_crlf_line_endings() {
+        // Windows clipboard / existing CRLF-saved notes. Swift's `$` anchor
+        // matches before either `\n` or `\r\n`, so the parser must treat the
+        // trailing `\r` as part of the line terminator, not the content.
+        let section = "\r\nhello\r\n2026-04-20 12:00\r\n\r\n";
+        let r = find_first_timestamp_line(section).unwrap();
+        assert_eq!(&section[r.clone()], "2026-04-20 12:00");
+        // The returned range ends *before* the `\r`, so splicing a new chunk
+        // at `r.end` lands between the timestamp and the CRLF pair.
+        assert_eq!(&section[r.end..r.end + 2], "\r\n");
     }
 
     #[test]

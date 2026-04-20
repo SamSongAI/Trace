@@ -68,6 +68,7 @@ pub(crate) fn validated_vault_path(raw: &Path, label: &str) -> Result<PathBuf, T
 pub(crate) fn markdown_quote_body_thread(text: &str) -> String {
     text.split('\n')
         .map(|line| {
+            let line = line.strip_suffix('\r').unwrap_or(line);
             if line.is_empty() {
                 ">".to_string()
             } else {
@@ -139,5 +140,21 @@ mod tests {
             bytes_written: 10,
         };
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn markdown_quote_body_thread_strips_carriage_returns() {
+        // Swift's `components(separatedBy: .newlines)` splits on `\r\n`,
+        // `\r`, `\n`, NEL, LS, and PS. For the CRLF inputs most likely to
+        // arrive on Windows (pasted from Notepad / clipboard), the quoted
+        // output must not carry an embedded `\r` into `> line\r` — callers
+        // re-join with `\n` only.
+        assert_eq!(markdown_quote_body_thread("a\r\nb"), "> a\n> b");
+        assert_eq!(markdown_quote_body_thread("a\r\n\r\nb"), "> a\n>\n> b");
+        // A lone `\r` without a following `\n` is a legacy Mac line ending
+        // that Swift also treats as a separator, but our input path only
+        // produces `\n`/`\r\n` — we only need to guarantee no `\r` leaks
+        // into the quoted output for the CRLF case.
+        assert_eq!(markdown_quote_body_thread("trailing\r\n"), "> trailing\n>");
     }
 }
