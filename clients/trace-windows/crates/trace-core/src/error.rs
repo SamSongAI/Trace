@@ -14,6 +14,9 @@ pub enum TraceError {
     #[error("invalid filename: {0}")]
     InvalidFilename(String),
 
+    #[error("invalid target folder: {0}")]
+    InvalidTargetFolderPath(String),
+
     #[error("unsupported date pattern token: {0}")]
     UnsupportedDatePatternToken(String),
 
@@ -53,6 +56,12 @@ mod tests {
     fn display_formats_invalid_filename() {
         let err = TraceError::InvalidFilename("...".into());
         assert_eq!(err.to_string(), "invalid filename: ...");
+    }
+
+    #[test]
+    fn display_formats_invalid_target_folder_path() {
+        let err = TraceError::InvalidTargetFolderPath("..".into());
+        assert_eq!(err.to_string(), "invalid target folder: ..");
     }
 
     #[test]

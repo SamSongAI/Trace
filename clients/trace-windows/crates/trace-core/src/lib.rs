@@ -19,8 +19,8 @@ pub use paths::{
     translate_swift_pattern, Locale, MAC_DATE_FORMAT_PRESETS,
 };
 pub use writer::{
-    write_atomic, DailyNoteSettings, DailyNoteWriter, NoteWriter, SaveMode, ThreadSettings,
-    ThreadWriter, WrittenNote,
+    write_atomic, DailyNoteSettings, DailyNoteWriter, FileWriter, FileWriterSettings, NoteWriter,
+    SaveMode, ThreadSettings, ThreadWriter, WrittenNote,
 };
 
 /// Crate version, wired up here so downstream crates can display it.

@@ -8,6 +8,7 @@
 
 pub mod atomic;
 pub mod daily;
+pub mod file;
 pub mod thread;
 
 use std::path::PathBuf;
@@ -19,6 +20,7 @@ use crate::models::Entry;
 
 pub use atomic::write_atomic;
 pub use daily::{DailyNoteSettings, DailyNoteWriter};
+pub use file::{FileWriter, FileWriterSettings};
 pub use thread::{ThreadSettings, ThreadWriter};
 
 /// Save-mode enum shared by writers that support both "create a new entry"
