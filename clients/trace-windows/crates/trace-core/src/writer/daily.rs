@@ -24,7 +24,7 @@ use chrono::{DateTime, Utc};
 use crate::error::TraceError;
 use crate::models::{EntryTheme, NoteSection};
 use crate::paths::{date_format, resolve_within_vault};
-use crate::writer::{write_atomic, WrittenNote};
+use crate::writer::{markdown_quote_body_thread, timestamp, write_atomic, WrittenNote};
 
 /// Injectable configuration for the daily note writer.
 ///
@@ -158,12 +158,6 @@ impl<S: DailyNoteSettings> DailyNoteWriter<S> {
     }
 }
 
-/// Formats `now` as `yyyy-MM-dd HH:mm` in UTC. Locale-independent so this is
-/// byte-identical to Swift's `en_US_POSIX` formatter.
-fn timestamp(now: DateTime<Utc>) -> String {
-    now.format("%Y-%m-%d %H:%M").to_string()
-}
-
 /// Wraps an entry body in the trailing `\n\n` separator used by the Mac
 /// client. Two newlines produce a blank line between entries.
 fn markdown_entry(body: &str) -> String {
@@ -179,23 +173,8 @@ fn plain_text_body(text: &str, timestamp: &str) -> String {
 }
 
 fn markdown_quote_body(text: &str, timestamp: &str) -> String {
-    let quoted = quoted_text(text);
+    let quoted = markdown_quote_body_thread(text);
     format!("{quoted}\n>\n> {timestamp}")
-}
-
-/// Prefixes every line with `>` (empty lines become a bare `>`). Mirrors the
-/// Swift `quotedText(from:)` helper, splitting on Unix newlines only.
-fn quoted_text(text: &str) -> String {
-    text.split('\n')
-        .map(|line| {
-            if line.is_empty() {
-                ">".to_string()
-            } else {
-                format!("> {line}")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn normalized_folder_name(raw: &str, fallback: &str) -> String {
@@ -656,12 +635,12 @@ mod tests {
 
     #[test]
     fn quoted_text_handles_blank_lines() {
-        assert_eq!(quoted_text("a\n\nb"), "> a\n>\n> b");
+        assert_eq!(markdown_quote_body_thread("a\n\nb"), "> a\n>\n> b");
     }
 
     #[test]
     fn quoted_text_single_line() {
-        assert_eq!(quoted_text("hello"), "> hello");
+        assert_eq!(markdown_quote_body_thread("hello"), "> hello");
     }
 
     // ---------------------------------------------------------------------
