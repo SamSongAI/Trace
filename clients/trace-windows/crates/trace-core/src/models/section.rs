@@ -32,6 +32,9 @@ impl NoteSection {
     }
 }
 
+// Sections are identified by their slot index, not their display title.
+// Two sections with the same index are equal even if titles differ, so
+// renames (via settings) do not break collections keyed on section identity.
 impl PartialEq for NoteSection {
     fn eq(&self, other: &Self) -> bool {
         self.index == other.index

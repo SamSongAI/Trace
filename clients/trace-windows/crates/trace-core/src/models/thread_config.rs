@@ -19,13 +19,7 @@ impl ThreadConfig {
         icon: Option<String>,
         order: i32,
     ) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            name: name.into(),
-            target_file: target_file.into(),
-            icon,
-            order,
-        }
+        Self::with_id(Uuid::new_v4(), name, target_file, icon, order)
     }
 
     pub fn with_id(
