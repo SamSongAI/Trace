@@ -6,12 +6,19 @@
 
 pub mod error;
 pub mod models;
+pub mod paths;
+pub mod writer;
 
 pub use error::TraceError;
 pub use models::{
     Entry, EntryTheme, Language, NoteSection, PanelFrame, SeparatorStyle, ThemePreset,
     ThreadConfig, WriteMode,
 };
+pub use paths::{
+    format_date, resolve_within_vault, sanitize_filename, sanitize_filename_preserve_extension,
+    translate_swift_pattern, Locale, MAC_DATE_FORMAT_PRESETS,
+};
+pub use writer::{write_atomic, NoteWriter, WrittenNote};
 
 /// Crate version, wired up here so downstream crates can display it.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
