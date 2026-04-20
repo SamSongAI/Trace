@@ -7,6 +7,7 @@
 pub mod error;
 pub mod models;
 pub mod paths;
+pub mod settings;
 pub mod writer;
 
 pub use error::TraceError;
@@ -17,6 +18,12 @@ pub use models::{
 pub use paths::{
     format_date, resolve_within_vault, sanitize_filename, sanitize_filename_preserve_extension,
     translate_swift_pattern, Locale, MAC_DATE_FORMAT_PRESETS,
+};
+pub use settings::{
+    AppSettings, VaultPathValidationIssue, CURRENT_SECTION_TITLE_ORDER_VERSION,
+    DEFAULT_APPEND_NOTE_MODIFIERS, DEFAULT_APPEND_NOTE_VKEY, DEFAULT_GLOBAL_HOTKEY_MODIFIERS,
+    DEFAULT_GLOBAL_HOTKEY_VKEY, DEFAULT_MODE_TOGGLE_MODIFIERS, DEFAULT_MODE_TOGGLE_VKEY,
+    DEFAULT_SEND_NOTE_MODIFIERS, DEFAULT_SEND_NOTE_VKEY, PROJECT_SECTION_INDEX,
 };
 pub use writer::{
     write_atomic, ClipboardImageWriter, ClipboardImageWriterSettings, DailyNoteSettings,
