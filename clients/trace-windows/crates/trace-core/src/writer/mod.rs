@@ -5,6 +5,7 @@
 //! images) live in sibling sub-modules added by subsequent sub-tasks.
 
 pub mod atomic;
+pub mod daily;
 
 use std::path::PathBuf;
 
@@ -12,6 +13,7 @@ use crate::error::TraceError;
 use crate::models::Entry;
 
 pub use atomic::write_atomic;
+pub use daily::{DailyNoteSettings, DailyNoteWriter};
 
 /// Result of a successful note write. Callers use this to validate that the
 /// expected path was touched and to assert byte-length parity against the
