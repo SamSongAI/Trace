@@ -1,10 +1,19 @@
-//! Daily / dimension-mode note writer (create-new-entry path).
+//! Daily / dimension-mode note writer.
 //!
-//! Mirrors `DailyNoteWriter.saveToDailyNote` / `DailyNoteWriter.insert` from
-//! the Mac source at `Sources/Trace/Services/DailyNoteWriter.swift`. Only the
-//! `createNewEntry` save mode is implemented here — appending to the latest
-//! entry, thread mode, file mode, and clipboard image handling live in
-//! sibling modules added by Phase 2.3–2.6.
+//! Mirrors `DailyNoteWriter.saveToDailyNote`, `DailyNoteWriter.insert`, and
+//! the three theme-specific `appendLatest*Entry` helpers from the Mac source
+//! at `Sources/Trace/Services/DailyNoteWriter.swift`. Thread mode, file mode,
+//! and clipboard image handling live in sibling modules.
+//!
+//! # Save modes
+//!
+//! - [`SaveMode::CreateNewEntry`]: insert a fresh entry at the top of the
+//!   section (Phase 2.2).
+//! - [`SaveMode::AppendToLatestEntry`]: splice new content *into* the latest
+//!   entry under the section — theme-aware (code-block closing fence for
+//!   `CodeBlockClassic`, timestamp line for `PlainTextTimestamp`, quote-block
+//!   trailer for `MarkdownQuote`). Falls back to `CreateNewEntry` when the
+//!   parser can't locate the expected anchor. (Phase 2.5)
 //!
 //! # Byte-level parity
 //!
@@ -17,6 +26,7 @@
 //! `Locale(identifier: "zh_CN")` in `formattedFileName`.
 
 use std::fs;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -24,7 +34,10 @@ use chrono::{DateTime, Utc};
 use crate::error::TraceError;
 use crate::models::{EntryTheme, NoteSection};
 use crate::paths::{date_format, resolve_within_vault};
-use crate::writer::{markdown_quote_body_thread, timestamp, write_atomic, WrittenNote};
+use crate::writer::{
+    markdown_quote_body_thread, timestamp, validated_vault_path, write_atomic, SaveMode,
+    WrittenNote,
+};
 
 /// Injectable configuration for the daily note writer.
 ///
@@ -76,6 +89,9 @@ impl<S: DailyNoteSettings> DailyNoteWriter<S> {
     /// Saves `text` as a new entry under `section`, creating the daily file
     /// and section header as needed.
     ///
+    /// Equivalent to `self.save(text, section, SaveMode::CreateNewEntry, now)`
+    /// and kept as a convenience for callers that only ever insert.
+    ///
     /// Returns `Ok(None)` when `text` trims to empty — mirroring Swift's
     /// silent-return behaviour — and `Ok(Some(written))` on a successful
     /// write. Returns `Err` for invalid vault paths, path-escape attempts,
@@ -84,6 +100,29 @@ impl<S: DailyNoteSettings> DailyNoteWriter<S> {
         &self,
         text: &str,
         section: &NoteSection,
+        now: DateTime<Utc>,
+    ) -> Result<Option<WrittenNote>, TraceError> {
+        self.save(text, section, SaveMode::CreateNewEntry, now)
+    }
+
+    /// Saves `text` into the daily note under `section`, honouring `mode`.
+    ///
+    /// Mirrors Swift's `DailyNoteWriter.save(...)` dispatch:
+    /// - [`SaveMode::CreateNewEntry`] inserts a fresh themed entry at the top
+    ///   of the section (or appends a new section when the header is
+    ///   missing).
+    /// - [`SaveMode::AppendToLatestEntry`] splices new content into the most
+    ///   recent entry under the section. When no entry anchor exists (no
+    ///   section header, no opening fence, no timestamp line, no quote
+    ///   block), it falls back to the create path.
+    ///
+    /// Returns `Ok(None)` for empty/whitespace `text`. The file is created
+    /// and parent directories are auto-provisioned when missing.
+    pub fn save(
+        &self,
+        text: &str,
+        section: &NoteSection,
+        mode: SaveMode,
         now: DateTime<Utc>,
     ) -> Result<Option<WrittenNote>, TraceError> {
         let trimmed = text.trim();
@@ -101,9 +140,22 @@ impl<S: DailyNoteSettings> DailyNoteWriter<S> {
         fs::create_dir_all(parent)?;
 
         let existing = load_or_empty(&file_path)?;
-        let entry = self.entry_for_text(trimmed, now);
         let header = self.settings.header_for(section);
-        let updated = insert_entry(&existing, &header, &entry);
+        let ts = timestamp(now);
+        let entry = self.entry_for_text(trimmed, now);
+
+        let updated = match mode {
+            SaveMode::CreateNewEntry => insert_entry(&existing, &header, &entry),
+            SaveMode::AppendToLatestEntry => append_latest_entry(
+                &existing,
+                trimmed,
+                &ts,
+                &header,
+                self.settings.entry_theme(),
+            )
+            .unwrap_or_else(|| insert_entry(&existing, &header, &entry)),
+        };
+
         let bytes = updated.as_bytes();
         write_atomic(&file_path, bytes)?;
 
@@ -116,7 +168,7 @@ impl<S: DailyNoteSettings> DailyNoteWriter<S> {
     /// Returns the absolute path `{vault}/{folder}/{formatted_date}.md` after
     /// checking the relative part cannot escape the vault.
     pub fn daily_file_path(&self, now: DateTime<Utc>) -> Result<PathBuf, TraceError> {
-        let vault = self.validated_vault_path()?;
+        let vault = validated_vault_path(self.settings.vault_path(), "vault path")?;
 
         let folder = normalized_folder_name(self.settings.daily_folder_name(), "Daily");
         let filename = format!(
@@ -130,21 +182,6 @@ impl<S: DailyNoteSettings> DailyNoteWriter<S> {
 
         let relative = format!("{}/{}", folder, filename);
         resolve_within_vault(&vault, &relative)
-    }
-
-    fn validated_vault_path(&self) -> Result<PathBuf, TraceError> {
-        let raw = self.settings.vault_path();
-        // `to_string_lossy` is only used for the blank-string check: non-UTF-8
-        // path bytes cannot equal `""` or pure whitespace after substitution,
-        // so lossy replacement here cannot flip a non-empty path into empty.
-        // The PathBuf we return below still carries the original bytes.
-        let as_str = raw.to_string_lossy();
-        if as_str.trim().is_empty() {
-            return Err(TraceError::InvalidVaultPath(
-                "vault path is blank".to_string(),
-            ));
-        }
-        Ok(raw.to_path_buf())
     }
 
     fn entry_for_text(&self, text: &str, now: DateTime<Utc>) -> String {
@@ -255,6 +292,236 @@ pub(crate) fn insert_entry(content: &str, header: &str, entry: &str) -> String {
     out.push_str("\n\n");
     out.push_str(entry);
     out
+}
+
+/// Append-to-latest-entry dispatch — byte-for-byte translation of Swift
+/// `DailyNoteWriter.appendLatestEntry(_:at:into:under:)` at lines 292–301.
+///
+/// Returns `None` when the section header is missing or the theme-specific
+/// anchor cannot be located; callers fall back to `insert_entry` in that
+/// case so the user's text never vanishes silently.
+pub(crate) fn append_latest_entry(
+    content: &str,
+    text: &str,
+    ts: &str,
+    header: &str,
+    theme: EntryTheme,
+) -> Option<String> {
+    match theme {
+        EntryTheme::CodeBlockClassic => append_latest_code_block(content, text, ts, header),
+        EntryTheme::PlainTextTimestamp => append_latest_plain_text(content, text, ts, header),
+        EntryTheme::MarkdownQuote => append_latest_markdown_quote(content, text, ts, header),
+    }
+}
+
+/// Splices `---\n{text}\n{ts}\n` immediately before the first closing ``` fence
+/// under `header`. Mirrors Swift `appendLatestCodeBlockEntry` (lines 303–326).
+fn append_latest_code_block(content: &str, text: &str, ts: &str, header: &str) -> Option<String> {
+    let section_range = section_body_range(content, header)?;
+    let section = &content[section_range.clone()];
+
+    let opening_rel = section.find("```")?;
+    let after_opening = opening_rel + 3;
+    let closing_rel = section[after_opening..]
+        .find("```")
+        .map(|p| after_opening + p)?;
+
+    let insertion_abs = section_range.start + closing_rel;
+
+    let prefix = if insertion_abs > 0 && content.as_bytes()[insertion_abs - 1] == b'\n' {
+        ""
+    } else {
+        "\n"
+    };
+    let chunk = format!("{prefix}---\n{text}\n{ts}\n");
+
+    Some(splice_at(content, insertion_abs, &chunk))
+}
+
+/// Splices `\n---\n{text}\n{ts}` immediately after the first `YYYY-MM-DD HH:MM`
+/// line under `header`. Mirrors Swift `appendLatestPlainTextEntry` (lines
+/// 354–373).
+fn append_latest_plain_text(content: &str, text: &str, ts: &str, header: &str) -> Option<String> {
+    let section_range = section_body_range(content, header)?;
+    let section = &content[section_range.clone()];
+
+    let ts_line = find_first_timestamp_line(section)?;
+    let insertion_abs = section_range.start + ts_line.end;
+
+    let chunk = format!("\n---\n{text}\n{ts}");
+    Some(splice_at(content, insertion_abs, &chunk))
+}
+
+/// Splices `\n> ---\n{quoted}\n>\n> {ts}\n` at the end of the first callout
+/// block (`>` prefix run) under `header`. Mirrors Swift
+/// `appendLatestMarkdownQuoteEntry` (lines 375–393).
+fn append_latest_markdown_quote(
+    content: &str,
+    text: &str,
+    ts: &str,
+    header: &str,
+) -> Option<String> {
+    let section_range = section_body_range(content, header)?;
+    let section = &content[section_range.clone()];
+
+    let quote_start = first_quote_block_start(section)?;
+    let quote_end = callout_block_end(section, quote_start);
+    let insertion_abs = section_range.start + quote_end;
+
+    let quoted = markdown_quote_body_thread(text);
+    let chunk = format!("\n> ---\n{quoted}\n>\n> {ts}\n");
+
+    Some(splice_at(content, insertion_abs, &chunk))
+}
+
+/// Shared splicing helper: `content[..at] + chunk + content[at..]` with a
+/// pre-sized allocation. Keeps all three appenders byte-identical.
+fn splice_at(content: &str, at: usize, chunk: &str) -> String {
+    let mut out = String::with_capacity(content.len() + chunk.len());
+    out.push_str(&content[..at]);
+    out.push_str(chunk);
+    out.push_str(&content[at..]);
+    out
+}
+
+/// Returns the byte range of the body under `header` in `content`: from the
+/// char after the header's trailing `\n` up to the next `\n# ` (or EOF).
+///
+/// Mirrors Swift `sectionBodyRange(in:under:)` at lines 436–454. Returns
+/// `None` when `header` is not found. A header at EOF with no trailing
+/// newline returns a zero-length range positioned at EOF — the caller's
+/// anchor search on the empty slice yields `None` and falls back to create.
+fn section_body_range(content: &str, header: &str) -> Option<Range<usize>> {
+    let header_start = content.find(header)?;
+    let after_header = header_start + header.len();
+
+    let line_break_rel = content[after_header..].find('\n');
+    let section_start = match line_break_rel {
+        Some(offset) => after_header + offset + 1,
+        None => content.len(),
+    };
+
+    if section_start >= content.len() {
+        return Some(section_start..section_start);
+    }
+
+    if let Some(next_header_rel) = content[section_start..].find("\n# ") {
+        Some(section_start..(section_start + next_header_rel))
+    } else {
+        Some(section_start..content.len())
+    }
+}
+
+/// Returns the byte offset of the first line in `section` whose first
+/// character is `>`. Mirrors Swift `firstQuoteBlockStart(in:)` (lines
+/// 395–411).
+fn first_quote_block_start(section: &str) -> Option<usize> {
+    let bytes = section.as_bytes();
+    let mut line_start = 0;
+
+    while line_start < section.len() {
+        let rel_break = bytes[line_start..].iter().position(|&b| b == b'\n');
+        let line_end = rel_break.map(|r| line_start + r).unwrap_or(section.len());
+
+        if section[line_start..line_end].starts_with('>') {
+            return Some(line_start);
+        }
+
+        let Some(lb) = rel_break else { break };
+        line_start += lb + 1;
+    }
+
+    None
+}
+
+/// Returns the byte offset where the callout block starting at `start` ends.
+/// Mirrors Swift `calloutBlockEnd(in:from:)` (lines 413–434).
+///
+/// The block ends:
+/// - at `section.len()` if every subsequent line is a `>` line and the last
+///   one has no trailing `\n`;
+/// - at the byte after the trailing `\n` of the last `>` line when the block
+///   is followed by `\n` plus any content that is NOT a `>` line;
+/// - at the start of the first subsequent `> [!…` line (nested callout),
+///   *except* when that line IS `start` (the anchor line itself can be a
+///   callout header).
+fn callout_block_end(section: &str, start: usize) -> usize {
+    let bytes = section.as_bytes();
+    let mut line_start = start;
+
+    while line_start < section.len() {
+        let rel_break = bytes[line_start..].iter().position(|&b| b == b'\n');
+        let Some(rel) = rel_break else {
+            let line = &section[line_start..];
+            return if line.starts_with('>') {
+                section.len()
+            } else {
+                line_start
+            };
+        };
+
+        let line_break = line_start + rel;
+        let line = &section[line_start..line_break];
+
+        if line_start != start && line.starts_with("> [!") {
+            return line_start;
+        }
+        if !line.starts_with('>') {
+            return line_start;
+        }
+
+        line_start = line_break + 1;
+    }
+
+    section.len()
+}
+
+/// Returns the byte range of the first line in `section` that matches
+/// `YYYY-MM-DD HH:MM`. Equivalent to Swift's regex
+/// `(?m)^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$` — hand-rolled so `trace-core`
+/// avoids depending on the `regex` crate for this one narrow pattern.
+fn find_first_timestamp_line(section: &str) -> Option<Range<usize>> {
+    let bytes = section.as_bytes();
+    let mut line_start = 0;
+
+    while line_start < section.len() {
+        let rel_break = bytes[line_start..].iter().position(|&b| b == b'\n');
+        let line_end = rel_break.map(|r| line_start + r).unwrap_or(section.len());
+
+        if is_timestamp_line(&section[line_start..line_end]) {
+            return Some(line_start..line_end);
+        }
+
+        let Some(lb) = rel_break else { break };
+        line_start += lb + 1;
+    }
+
+    None
+}
+
+/// Returns `true` when `line` is exactly 16 ASCII bytes shaped like
+/// `YYYY-MM-DD HH:MM` (the format emitted by `timestamp`).
+fn is_timestamp_line(line: &str) -> bool {
+    if line.len() != 16 {
+        return false;
+    }
+    let b = line.as_bytes();
+    b[0].is_ascii_digit()
+        && b[1].is_ascii_digit()
+        && b[2].is_ascii_digit()
+        && b[3].is_ascii_digit()
+        && b[4] == b'-'
+        && b[5].is_ascii_digit()
+        && b[6].is_ascii_digit()
+        && b[7] == b'-'
+        && b[8].is_ascii_digit()
+        && b[9].is_ascii_digit()
+        && b[10] == b' '
+        && b[11].is_ascii_digit()
+        && b[12].is_ascii_digit()
+        && b[13] == b':'
+        && b[14].is_ascii_digit()
+        && b[15].is_ascii_digit()
 }
 
 #[cfg(test)]
@@ -687,5 +954,525 @@ mod tests {
     fn insert_appends_with_single_newline_when_content_ends_with_newline() {
         let out = insert_entry("other\n", "# Note", "entry\n\n");
         assert_eq!(out, "other\n\n# Note\n\nentry\n\n");
+    }
+
+    // ---------------------------------------------------------------------
+    // Phase 2.5: AppendToLatestEntry — end-to-end writer tests
+    // ---------------------------------------------------------------------
+
+    /// Helper: seeds a daily file with `initial` contents, then calls `save`
+    /// with the given mode and returns the resulting file bytes.
+    fn run_save(
+        theme: EntryTheme,
+        initial: Option<&str>,
+        text: &str,
+        section: &NoteSection,
+        mode: SaveMode,
+        now: DateTime<Utc>,
+    ) -> (TempDir, String) {
+        let tmp = TempDir::new().unwrap();
+        let settings = FakeDailySettings::new(tmp.path().to_path_buf(), theme);
+        let writer = DailyNoteWriter::new(settings);
+
+        let file_path = writer.daily_file_path(now).unwrap();
+        fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+        if let Some(seed) = initial {
+            fs::write(&file_path, seed).unwrap();
+        }
+
+        let _ = writer.save(text, section, mode, now).unwrap().unwrap();
+        let actual = fs::read_to_string(&file_path).unwrap();
+        (tmp, actual)
+    }
+
+    #[test]
+    fn save_create_mode_matches_save_new_entry() {
+        // Behavioural equivalence: save(..., CreateNewEntry, ...) must
+        // produce the same bytes as save_new_entry(...).
+        let now = fixed_time(2026, 4, 20, 12, 0);
+        let section = NoteSection::new(0, "Note");
+
+        let (_a, out_a) = run_save(
+            EntryTheme::CodeBlockClassic,
+            None,
+            "hello",
+            &section,
+            SaveMode::CreateNewEntry,
+            now,
+        );
+
+        // Re-run through save_new_entry for parity.
+        let tmp = TempDir::new().unwrap();
+        let settings =
+            FakeDailySettings::new(tmp.path().to_path_buf(), EntryTheme::CodeBlockClassic);
+        let writer = DailyNoteWriter::new(settings);
+        let p = writer.daily_file_path(now).unwrap();
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        writer.save_new_entry("hello", &section, now).unwrap();
+        let out_b = fs::read_to_string(&p).unwrap();
+
+        assert_eq!(out_a, out_b);
+    }
+
+    #[test]
+    fn append_code_block_inserts_before_closing_fence() {
+        let now = fixed_time(2026, 4, 20, 12, 5);
+        let section = NoteSection::new(0, "Note");
+        let seed = "# Note\n\n```\nhello\n2026-04-20 12:00\n```\n\n";
+
+        let (_tmp, actual) = run_save(
+            EntryTheme::CodeBlockClassic,
+            Some(seed),
+            "follow up",
+            &section,
+            SaveMode::AppendToLatestEntry,
+            now,
+        );
+
+        // Byte-for-byte parity with the Swift splice: prev byte before
+        // closing fence is `\n`, so prefix is "" and the chunk is inserted
+        // as `---\n{text}\n{ts}\n`.
+        let expected = concat!(
+            "# Note\n\n",
+            "```\n",
+            "hello\n",
+            "2026-04-20 12:00\n",
+            "---\n",
+            "follow up\n",
+            "2026-04-20 12:05\n",
+            "```\n\n",
+        );
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn append_code_block_prefixes_newline_when_fence_lacks_preceding_break() {
+        // Opening fence with content directly up against the closing fence
+        // (no newline before ```) forces prefix = "\n".
+        let now = fixed_time(2026, 4, 20, 12, 5);
+        let section = NoteSection::new(0, "Note");
+        let seed = "# Note\n\n```hello```";
+
+        let (_tmp, actual) = run_save(
+            EntryTheme::CodeBlockClassic,
+            Some(seed),
+            "more",
+            &section,
+            SaveMode::AppendToLatestEntry,
+            now,
+        );
+
+        let expected = "# Note\n\n```hello\n---\nmore\n2026-04-20 12:05\n```".to_string();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn append_plain_text_inserts_after_first_timestamp_line() {
+        let now = fixed_time(2026, 4, 20, 12, 5);
+        let section = NoteSection::new(0, "Note");
+        let seed = "# Note\n\nhello\n2026-04-20 12:00\n\n";
+
+        let (_tmp, actual) = run_save(
+            EntryTheme::PlainTextTimestamp,
+            Some(seed),
+            "follow up",
+            &section,
+            SaveMode::AppendToLatestEntry,
+            now,
+        );
+
+        let expected = concat!(
+            "# Note\n\n",
+            "hello\n",
+            "2026-04-20 12:00\n",
+            "---\n",
+            "follow up\n",
+            "2026-04-20 12:05\n\n",
+        );
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn append_plain_text_first_timestamp_wins_when_multiple() {
+        // Two timestamps present. Swift's regex matches the first one
+        // (earliest line offset), and we must mirror that — even if the
+        // second is logically newer.
+        let now = fixed_time(2026, 4, 20, 12, 10);
+        let section = NoteSection::new(0, "Note");
+        let seed = concat!(
+            "# Note\n\n",
+            "first\n",
+            "2026-04-20 12:00\n",
+            "---\n",
+            "second\n",
+            "2026-04-20 12:05\n\n",
+        );
+
+        let (_tmp, actual) = run_save(
+            EntryTheme::PlainTextTimestamp,
+            Some(seed),
+            "third",
+            &section,
+            SaveMode::AppendToLatestEntry,
+            now,
+        );
+
+        let expected = concat!(
+            "# Note\n\n",
+            "first\n",
+            "2026-04-20 12:00\n",
+            "---\n",
+            "third\n",
+            "2026-04-20 12:10\n",
+            "---\n",
+            "second\n",
+            "2026-04-20 12:05\n\n",
+        );
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn append_markdown_quote_extends_callout_block() {
+        let now = fixed_time(2026, 4, 20, 12, 5);
+        let section = NoteSection::new(0, "Note");
+        // Seed has a trailing blank line after the callout, which Swift's
+        // `calloutBlockEnd` stops at — so the chunk's leading `\n` lands
+        // *before* the existing blank, producing `\n\n` between the old
+        // timestamp and the new `> ---`.
+        let seed = "# Note\n\n> hello\n>\n> 2026-04-20 12:00\n\n";
+
+        let (_tmp, actual) = run_save(
+            EntryTheme::MarkdownQuote,
+            Some(seed),
+            "follow up",
+            &section,
+            SaveMode::AppendToLatestEntry,
+            now,
+        );
+
+        let expected = concat!(
+            "# Note\n\n",
+            "> hello\n",
+            ">\n",
+            "> 2026-04-20 12:00\n",
+            "\n",
+            "> ---\n",
+            "> follow up\n",
+            ">\n",
+            "> 2026-04-20 12:05\n",
+            "\n",
+        );
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn append_markdown_quote_stops_before_nested_callout() {
+        // A `> [!note]` line below the anchor terminates the callout block;
+        // the splice must land before it, not at the true end of the
+        // outermost block.
+        let now = fixed_time(2026, 4, 20, 12, 5);
+        let section = NoteSection::new(0, "Note");
+        let seed = concat!(
+            "# Note\n\n",
+            "> hello\n",
+            ">\n",
+            "> 2026-04-20 12:00\n",
+            "> [!note] nested\n",
+            "> inner line\n\n",
+        );
+
+        let (_tmp, actual) = run_save(
+            EntryTheme::MarkdownQuote,
+            Some(seed),
+            "follow up",
+            &section,
+            SaveMode::AppendToLatestEntry,
+            now,
+        );
+
+        let expected = concat!(
+            "# Note\n\n",
+            "> hello\n",
+            ">\n",
+            "> 2026-04-20 12:00\n",
+            "\n",
+            "> ---\n",
+            "> follow up\n",
+            ">\n",
+            "> 2026-04-20 12:05\n",
+            "> [!note] nested\n",
+            "> inner line\n\n",
+        );
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn append_falls_back_to_create_when_section_missing() {
+        // Seed has a different section. Append has no anchor, so behaviour
+        // must match CreateNewEntry: add `# Note` + themed entry at EOF.
+        let now = fixed_time(2026, 4, 20, 12, 5);
+        let section = NoteSection::new(0, "Note");
+        let seed = "# Other\n\nother text\n";
+
+        let (_tmp, actual) = run_save(
+            EntryTheme::CodeBlockClassic,
+            Some(seed),
+            "new",
+            &section,
+            SaveMode::AppendToLatestEntry,
+            now,
+        );
+
+        let expected = concat!(
+            "# Other\n\n",
+            "other text\n",
+            "\n",
+            "# Note\n\n",
+            "```\nnew\n2026-04-20 12:05\n```\n\n",
+        );
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn append_falls_back_to_create_when_anchor_missing_under_section() {
+        // `# Note` exists but has no fence — code-block appender returns
+        // None, caller falls back to create-new which inserts right under
+        // the header.
+        let now = fixed_time(2026, 4, 20, 12, 5);
+        let section = NoteSection::new(0, "Note");
+        let seed = "# Note\n\nno fence here\n";
+
+        let (_tmp, actual) = run_save(
+            EntryTheme::CodeBlockClassic,
+            Some(seed),
+            "new",
+            &section,
+            SaveMode::AppendToLatestEntry,
+            now,
+        );
+
+        // Fallback uses insert_entry with prefix="" (since byte after
+        // header+newline is `\n`), so the entry slots in between the header
+        // blank line and the existing body, matching
+        // `entries_separated_by_blank_line_only`'s insertion pattern.
+        let expected = concat!(
+            "# Note\n",
+            "```\nnew\n2026-04-20 12:05\n```\n\n",
+            "\nno fence here\n",
+        );
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn append_scopes_to_current_section_only() {
+        // Two sections, each with their own fence. Appending under the
+        // second section must NOT touch the first.
+        let now = fixed_time(2026, 4, 20, 12, 10);
+        let section = NoteSection::new(1, "Clip");
+        let seed = concat!(
+            "# Note\n\n",
+            "```\nalpha\n2026-04-20 12:00\n```\n\n",
+            "# Clip\n\n",
+            "```\nbeta\n2026-04-20 12:05\n```\n\n",
+        );
+
+        let (_tmp, actual) = run_save(
+            EntryTheme::CodeBlockClassic,
+            Some(seed),
+            "gamma",
+            &section,
+            SaveMode::AppendToLatestEntry,
+            now,
+        );
+
+        let expected = concat!(
+            "# Note\n\n",
+            "```\nalpha\n2026-04-20 12:00\n```\n\n",
+            "# Clip\n\n",
+            "```\n",
+            "beta\n",
+            "2026-04-20 12:05\n",
+            "---\n",
+            "gamma\n",
+            "2026-04-20 12:10\n",
+            "```\n\n",
+        );
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn append_empty_text_is_noop() {
+        // Matches save_new_entry: whitespace-only text never touches disk.
+        let tmp = TempDir::new().unwrap();
+        let settings =
+            FakeDailySettings::new(tmp.path().to_path_buf(), EntryTheme::CodeBlockClassic);
+        let writer = DailyNoteWriter::new(settings);
+
+        let now = fixed_time(2026, 4, 20, 12, 0);
+        let section = NoteSection::new(0, "Note");
+
+        assert!(writer
+            .save("", &section, SaveMode::AppendToLatestEntry, now)
+            .unwrap()
+            .is_none());
+        assert!(writer
+            .save("   \n\t  ", &section, SaveMode::AppendToLatestEntry, now)
+            .unwrap()
+            .is_none());
+        assert!(!writer.daily_file_path(now).unwrap().exists());
+    }
+
+    #[test]
+    fn append_honors_custom_section_header() {
+        // When `header_for` returns a custom title, the append parser must
+        // locate *that* header rather than the default `NoteSection::header`.
+        let tmp = TempDir::new().unwrap();
+        let mut settings =
+            FakeDailySettings::new(tmp.path().to_path_buf(), EntryTheme::CodeBlockClassic);
+        settings.custom_header = Some("# Ideas".to_string());
+        let writer = DailyNoteWriter::new(settings);
+
+        let now = fixed_time(2026, 4, 20, 12, 5);
+        let section = NoteSection::new(5, "Ignored");
+
+        let file_path = writer.daily_file_path(now).unwrap();
+        fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+        fs::write(
+            &file_path,
+            "# Ideas\n\n```\nfirst\n2026-04-20 12:00\n```\n\n",
+        )
+        .unwrap();
+
+        let _ = writer
+            .save("second", &section, SaveMode::AppendToLatestEntry, now)
+            .unwrap()
+            .unwrap();
+
+        let actual = fs::read_to_string(&file_path).unwrap();
+        let expected = concat!(
+            "# Ideas\n\n",
+            "```\nfirst\n2026-04-20 12:00\n",
+            "---\nsecond\n2026-04-20 12:05\n",
+            "```\n\n",
+        );
+        assert_eq!(actual, expected);
+    }
+
+    // ---------------------------------------------------------------------
+    // Phase 2.5: unit tests for the parser helpers
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn section_body_range_slices_between_headers() {
+        let content = "# A\n\nfirst body\n\n# B\n\nsecond body\n";
+        let a = section_body_range(content, "# A").unwrap();
+        assert_eq!(&content[a.clone()], "\nfirst body\n");
+        let b = section_body_range(content, "# B").unwrap();
+        assert_eq!(&content[b.clone()], "\nsecond body\n");
+    }
+
+    #[test]
+    fn section_body_range_returns_none_when_header_missing() {
+        assert_eq!(section_body_range("# Other\n\nbody\n", "# Missing"), None);
+    }
+
+    #[test]
+    fn section_body_range_empty_body_at_eof() {
+        // Header sits at EOF with NO trailing newline: range collapses to
+        // `content.len()..content.len()`.
+        let content = "# Note";
+        let r = section_body_range(content, "# Note").unwrap();
+        assert_eq!(r, content.len()..content.len());
+        assert_eq!(&content[r], "");
+    }
+
+    #[test]
+    fn section_body_range_includes_leading_newline_when_blank_line_follows() {
+        // Header is `# Note\n` and next char is `\n` — section starts AT
+        // that second `\n`, so the leading `\n` is part of the range. This
+        // matches Swift exactly (we traced it through
+        // `content.index(after: afterHeaderLineBreak)`).
+        let content = "# Note\n\nbody\n";
+        let r = section_body_range(content, "# Note").unwrap();
+        assert_eq!(&content[r], "\nbody\n");
+    }
+
+    #[test]
+    fn first_quote_block_start_finds_leading_gt_line() {
+        assert_eq!(first_quote_block_start("\n> hello\n> world\n"), Some(1));
+        assert_eq!(first_quote_block_start("plain\n> quote\n"), Some(6));
+    }
+
+    #[test]
+    fn first_quote_block_start_returns_none_without_gt() {
+        assert_eq!(first_quote_block_start(""), None);
+        assert_eq!(first_quote_block_start("no quote here\n"), None);
+        // A line that contains `>` somewhere but doesn't start with it is
+        // not a quote line.
+        assert_eq!(first_quote_block_start("foo > bar\n"), None);
+    }
+
+    #[test]
+    fn callout_block_end_stops_on_non_gt_line() {
+        let section = "> a\n> b\nplain\n";
+        let end = callout_block_end(section, 0);
+        assert_eq!(&section[..end], "> a\n> b\n");
+    }
+
+    #[test]
+    fn callout_block_end_returns_section_len_when_all_gt() {
+        let section = "> a\n> b\n";
+        assert_eq!(callout_block_end(section, 0), section.len());
+    }
+
+    #[test]
+    fn callout_block_end_stops_before_nested_callout_but_not_at_start() {
+        // The anchor line MAY be `> [!…` (that's how nested blocks are
+        // identified in the first place). But a subsequent `> [!…` ends
+        // the outer block.
+        let section = "> [!quote] outer\n> body\n> [!note] inner\n> inner body\n";
+        let end = callout_block_end(section, 0);
+        // End should be at the start of the `> [!note] inner` line.
+        let expected_end = section.find("> [!note]").unwrap();
+        assert_eq!(end, expected_end);
+    }
+
+    #[test]
+    fn callout_block_end_handles_trailing_gt_line_without_newline() {
+        let section = "> a\n> b";
+        assert_eq!(callout_block_end(section, 0), section.len());
+    }
+
+    #[test]
+    fn find_first_timestamp_line_matches_single_line() {
+        let section = "\nhello\n2026-04-20 12:00\n\n";
+        let r = find_first_timestamp_line(section).unwrap();
+        assert_eq!(&section[r], "2026-04-20 12:00");
+    }
+
+    #[test]
+    fn find_first_timestamp_line_returns_first_of_many() {
+        let section = "\nhello\n2026-04-20 12:00\n---\nx\n2026-04-20 12:05\n";
+        let r = find_first_timestamp_line(section).unwrap();
+        assert_eq!(r.start, section.find("2026-04-20 12:00").unwrap());
+    }
+
+    #[test]
+    fn find_first_timestamp_line_none_when_absent() {
+        assert_eq!(find_first_timestamp_line(""), None);
+        assert_eq!(find_first_timestamp_line("no timestamps here\n"), None);
+        // Suffix/prefix junk on the same line disqualifies it.
+        assert_eq!(find_first_timestamp_line("2026-04-20 12:00 x\n"), None);
+        assert_eq!(find_first_timestamp_line("x 2026-04-20 12:00\n"), None);
+    }
+
+    #[test]
+    fn is_timestamp_line_rejects_wrong_shapes() {
+        assert!(is_timestamp_line("2026-04-20 12:00"));
+        assert!(!is_timestamp_line("2026-04-20 12:0")); // too short
+        assert!(!is_timestamp_line("2026-04-20 12:000")); // too long
+        assert!(!is_timestamp_line("2026/04/20 12:00")); // wrong sep
+        assert!(!is_timestamp_line("20 6-04-20 12:00")); // space in year
+        assert!(!is_timestamp_line("")); // empty
     }
 }
