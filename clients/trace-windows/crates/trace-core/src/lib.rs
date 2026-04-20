@@ -5,6 +5,7 @@
 //! lives in `trace-platform`; the iced UI layer lives in `trace-ui`.
 
 pub mod error;
+pub mod l10n;
 pub mod models;
 pub mod paths;
 pub mod settings;
@@ -12,6 +13,7 @@ pub mod theme;
 pub mod writer;
 
 pub use error::TraceError;
+pub use l10n::L10n;
 pub use models::{
     Entry, EntryTheme, Language, NoteSection, PanelFrame, SeparatorStyle, ThemePreset,
     ThreadConfig, WriteMode,
