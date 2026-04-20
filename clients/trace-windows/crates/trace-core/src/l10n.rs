@@ -17,6 +17,9 @@
 use crate::models::Language;
 
 /// Centralized localization strings, mirroring the Swift `L10n` enum.
+///
+/// All methods are associated functions — `L10n` is a zero-sized marker
+/// type that is never instantiated. Call sites: `L10n::vault(lang)`.
 pub struct L10n;
 
 /// Picks the variant matching `lang`, falling back to English when the
@@ -229,7 +232,11 @@ impl L10n {
 
     /// Interpolates `name` into the "conflicts with <shortcut>" template.
     /// Mirrors Swift's `shortcutConflict(with:)`.
-    pub fn shortcut_conflict(name: &str, lang: Language) -> String {
+    ///
+    /// Uses Rust's `format!` variable capture (not string replacement), so
+    /// `name` values containing a literal `{name}` are passed through
+    /// verbatim without re-expansion.
+    pub fn shortcut_conflict(lang: Language, name: &str) -> String {
         match lang {
             Language::Zh => format!("与「{name}」冲突"),
             Language::Ja => format!("「{name}」と競合しています"),
@@ -1688,8 +1695,8 @@ mod tests {
             L10n::theme_dune_summary(Language::En)
         );
         assert_eq!(
-            L10n::shortcut_conflict("Send Note", Language::SystemDefault),
-            L10n::shortcut_conflict("Send Note", Language::En)
+            L10n::shortcut_conflict(Language::SystemDefault, "Send Note"),
+            L10n::shortcut_conflict(Language::En, "Send Note")
         );
     }
 
@@ -1698,30 +1705,30 @@ mod tests {
     #[test]
     fn shortcut_conflict_interpolates_name() {
         assert_eq!(
-            L10n::shortcut_conflict("发送笔记", Language::Zh),
+            L10n::shortcut_conflict(Language::Zh, "发送笔记"),
             "与「发送笔记」冲突"
         );
         assert_eq!(
-            L10n::shortcut_conflict("ノートを送信", Language::Ja),
+            L10n::shortcut_conflict(Language::Ja, "ノートを送信"),
             "「ノートを送信」と競合しています"
         );
         assert_eq!(
-            L10n::shortcut_conflict("Send Note", Language::En),
+            L10n::shortcut_conflict(Language::En, "Send Note"),
             "Conflicts with \"Send Note\""
         );
     }
 
     #[test]
     fn shortcut_conflict_preserves_bracket_glyphs() {
-        let zh = L10n::shortcut_conflict("创建笔记", Language::Zh);
+        let zh = L10n::shortcut_conflict(Language::Zh, "创建笔记");
         assert!(zh.contains('「'), "zh variant must contain 「: {zh}");
         assert!(zh.contains('」'), "zh variant must contain 」: {zh}");
 
-        let ja = L10n::shortcut_conflict("ノートを作成", Language::Ja);
+        let ja = L10n::shortcut_conflict(Language::Ja, "ノートを作成");
         assert!(ja.contains('「'), "ja variant must contain 「: {ja}");
         assert!(ja.contains('」'), "ja variant must contain 」: {ja}");
 
-        let en = L10n::shortcut_conflict("Create Note", Language::En);
+        let en = L10n::shortcut_conflict(Language::En, "Create Note");
         assert!(
             en.contains('"'),
             "en variant must wrap the name in ASCII double-quotes: {en}"
