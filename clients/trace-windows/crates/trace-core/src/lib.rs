@@ -8,6 +8,7 @@ pub mod error;
 pub mod models;
 pub mod paths;
 pub mod settings;
+pub mod theme;
 pub mod writer;
 
 pub use error::TraceError;
@@ -25,6 +26,7 @@ pub use settings::{
     DEFAULT_GLOBAL_HOTKEY_VKEY, DEFAULT_MODE_TOGGLE_MODIFIERS, DEFAULT_MODE_TOGGLE_VKEY,
     DEFAULT_SEND_NOTE_MODIFIERS, DEFAULT_SEND_NOTE_VKEY, PROJECT_SECTION_INDEX,
 };
+pub use theme::{CapturePalette, SettingsPalette, TraceColor, TraceTheme};
 pub use writer::{
     write_atomic, ClipboardImageWriter, ClipboardImageWriterSettings, DailyNoteSettings,
     DailyNoteWriter, FileWriter, FileWriterSettings, ImageWritePlan, NoteWriter, SaveMode,
