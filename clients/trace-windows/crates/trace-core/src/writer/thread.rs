@@ -33,7 +33,10 @@ use crate::error::TraceError;
 use crate::models::{EntryTheme, ThreadConfig};
 use crate::paths::resolve_within_vault;
 use crate::paths::safety::canonicalize_existing_prefix_of;
-use crate::writer::{markdown_quote_body_thread, timestamp, write_atomic, SaveMode, WrittenNote};
+use crate::writer::{
+    markdown_quote_body_thread, timestamp, validated_vault_path, write_atomic, SaveMode,
+    WrittenNote,
+};
 
 /// Injectable configuration for the thread writer.
 ///
@@ -115,7 +118,7 @@ impl<S: ThreadSettings> ThreadWriter<S> {
     /// traversal checks, and `.md` suffix handling are byte-for-byte with the
     /// Swift reference.
     pub fn thread_file_path(&self, thread: &ThreadConfig) -> Result<PathBuf, TraceError> {
-        let vault = self.validated_vault_path()?;
+        let vault = validated_vault_path(self.settings.vault_path(), "vault path")?;
 
         let normalized = thread.target_file.replace('\\', "/");
         let normalized = normalized.trim();
@@ -132,17 +135,6 @@ impl<S: ThreadSettings> ThreadWriter<S> {
         };
 
         Ok(ensure_md_extension(resolved))
-    }
-
-    fn validated_vault_path(&self) -> Result<PathBuf, TraceError> {
-        let raw = self.settings.vault_path();
-        let as_str = raw.to_string_lossy();
-        if as_str.trim().is_empty() {
-            return Err(TraceError::InvalidVaultPath(
-                "vault path is blank".to_string(),
-            ));
-        }
-        Ok(raw.to_path_buf())
     }
 
     fn entry_for_text(&self, text: &str, now: DateTime<Utc>) -> String {

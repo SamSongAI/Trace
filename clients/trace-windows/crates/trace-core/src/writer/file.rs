@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 
 use crate::error::TraceError;
-use crate::writer::{timestamp, write_atomic, WrittenNote};
+use crate::writer::{timestamp, validated_vault_path, write_atomic, WrittenNote};
 
 /// Injectable configuration for the file writer.
 ///
@@ -73,7 +73,8 @@ impl<S: FileWriterSettings> FileWriter<S> {
             return Ok(None);
         }
 
-        let file_path = self.inbox_file_path(title, target_folder, now)?;
+        let normalized_title = normalized_document_title(title);
+        let file_path = self.inbox_file_path(normalized_title.as_deref(), target_folder, now)?;
 
         let parent = file_path.parent().ok_or_else(|| {
             TraceError::AtomicWriteFailed(format!(
@@ -83,7 +84,7 @@ impl<S: FileWriterSettings> FileWriter<S> {
         })?;
         fs::create_dir_all(parent)?;
 
-        let content = inbox_document_content(trimmed_text, title, now);
+        let content = inbox_document_content(trimmed_text, normalized_title.as_deref(), now);
         let bytes = content.as_bytes();
         write_atomic(&file_path, bytes)?;
 
@@ -93,25 +94,15 @@ impl<S: FileWriterSettings> FileWriter<S> {
         }))
     }
 
-    fn validated_inbox_vault_path(&self) -> Result<PathBuf, TraceError> {
-        let raw = self.settings.inbox_vault_path();
-        let as_str = raw.to_string_lossy();
-        if as_str.trim().is_empty() {
-            return Err(TraceError::InvalidVaultPath(
-                "inbox vault path is blank".to_string(),
-            ));
-        }
-        Ok(raw.to_path_buf())
-    }
-
     fn inbox_file_path(
         &self,
-        title: Option<&str>,
+        normalized_title: Option<&str>,
         target_folder: Option<&str>,
         now: DateTime<Utc>,
     ) -> Result<PathBuf, TraceError> {
-        let inbox_base = self.validated_inbox_vault_path()?;
-        let base_name = file_base_name(title, now);
+        let inbox_base =
+            validated_vault_path(self.settings.inbox_vault_path(), "inbox vault path")?;
+        let base_name = file_base_name(normalized_title, now);
 
         let target_dir = match target_folder {
             Some(folder) if !folder.trim().is_empty() => {
@@ -173,9 +164,10 @@ fn normalized_relative_folder_path(folder: &str) -> Result<String, TraceError> {
     Ok(components.join("/"))
 }
 
-/// Mirrors `fileBaseName(for:at:)`.
-fn file_base_name(title: Option<&str>, now: DateTime<Utc>) -> String {
-    match normalized_file_name_segment(title) {
+/// Mirrors `fileBaseName(for:at:)`. `normalized_title` is the output of
+/// [`normalized_document_title`] — trim + non-empty guaranteed.
+fn file_base_name(normalized_title: Option<&str>, now: DateTime<Utc>) -> String {
+    match normalized_title.and_then(sanitize_to_file_name_segment) {
         Some(seg) if !seg.is_empty() => seg,
         _ => file_name_timestamp(now),
     }
@@ -196,22 +188,22 @@ fn normalized_document_title(title: Option<&str>) -> Option<String> {
     }
 }
 
-/// Mirrors `normalizedFileNameSegment(_:)`.
+/// Sanitises an already-normalised (trim + non-empty) title into a filename
+/// segment. Mirrors steps 2–7 of Swift's `normalizedFileNameSegment(_:)`;
+/// step 1 (the trim/empty guard) is the caller's responsibility via
+/// [`normalized_document_title`].
 ///
 /// Steps (in order, matching Swift):
-/// 1. `normalizedDocumentTitle` — trim + None-if-empty guard.
-/// 2. Replace each char in `/\:*?"<>|` with `-`.
-/// 3. Replace `\n` / `\r` with ` `.
-/// 4. Collapse whitespace runs → `-` (hand-rolled; Swift uses `\s+`).
-/// 5. Collapse consecutive `-` runs → single `-` (hand-rolled; Swift uses
+/// 1. Replace each char in `/\:*?"<>|` with `-`.
+/// 2. Replace `\n` / `\r` with ` `.
+/// 3. Collapse whitespace runs → `-` (hand-rolled; Swift uses `\s+`).
+/// 4. Collapse consecutive `-` runs → single `-` (hand-rolled; Swift uses
 ///    `-{2,}`).
-/// 6. Trim leading / trailing chars in `{'-', '.', ' '}`.
-/// 7. Return `None` if the result is empty.
-fn normalized_file_name_segment(title: Option<&str>) -> Option<String> {
-    let doc_title = normalized_document_title(title)?;
-
+/// 5. Trim leading / trailing chars in `{'-', '.', ' '}`.
+/// 6. Return `None` if the result is empty.
+fn sanitize_to_file_name_segment(normalized_title: &str) -> Option<String> {
     const INVALID: &[char] = &['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
-    let after_invalid: String = doc_title
+    let after_invalid: String = normalized_title
         .chars()
         .map(|c| if INVALID.contains(&c) { '-' } else { c })
         .collect();
@@ -275,26 +267,29 @@ fn collapse_consecutive_hyphens(s: &str) -> String {
 
 /// Builds the full file content. Mirrors `inboxDocumentContent(for:title:at:)`.
 ///
+/// `normalized_title` is the output of [`normalized_document_title`] — trim +
+/// non-empty guaranteed, so the frontmatter's `title:` line is always present
+/// when `Some(..)`.
+///
 /// Exact byte layout:
 /// - With title:    `---\ntitle: "<esc>"\ncreated: "<ts>"\n---\n\n<text>`
 /// - Without title: `---\ncreated: "<ts>"\n---\n\n<text>`
 ///
-/// `<esc>` is the whitespace-trimmed title with `"` → `\"`. `<text>` is the
-/// already-trimmed body. No trailing newline unless `text` itself ends with
-/// one.
-fn inbox_document_content(text: &str, title: Option<&str>, now: DateTime<Utc>) -> String {
+/// `<esc>` is the title with `"` → `\"`. `<text>` is the already-trimmed body.
+/// No trailing newline unless `text` itself ends with one.
+fn inbox_document_content(
+    text: &str,
+    normalized_title: Option<&str>,
+    now: DateTime<Utc>,
+) -> String {
     let ts = timestamp(now);
-
-    let escaped_title = normalized_document_title(title).map(|t| t.replace('"', "\\\""));
-
-    let mut frontmatter_lines: Vec<String> = Vec::new();
-    if let Some(et) = escaped_title {
-        frontmatter_lines.push(format!("title: \"{et}\""));
+    match normalized_title {
+        Some(t) => {
+            let escaped = t.replace('"', "\\\"");
+            format!("---\ntitle: \"{escaped}\"\ncreated: \"{ts}\"\n---\n\n{text}")
+        }
+        None => format!("---\ncreated: \"{ts}\"\n---\n\n{text}"),
     }
-    frontmatter_lines.push(format!("created: \"{ts}\""));
-
-    let frontmatter_body = frontmatter_lines.join("\n");
-    format!("---\n{frontmatter_body}\n---\n\n{text}")
 }
 
 #[cfg(test)]

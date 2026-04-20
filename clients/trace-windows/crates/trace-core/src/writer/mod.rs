@@ -11,7 +11,7 @@ pub mod daily;
 pub mod file;
 pub mod thread;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 
@@ -46,6 +46,18 @@ pub enum SaveMode {
 /// Shared between Daily and Thread writers to avoid drift.
 pub(crate) fn timestamp(now: DateTime<Utc>) -> String {
     now.format("%Y-%m-%d %H:%M").to_string()
+}
+
+/// Validates that a writer's configured vault path is not blank.
+///
+/// Shared between `ThreadWriter` and `FileWriter` so both produce the same
+/// `InvalidVaultPath` error shape. `label` appears verbatim in the error
+/// message (e.g. `"vault path"` or `"inbox vault path"`).
+pub(crate) fn validated_vault_path(raw: &Path, label: &str) -> Result<PathBuf, TraceError> {
+    if raw.to_string_lossy().trim().is_empty() {
+        return Err(TraceError::InvalidVaultPath(format!("{label} is blank")));
+    }
+    Ok(raw.to_path_buf())
 }
 
 /// Prefixes every line of `text` with `>` (empty lines become a bare `>`).
