@@ -135,6 +135,12 @@ mod imp {
     /// same name fails with `ERROR_CLASS_ALREADY_EXISTS` — we gate it behind
     /// a `OnceLock` and cache the result so all subsequent hotkey registrations
     /// reuse the same class atom (or the same failure).
+    ///
+    /// The failure branch is intentionally permanent for the lifetime of the
+    /// process. `RegisterClassExW` failures are nearly always configuration-
+    /// or resource-limit errors that don't self-heal; caching the error code
+    /// lets subsequent `register()` calls fail fast with the same diagnostic
+    /// instead of retrying and potentially making things worse.
     static WND_CLASS_REGISTRATION: OnceLock<Result<(), u32>> = OnceLock::new();
 
     /// A registered Windows global hotkey.
@@ -184,11 +190,16 @@ mod imp {
                     Err(err)
                 }
                 Err(_) => {
-                    // The worker died before or during bootstrap (panic
-                    // inside `worker_main`, or both halves of `boot_tx`
-                    // dropped before send). Best-effort join so we don't
-                    // leave a detached thread; ignore any panic payload.
-                    let _ = thread_handle.join();
+                    // Intentionally drop (detach) the handle instead of
+                    // joining: the worker may still be stuck inside
+                    // `CreateWindowExW` or `RegisterHotKey` on a heavily
+                    // loaded system; blocking the caller would defeat the
+                    // timeout. Letting the thread finish naturally is safe
+                    // because the events channel's Receiver is dropped
+                    // here, so the worker will break out of its message
+                    // loop on the first `WM_HOTKEY` (or on the bootstrap
+                    // Sender drop if it hasn't reached the loop yet).
+                    drop(thread_handle);
                     Err(GlobalHotkeyError::ThreadDied)
                 }
             }
@@ -332,11 +343,14 @@ mod imp {
     }
 
     fn register_class() -> Result<(), u32> {
+        // Propagate `GetModuleHandleW` failures instead of silently passing a
+        // NULL `HINSTANCE` to `RegisterClassExW`, which would surface later as
+        // a misleading `WindowClassFailed`. Reporting the real error keeps the
+        // diagnostic honest.
         let hinstance: HINSTANCE = unsafe {
-            match GetModuleHandleW(PCWSTR(std::ptr::null())) {
-                Ok(module) => HINSTANCE(module.0),
-                Err(_) => HINSTANCE(std::ptr::null_mut()),
-            }
+            GetModuleHandleW(PCWSTR(std::ptr::null()))
+                .map(|module| HINSTANCE(module.0))
+                .map_err(|_| last_error_code())?
         };
 
         let wnd_class = WNDCLASSEXW {
@@ -355,17 +369,23 @@ mod imp {
         }
     }
 
-    fn run_message_loop(hwnd: HWND, events_tx: &Sender<()>) {
+    fn run_message_loop(_hwnd: HWND, events_tx: &Sender<()>) {
         let mut msg = MSG::default();
         loop {
-            // Filter on `hwnd` so we only pick up messages for our
-            // message-only window — both `WM_HOTKEY` (because we registered
-            // the hotkey against this HWND) and `WM_TRACE_STOP` (posted via
-            // `PostMessageW(hwnd, ...)` from Drop) arrive here.
-            let got = unsafe { GetMessageW(&mut msg, hwnd, 0, 0) };
-            // GetMessageW returns 0 on WM_QUIT, -1 on error. We never
-            // PostQuitMessage, so a 0 here means something upstream nuked
-            // our queue — bail out.
+            // Pass NULL to receive all messages on this thread — the hwnd
+            // filter would drop `WM_HOTKEY` because its `MSG.hwnd` field can
+            // be NULL even when `RegisterHotKey` was called with a window
+            // handle (`WM_HOTKEY` is conceptually a thread-level event). Our
+            // `match msg.message` arms dispatch only the messages we care
+            // about; anything else is routed through `TranslateMessage` +
+            // `DispatchMessageW`.
+            let got = unsafe { GetMessageW(&mut msg, HWND(std::ptr::null_mut()), 0, 0) };
+            // `GetMessageW` returns:
+            // - positive: regular message retrieved
+            // - 0: `WM_QUIT` was retrieved (no one posts it in our thread
+            //   today, but we treat it as a stop)
+            // - -1 (-1i32): error (extremely rare; typically indicates an
+            //   invalid HWND or a system-level failure)
             if got.0 <= 0 {
                 break;
             }
@@ -420,26 +440,21 @@ mod tests {
 
     #[test]
     fn global_hotkey_error_display_is_human_readable() {
-        let cases: [GlobalHotkeyError; 5] = [
-            GlobalHotkeyError::RegistrationFailed(1409),
-            GlobalHotkeyError::WindowCreationFailed(5),
-            GlobalHotkeyError::WindowClassFailed(1410),
-            GlobalHotkeyError::ThreadSpawnFailed("nope".into()),
-            GlobalHotkeyError::ThreadDied,
-        ];
-
-        for err in &cases {
-            let rendered = err.to_string();
-            assert!(
-                !rendered.is_empty(),
-                "Display impl produced empty string for {err:?}"
-            );
-            // A useful message is more than the variant name.
-            assert!(
-                rendered.len() >= 10,
-                "Display impl too terse for {err:?}: {rendered:?}"
-            );
-        }
+        use GlobalHotkeyError::*;
+        assert!(RegistrationFailed(1409).to_string().contains("1409"));
+        assert!(WindowCreationFailed(6).to_string().contains("6"));
+        assert!(WindowClassFailed(87).to_string().contains("87"));
+        assert!(ThreadSpawnFailed("nope".into())
+            .to_string()
+            .contains("nope"));
+        let dead = ThreadDied.to_string();
+        // "ThreadDied" should render as something like "worker thread died" —
+        // assert at minimum it's non-empty and doesn't expose the debug variant.
+        assert!(!dead.is_empty());
+        assert!(
+            !dead.contains("ThreadDied"),
+            "Display should be human-readable, not the debug variant name: {dead}"
+        );
     }
 
     #[test]
