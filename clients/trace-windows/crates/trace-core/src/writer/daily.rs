@@ -1106,6 +1106,16 @@ mod tests {
         // silently fell back to `CreateNewEntry`, producing a duplicate
         // `## HH:MM` block at the top instead of appending under the
         // existing one.
+        //
+        // Output line endings are intentionally mixed: existing CRLF
+        // bytes are preserved verbatim, the spliced chunk is LF-only
+        // (matching Swift's LF-only string literals). The `12:00` line's
+        // original `\r\n` ends up visually "split" — `\n` terminates
+        // `12:00`, and the `\r\n` that followed it now terminates the
+        // new `12:05` line. Every `\r` in the output is still paired
+        // with a following `\n`, so no orphan carriage returns are
+        // introduced; downstream Markdown renderers accept mixed
+        // terminators.
         let now = fixed_time(2026, 4, 20, 12, 5);
         let section = NoteSection::new(0, "Note");
         let seed = "# Note\r\n\r\nhello\r\n2026-04-20 12:00\r\n\r\n";
@@ -1119,9 +1129,6 @@ mod tests {
             now,
         );
 
-        // Existing CRLF bytes are preserved verbatim; the spliced chunk
-        // uses LF (matching Swift, whose `String(contentsOf:)` loads and
-        // writes bytes unchanged and whose appended chunk is LF-only).
         let expected = concat!(
             "# Note\r\n\r\n",
             "hello\r\n",
@@ -1130,6 +1137,92 @@ mod tests {
             "\r\n\r\n",
         );
         assert_eq!(actual, expected);
+        // Sanity: no bare `\r` (every `\r` followed by `\n`).
+        let bytes = actual.as_bytes();
+        for (i, &b) in bytes.iter().enumerate() {
+            if b == b'\r' {
+                assert_eq!(
+                    bytes.get(i + 1),
+                    Some(&b'\n'),
+                    "bare \\r at byte {i} in {actual:?}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn append_code_block_handles_crlf_seed() {
+        // CRLF seed — the opening/closing fences are located by ASCII
+        // `str::find("```")` so CRLF is transparent to the anchor search.
+        // The preceding-byte check for the prefix sees `\n` (LF half of
+        // the final `\r\n`) and selects prefix = "", matching the LF
+        // behaviour. Existing CRLF bytes preserved, spliced chunk LF.
+        let now = fixed_time(2026, 4, 20, 12, 5);
+        let section = NoteSection::new(0, "Note");
+        let seed = "# Note\r\n\r\n```\r\nhello\r\n2026-04-20 12:00\r\n```\r\n\r\n";
+
+        let (_tmp, actual) = run_save(
+            EntryTheme::CodeBlockClassic,
+            Some(seed),
+            "follow up",
+            &section,
+            SaveMode::AppendToLatestEntry,
+            now,
+        );
+
+        let expected = concat!(
+            "# Note\r\n\r\n",
+            "```\r\n",
+            "hello\r\n",
+            "2026-04-20 12:00\r\n",
+            "---\nfollow up\n2026-04-20 12:05\n",
+            "```\r\n\r\n",
+        );
+        assert_eq!(actual, expected);
+        // No bare `\r`.
+        let bytes = actual.as_bytes();
+        for (i, &b) in bytes.iter().enumerate() {
+            if b == b'\r' {
+                assert_eq!(bytes.get(i + 1), Some(&b'\n'), "bare \\r at byte {i}");
+            }
+        }
+    }
+
+    #[test]
+    fn append_markdown_quote_handles_crlf_seed() {
+        // CRLF seed. `first_quote_block_start` tests `starts_with('>')`
+        // on the line (which includes the trailing `\r`), so it still
+        // recognises quoted lines. `callout_block_end` stops at the
+        // trailing blank (`\r`-prefixed line fails `starts_with(">")`).
+        let now = fixed_time(2026, 4, 20, 12, 5);
+        let section = NoteSection::new(0, "Note");
+        let seed = "# Note\r\n\r\n> hello\r\n>\r\n> 2026-04-20 12:00\r\n\r\n";
+
+        let (_tmp, actual) = run_save(
+            EntryTheme::MarkdownQuote,
+            Some(seed),
+            "follow up",
+            &section,
+            SaveMode::AppendToLatestEntry,
+            now,
+        );
+
+        let expected = concat!(
+            "# Note\r\n\r\n",
+            "> hello\r\n",
+            ">\r\n",
+            "> 2026-04-20 12:00\r\n",
+            "\n> ---\n> follow up\n>\n> 2026-04-20 12:05\n",
+            "\r\n",
+        );
+        assert_eq!(actual, expected);
+        // No bare `\r`.
+        let bytes = actual.as_bytes();
+        for (i, &b) in bytes.iter().enumerate() {
+            if b == b'\r' {
+                assert_eq!(bytes.get(i + 1), Some(&b'\n'), "bare \\r at byte {i}");
+            }
+        }
     }
 
     #[test]
