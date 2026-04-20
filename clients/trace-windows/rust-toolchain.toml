@@ -1,0 +1,10 @@
+[toolchain]
+# Track the latest stable channel. Pinning a patch would force every
+# contributor onto the same compiler build, which is not necessary for Trace —
+# any stable >= the workspace `rust-version` (1.80) should work.
+channel = "stable"
+components = ["rustfmt", "clippy"]
+# Intentionally no `targets = [...]` here: cross-compiling to Windows from a
+# macOS/Linux dev box is out of scope. CI installs the right target by virtue
+# of being on a Windows runner. Contributors who want to cross-compile locally
+# can `rustup target add x86_64-pc-windows-msvc` themselves.

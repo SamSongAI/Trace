@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/trace-core",
+    "crates/trace-platform",
+    "crates/trace-ui",
+    "crates/trace-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+repository = "https://github.com/SamSong1997/Trace"
+authors = ["Sam Song <samsong199705@gmail.com>"]
+
+[workspace.dependencies]
+# Cross-platform domain dependencies (used by trace-core)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+chrono = { version = "0.4", features = ["clock", "serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# UI dependencies
+iced = "0.14"
+
+# Windows platform dependencies
+windows = "0.58"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

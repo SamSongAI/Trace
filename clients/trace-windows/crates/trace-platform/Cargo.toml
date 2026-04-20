@@ -1,0 +1,18 @@
+[package]
+name = "trace-platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Windows-only system integration for the Trace client (global hotkeys, tray, autostart)."
+
+[dependencies]
+trace-core = { path = "../trace-core" }
+
+# `windows` is only declared on Windows targets so the workspace remains
+# buildable on macOS/Linux developer machines (the crate body stays empty on
+# non-Windows targets via `#[cfg(windows)]`).
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }

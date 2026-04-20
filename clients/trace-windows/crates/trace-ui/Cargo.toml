@@ -1,0 +1,13 @@
+[package]
+name = "trace-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "iced-based UI layer for the Trace Windows client."
+
+[dependencies]
+trace-core = { path = "../trace-core" }
+iced = { workspace = true }

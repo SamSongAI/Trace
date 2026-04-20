@@ -1,0 +1,65 @@
+name: trace-windows-build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'clients/trace-windows/**'
+      - '.github/workflows/trace-windows-build.yml'
+  pull_request:
+    paths:
+      - 'clients/trace-windows/**'
+      - '.github/workflows/trace-windows-build.yml'
+
+defaults:
+  run:
+    working-directory: clients/trace-windows
+
+jobs:
+  # Cross-platform sanity check for the domain layer. `trace-core` deliberately
+  # has no Windows dependencies so it must build and test on Linux too.
+  core-tests:
+    name: trace-core tests
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/trace-windows -> target
+
+      - name: Run trace-core tests
+        run: cargo test -p trace-core --verbose
+
+  # Full release build requires Windows because `trace-platform` and
+  # `trace-app` link against the `windows` crate. We exclude `trace-app` from
+  # the explicit build list because it has no runtime yet, but including it
+  # still works on Windows.
+  windows-release-build:
+    name: cargo build --release (windows)
+    runs-on: windows-latest
+    needs: core-tests
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/trace-windows -> target
+
+      - name: Build trace-core, trace-platform, trace-ui (release)
+        run: cargo build --release -p trace-core -p trace-platform -p trace-ui

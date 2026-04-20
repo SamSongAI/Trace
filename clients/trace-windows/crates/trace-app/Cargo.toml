@@ -1,0 +1,22 @@
+[package]
+name = "trace-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Executable entry point for the Trace Windows client."
+
+[[bin]]
+name = "trace-app"
+path = "src/main.rs"
+
+[dependencies]
+trace-core = { path = "../trace-core" }
+trace-ui = { path = "../trace-ui" }
+
+# `trace-platform` only pulls in real Windows APIs on Windows targets, so we
+# only link it on Windows too. On macOS/Linux the binary compiles as a no-op.
+[target.'cfg(windows)'.dependencies]
+trace-platform = { path = "../trace-platform" }

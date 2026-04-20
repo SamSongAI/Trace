@@ -1,0 +1,19 @@
+# Cargo workspace configuration for the Trace Windows client.
+#
+# Release builds target x86-64-v2 (Nehalem+, covers all 64-bit consumer CPUs
+# from ~2008 onwards) to enable SSE4.2/POPCNT without sacrificing
+# compatibility on the vast majority of current Windows 10/11 machines.
+[build]
+# No global target override: development on macOS/Linux should keep the host
+# triple. Windows CI builds explicitly with `cargo build --release`.
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-cpu=x86-64-v2"]
+
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "target-cpu=x86-64-v2"]
+
+# NOTE: keep this file free of developer-specific registry mirrors. Contributors
+# behind mirrors/proxies should put those overrides in their user-level
+# `~/.cargo/config.toml` so CI and other machines pull from the official
+# crates.io index unchanged.
