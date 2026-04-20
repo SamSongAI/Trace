@@ -4,6 +4,15 @@
 //! its tests can run on Linux, macOS and Windows alike. Platform integration
 //! lives in `trace-platform`; the iced UI layer lives in `trace-ui`.
 
+pub mod error;
+pub mod models;
+
+pub use error::TraceError;
+pub use models::{
+    Entry, EntryTheme, Language, NoteSection, PanelFrame, SeparatorStyle, ThemePreset,
+    ThreadConfig, WriteMode,
+};
+
 /// Crate version, wired up here so downstream crates can display it.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
