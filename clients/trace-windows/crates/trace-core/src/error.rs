@@ -8,6 +8,18 @@ pub enum TraceError {
     #[error("invalid thread config: {0}")]
     InvalidThreadConfig(String),
 
+    #[error("path escapes vault: {0}")]
+    PathEscapesVault(String),
+
+    #[error("invalid filename: {0}")]
+    InvalidFilename(String),
+
+    #[error("unsupported date pattern token: {0}")]
+    UnsupportedDatePatternToken(String),
+
+    #[error("atomic write failed: {0}")]
+    AtomicWriteFailed(String),
+
     #[error("serialization failed: {0}")]
     SerializationFailed(#[from] serde_json::Error),
 
@@ -29,6 +41,30 @@ mod tests {
     fn display_formats_invalid_thread_config() {
         let err = TraceError::InvalidThreadConfig("duplicate name".into());
         assert_eq!(err.to_string(), "invalid thread config: duplicate name");
+    }
+
+    #[test]
+    fn display_formats_path_escapes_vault() {
+        let err = TraceError::PathEscapesVault("../etc/passwd".into());
+        assert_eq!(err.to_string(), "path escapes vault: ../etc/passwd");
+    }
+
+    #[test]
+    fn display_formats_invalid_filename() {
+        let err = TraceError::InvalidFilename("...".into());
+        assert_eq!(err.to_string(), "invalid filename: ...");
+    }
+
+    #[test]
+    fn display_formats_unsupported_date_pattern_token() {
+        let err = TraceError::UnsupportedDatePatternToken("Q".into());
+        assert_eq!(err.to_string(), "unsupported date pattern token: Q");
+    }
+
+    #[test]
+    fn display_formats_atomic_write_failed() {
+        let err = TraceError::AtomicWriteFailed("rename aborted".into());
+        assert_eq!(err.to_string(), "atomic write failed: rename aborted");
     }
 
     #[test]
