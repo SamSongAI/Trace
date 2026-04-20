@@ -640,7 +640,7 @@ fn migrate_project_title(titles: &[String], stored_version: u32) -> Vec<String> 
     let compacted: String = title
         .trim()
         .chars()
-        .filter(|c| !c.is_whitespace())
+        .filter(|c| *c != ' ')
         .collect::<String>()
         .to_uppercase();
 
@@ -1050,6 +1050,22 @@ mod tests {
         let titles: Vec<String> = ["A", "B"].iter().map(|s| s.to_string()).collect();
         let migrated = migrate_project_title(&titles, 0);
         assert_eq!(migrated, titles);
+    }
+
+    #[test]
+    fn project_migration_only_strips_ascii_space_not_tab_or_unicode_whitespace() {
+        // Swift's `replacingOccurrences(of: " ", with: "")` only handles
+        // U+0020. Tabs, NBSP, and full-width spaces must NOT be treated as
+        // collapsible — otherwise "TO\tDO" and similar variants would trigger
+        // migration on Windows but not on Mac, diverging the two clients.
+        for exotic in ["TO\tDO", "TO\u{00A0}DO", "TO\u{3000}DO"] {
+            let titles = titles_with_project(exotic);
+            let migrated = migrate_project_title(&titles, 0);
+            assert_eq!(
+                migrated[PROJECT_SECTION_INDEX], exotic,
+                "exotic whitespace variant {exotic:?} must be preserved, not migrated to default",
+            );
+        }
     }
 
     // -------------------------------------------------------------------
