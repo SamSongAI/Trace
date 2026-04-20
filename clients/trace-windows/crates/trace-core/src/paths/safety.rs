@@ -115,7 +115,7 @@ fn canonicalize_existing_prefix(path: &Path) -> PathBuf {
     canonicalize_existing_prefix_of(path).unwrap_or_else(|| normalize_components(path))
 }
 
-fn canonicalize_existing_prefix_of(path: &Path) -> Option<PathBuf> {
+pub(crate) fn canonicalize_existing_prefix_of(path: &Path) -> Option<PathBuf> {
     let mut current = path.to_path_buf();
     loop {
         if let Ok(canonical) = std::fs::canonicalize(&current) {

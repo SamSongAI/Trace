@@ -32,6 +32,7 @@ use chrono::{DateTime, Utc};
 use crate::error::TraceError;
 use crate::models::{EntryTheme, ThreadConfig};
 use crate::paths::resolve_within_vault;
+use crate::paths::safety::canonicalize_existing_prefix_of;
 use crate::writer::{markdown_quote_body_thread, timestamp, write_atomic, SaveMode, WrittenNote};
 
 /// Injectable configuration for the thread writer.
@@ -229,10 +230,11 @@ fn find_top_level_heading_end(content: &str) -> Option<usize> {
 
     // Check start-of-file first.
     if starts_heading(bytes, 0) {
-        return bytes[0..].iter().position(|b| *b == b'\n').map(|i| i + 1);
+        return bytes.iter().position(|b| *b == b'\n').map(|i| i + 1);
     }
 
     // Scan for "\n# " or "\n#\t" elsewhere in the file.
+    // +2 so bytes[idx+1..=idx+2] can hold the "# " or "#\t" heading marker.
     let mut idx = 0;
     while idx + 2 < bytes.len() {
         if bytes[idx] == b'\n' && starts_heading(bytes, idx + 1) {
@@ -275,6 +277,7 @@ fn find_h2_heading_start(content: &str) -> Option<usize> {
         return Some(0);
     }
 
+    // +3 so bytes[idx+1..=idx+3] can hold the "## " or "##\t" h2 marker.
     let mut idx = 0;
     while idx + 3 < bytes.len() {
         if bytes[idx] == b'\n' && starts_h2(bytes, idx + 1) {
@@ -316,21 +319,6 @@ fn resolve_absolute_target(normalized: &str) -> Result<PathBuf, TraceError> {
     // resolved. If nothing exists yet we fall back to the literal path.
     let resolved = canonicalize_existing_prefix_of(&path).unwrap_or(path);
     Ok(resolved)
-}
-
-/// Best-effort prefix canonicalisation — identical in spirit to the helper in
-/// `paths::safety`, duplicated here to avoid widening the module boundary.
-fn canonicalize_existing_prefix_of(path: &Path) -> Option<PathBuf> {
-    let mut current = path.to_path_buf();
-    loop {
-        if let Ok(canonical) = std::fs::canonicalize(&current) {
-            let suffix = path.strip_prefix(&current).unwrap_or(Path::new(""));
-            return Some(canonical.join(suffix));
-        }
-        if !current.pop() {
-            return None;
-        }
-    }
 }
 
 /// Appends `.md` if the path string does not already end with `.md`.
