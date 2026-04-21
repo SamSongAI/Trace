@@ -36,20 +36,35 @@ pub const LORA_FONT: Font = Font::with_name("Lora");
 /// [`None`] until the Phase 10 font asset is checked in. See module docs.
 pub const LORA_FONT_BYTES: Option<&[u8]> = None;
 
+/// The concrete slice returned by [`startup_font_bytes`]. Kept as its own
+/// constant because `const fn` can't build a slice literal over a conditional
+/// [`Option`] value.
+///
+/// **Invariant**: this must stay in lock-step with [`LORA_FONT_BYTES`]. When
+/// the Phase 10 font asset lands, update both:
+///
+/// ```ignore
+/// pub const LORA_FONT_BYTES: Option<&[u8]> =
+///     Some(include_bytes!("../../../assets/fonts/Lora-Regular.ttf"));
+/// const STARTUP_FONTS: &[&[u8]] =
+///     &[include_bytes!("../../../assets/fonts/Lora-Regular.ttf")];
+/// ```
+const STARTUP_FONTS: &[&[u8]] = &[];
+
 /// Returns the list of font byte blobs that `app::run()` should register with
 /// iced at startup. Callers splat this into the `application(...)` builder:
 ///
 /// ```ignore
 /// let mut app = iced::application(...);
-/// for bytes in trace_ui::fonts::startup_font_bytes() {
+/// for &bytes in trace_ui::fonts::startup_font_bytes() {
 ///     app = app.font(bytes);
 /// }
 /// ```
-pub fn startup_font_bytes() -> Vec<&'static [u8]> {
-    match LORA_FONT_BYTES {
-        Some(bytes) => vec![bytes],
-        None => Vec::new(),
-    }
+///
+/// Returns a static slice rather than an owned [`Vec`] so no allocation is
+/// needed when no fonts are bundled.
+pub const fn startup_font_bytes() -> &'static [&'static [u8]] {
+    STARTUP_FONTS
 }
 
 #[cfg(test)]
@@ -66,13 +81,11 @@ mod tests {
     }
 
     #[test]
-    fn startup_font_bytes_is_empty_when_unbundled() {
-        // Guard test: once Phase 10 actually bundles Lora, update this test
-        // to assert the bytes are loaded.
-        if LORA_FONT_BYTES.is_none() {
-            assert!(startup_font_bytes().is_empty());
-        } else {
-            assert_eq!(startup_font_bytes().len(), 1);
-        }
+    fn startup_font_bytes_matches_lora_option() {
+        // Guard test: `STARTUP_FONTS` must stay in lock-step with
+        // `LORA_FONT_BYTES`. If a future edit updates one but not the other,
+        // this catches it.
+        let bundled_count = usize::from(LORA_FONT_BYTES.is_some());
+        assert_eq!(startup_font_bytes().len(), bundled_count);
     }
 }

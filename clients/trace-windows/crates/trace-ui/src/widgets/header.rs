@@ -5,10 +5,13 @@
 //! padding, chrome background, 8 px spacing between the wordmark and the
 //! button cluster.
 //!
-//! Icons are rendered as unicode glyphs: pin uses U+1F4CC ("pushpin") to match
-//! the Mac SF Symbol `pin` / `pin.fill`, and settings uses U+2699 ("gear").
-//! Phase 10 keeps the icons purely decorative; Phase 11 will swap in bitmap
-//! icons if the glyph coverage is insufficient on Windows defaults.
+//! Icons are rendered as unicode glyphs: pin uses U+1F4CC ("pushpin") to
+//! approximate the Mac SF Symbol `pin`, and settings uses U+2699 ("gear").
+//! Unicode has no filled-pushpin counterpart to SF Symbol `pin.fill`, so the
+//! Mac's weight swap is replaced by an accent-color swap driven by the
+//! `pinned` flag (see [`crate::theme::header_icon_button_style`]). Phase 11
+//! will swap in bitmap icons if the glyph coverage is insufficient on
+//! Windows defaults.
 
 use iced::widget::{button, container, row, text, Space};
 use iced::{Length, Pixels};
@@ -20,25 +23,21 @@ use crate::theme::{chrome_container_style, header_icon_button_style};
 
 /// Brand wordmark displayed on the left side of the header.
 pub const BRAND_TEXT: &str = "Trace";
-/// Glyph used for the Pin button when the panel is not pinned. Maps to the
-/// Mac SF Symbol `pin`.
+/// Glyph used for the Pin button regardless of state. The pinned vs. idle
+/// distinction is carried by the button's text color, not by swapping glyphs
+/// (Unicode has no filled-pushpin sibling to U+1F4CC).
 pub const PIN_GLYPH: &str = "\u{1F4CC}";
-/// Glyph used when the panel is pinned. Mac uses `pin.fill`; we reuse the
-/// same codepoint and rely on weight/color to signal the state.
-pub const PIN_FILL_GLYPH: &str = "\u{1F4CC}";
 /// Gear glyph used for the Settings button.
 pub const SETTINGS_GLYPH: &str = "\u{2699}";
 
 /// Builds the 36 px header row.
 ///
-/// `pinned` toggles the pin button's icon color and active state so it can
-/// look distinct from the idle icon-muted shade.
+/// `pinned` controls the pin button's text color (accent vs. icon-muted) so
+/// it can look distinct from the idle state without changing the glyph.
 pub fn header<'a>(palette: CapturePalette, pinned: bool) -> iced::Element<'a, Message> {
-    let pin_icon = if pinned { PIN_FILL_GLYPH } else { PIN_GLYPH };
-
     let brand = text(BRAND_TEXT).font(LORA_FONT).size(Pixels(13.0));
 
-    let pin_button = button(text(pin_icon).size(Pixels(11.0)))
+    let pin_button = button(text(PIN_GLYPH).size(Pixels(11.0)))
         .on_press(Message::PinToggled)
         .style(header_icon_button_style(palette, pinned));
 

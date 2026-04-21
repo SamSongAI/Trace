@@ -91,6 +91,15 @@ pub struct CaptureApp {
     /// wholesale on preset change so read paths can take a snapshot without
     /// locking.
     pub theme: TraceTheme,
+    /// Pre-built iced [`Theme`] derived from [`CaptureApp::theme`]. iced calls
+    /// the `theme()` closure on every frame, and `to_iced_theme` performs a
+    /// full palette rebuild (colour mixing plus an `Arc` allocation). We cache
+    /// the result here and only rebuild it when the preset actually changes.
+    ///
+    /// **Invariant**: `iced_theme == to_iced_theme(&theme)`. [`set_theme`]
+    /// refreshes both fields atomically; direct mutation of `theme` will
+    /// desynchronise the cache.
+    pub iced_theme: Theme,
     /// Whether the document-title input is visible, plus all the footer
     /// branching.
     pub write_mode: WriteMode,
@@ -129,8 +138,10 @@ impl CaptureApp {
         // stable order without re-sorting per frame.
         let mut threads = threads;
         threads.sort_by_key(|t| t.order);
+        let iced_theme = to_iced_theme(&theme);
         Self {
             theme,
+            iced_theme,
             write_mode: WriteMode::default(),
             editor_content: text_editor::Content::new(),
             selected_section: None,
@@ -147,6 +158,15 @@ impl CaptureApp {
     /// [`text_editor::Content::text`].
     pub fn editor_text(&self) -> String {
         self.editor_content.text()
+    }
+
+    /// Replaces the active [`TraceTheme`] and refreshes the cached
+    /// [`Self::iced_theme`] atomically. This is the only supported way to
+    /// change the preset — callers that mutate [`Self::theme`] directly will
+    /// leave the cache stale. Phase 12 wires this into the settings flow.
+    pub fn set_theme(&mut self, theme: TraceTheme) {
+        self.iced_theme = to_iced_theme(&theme);
+        self.theme = theme;
     }
 }
 
@@ -223,9 +243,11 @@ pub fn view(state: &CaptureApp) -> Element<'_, Message> {
 /// Returns the iced [`Theme`] derived from [`CaptureApp::theme`].
 ///
 /// Plumbed through `iced::application(...).theme(theme)` so changing the
-/// preset in Phase 12 will live-update the shell.
+/// preset in Phase 12 will live-update the shell. Reads from the cached
+/// [`CaptureApp::iced_theme`] so the per-frame cost is an `Arc` clone rather
+/// than a full palette rebuild.
 pub fn theme(state: &CaptureApp) -> Theme {
-    to_iced_theme(&state.theme)
+    state.iced_theme.clone()
 }
 
 /// Returns the panel's [`window::Settings`].
@@ -395,6 +417,32 @@ mod tests {
         let expected_bg = app.theme.capture.panel_background;
         let palette = iced_theme.palette();
         assert!((palette.background.r - expected_bg.r as f32 / 255.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn set_theme_refreshes_cached_iced_theme() {
+        use crate::theme::to_iced_theme;
+
+        let mut app = fresh_app();
+        let dark_fresh = to_iced_theme(&app.theme);
+        assert_eq!(
+            theme(&app).palette().background,
+            dark_fresh.palette().background,
+            "initial cache must match a fresh to_iced_theme(Dark)"
+        );
+
+        app.set_theme(TraceTheme::for_preset(ThemePreset::Light));
+        let light_fresh = to_iced_theme(&app.theme);
+        assert_eq!(
+            theme(&app).palette().background,
+            light_fresh.palette().background,
+            "after set_theme the cache must match a fresh to_iced_theme(Light)"
+        );
+        assert_ne!(
+            dark_fresh.palette().background,
+            light_fresh.palette().background,
+            "Dark and Light should produce distinct palette backgrounds"
+        );
     }
 
     #[test]

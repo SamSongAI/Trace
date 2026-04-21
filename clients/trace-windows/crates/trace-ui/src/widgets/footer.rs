@@ -153,7 +153,8 @@ fn chip_grid<'a>(
     chips: Vec<iced::Element<'a, Message>>,
 ) -> iced::Element<'a, Message> {
     let columns = SECTION_GRID_COLUMNS.max(1);
-    let mut rows: Vec<iced::Element<'a, Message>> = Vec::new();
+    let expected_rows = chips.len().div_ceil(columns);
+    let mut rows: Vec<iced::Element<'a, Message>> = Vec::with_capacity(expected_rows);
     let mut current_row: Vec<iced::Element<'a, Message>> = Vec::with_capacity(columns);
     for chip in chips {
         current_row.push(chip);
