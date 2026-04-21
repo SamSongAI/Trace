@@ -23,13 +23,14 @@
 //! top-level `iced::daemon` wiring that routes messages between the two
 //! windows.
 
+pub mod tiles;
 pub mod widgets;
 
 use std::sync::Arc;
 
-use iced::widget::{column, container, scrollable, text, Space};
+use iced::widget::{column, container, row, scrollable, text};
 use iced::{window, Element, Length, Pixels, Size, Subscription, Task, Theme};
-use trace_core::{AppSettings, L10n, Language, TraceTheme};
+use trace_core::{AppSettings, L10n, Language, ThemePreset, TraceTheme, WriteMode};
 
 use crate::theme::to_iced_theme;
 
@@ -78,16 +79,31 @@ pub fn window_settings() -> window::Settings {
 
 /// Messages consumed by [`settings_update`].
 ///
-/// Sub-task 1 keeps the surface minimal — only the "close" pathway is wired
-/// so that tests can verify the message dispatch round-trips. Every later
-/// sub-task extends this enum with card-specific variants (e.g. a Language
-/// picker change, a Theme preset change, etc.).
+/// Sub-task 3 wires the first three cards (Language, Theme, Storage → Write
+/// Mode). The three [`LanguageChanged`]/[`ThemePresetChanged`]/
+/// [`WriteModeChanged`] variants only touch shadow fields on
+/// [`SettingsApp`] — persistence to [`AppSettings`] lands in sub-task 8,
+/// after every card has its full row complement wired up.
+///
+/// [`LanguageChanged`]: SettingsMessage::LanguageChanged
+/// [`ThemePresetChanged`]: SettingsMessage::ThemePresetChanged
+/// [`WriteModeChanged`]: SettingsMessage::WriteModeChanged
 #[derive(Debug, Clone)]
 pub enum SettingsMessage {
-    /// Fired when the user changes the active language. Sub-task 1 plumbs
-    /// this through `settings_update` so later sub-tasks can hook in the
-    /// real `AppSettings` write path without touching the dispatch layer.
+    /// Fired when the user changes the active language via the Language card.
+    /// Updates the shadow [`SettingsApp::language`] field so the rest of the
+    /// settings view localizes immediately without a round-trip through
+    /// [`AppSettings`].
     LanguageChanged(Language),
+    /// Fired when the user picks a different theme preset via the Theme card.
+    /// Updates the shadow [`SettingsApp::theme_preset`] and rebuilds the
+    /// cached iced theme so the settings window itself previews the selection
+    /// in-place.
+    ThemePresetChanged(ThemePreset),
+    /// Fired when the user picks a different write mode via the Storage card.
+    /// Updates the shadow [`SettingsApp::write_mode`] field without touching
+    /// the shared [`AppSettings`] snapshot.
+    WriteModeChanged(WriteMode),
 }
 
 /// Mutable application state for the settings window.
@@ -122,6 +138,18 @@ pub struct SettingsApp {
     /// `settings.language`; later sub-tasks wire a language picker to this
     /// field.
     pub language: Language,
+    /// Active theme preset shown in the Theme card. Seeded from
+    /// `settings.app_theme_preset`; mutated in-place by
+    /// [`SettingsMessage::ThemePresetChanged`] so the settings window can
+    /// preview a new preset before the write back to [`AppSettings`] lands
+    /// (sub-task 8).
+    pub theme_preset: ThemePreset,
+    /// Active write mode shown in the Storage → Write Mode row. Seeded from
+    /// `settings.note_write_mode`; mutated in-place by
+    /// [`SettingsMessage::WriteModeChanged`] so the Storage card can toggle
+    /// between `Dimension` / `Thread` / `File` independently of the shared
+    /// [`AppSettings`] snapshot.
+    pub write_mode: WriteMode,
 }
 
 impl SettingsApp {
@@ -135,11 +163,15 @@ impl SettingsApp {
     pub fn new(theme: TraceTheme, settings: Arc<AppSettings>) -> Self {
         let iced_theme = to_iced_theme(&theme);
         let language = settings.language;
+        let theme_preset = settings.app_theme_preset;
+        let write_mode = settings.note_write_mode;
         Self {
             theme,
             iced_theme,
             settings,
             language,
+            theme_preset,
+            write_mode,
         }
     }
 
@@ -164,22 +196,49 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
             state.language = lang;
             Task::none()
         }
+        SettingsMessage::ThemePresetChanged(preset) => {
+            // Swap the shadow field first, then rebuild the full
+            // [`TraceTheme`] so the cached iced theme stays in lock-step.
+            // `set_theme` handles the iced-theme recompute so this branch
+            // only needs to remember the preset and hand off to the helper.
+            state.theme_preset = preset;
+            state.set_theme(TraceTheme::for_preset(preset));
+            Task::none()
+        }
+        SettingsMessage::WriteModeChanged(mode) => {
+            // The write-mode shadow field only feeds the view layer. Sub-task 4
+            // will thread this into the Storage card's vault-path / filename
+            // rows so toggling the mode retargets the fields; sub-task 8 wires
+            // the actual persistence.
+            state.write_mode = mode;
+            Task::none()
+        }
     }
 }
+
+/// Spacing (in pixels) between stacked settings cards inside the scrollable
+/// column. Matches Mac `SettingsView.swift`'s `VStack(spacing: 18)`.
+pub const SETTINGS_CARD_STACK_SPACING: f32 = 18.0;
+/// Spacing between adjacent language chips inside the Language card row.
+pub const LANGUAGE_CHIP_SPACING: f32 = 8.0;
+/// Vertical spacing between theme-preset tiles inside the Theme card column.
+pub const THEME_TILE_SPACING: f32 = 8.0;
+/// Spacing between adjacent write-mode tiles inside the Storage card row.
+pub const WRITE_MODE_TILE_SPACING: f32 = 8.0;
 
 /// Renders the settings window. Returns an [`Element`] ready for use in an
 /// `iced::daemon(...).view(...)` router.
 ///
-/// Sub-task 1 renders a single scrollable column with a localized "Settings"
-/// title. Card-level content lands in sub-tasks 3+.
+/// Sub-task 3 layers the first three cards (Language, Theme, Storage) on top
+/// of the sub-task 1 scrollable shell. Every subsequent sub-task appends more
+/// cards to [`build_cards`] without reshaping the outer layout.
 pub fn settings_view(state: &SettingsApp) -> Element<'_, SettingsMessage> {
     let title = text(L10n::settings(state.language)).size(Pixels(SETTINGS_TITLE_FONT_SIZE));
 
-    // The scrollable column is intentionally left with a single child so
-    // sub-task 2 can slot in the card stack here without reshaping the
-    // outer layout.
-    let body = column![title, Space::new().height(Length::Shrink)]
-        .spacing(16)
+    let cards = build_cards(state);
+
+    let body = column![title, cards]
+        .spacing(SETTINGS_CARD_STACK_SPACING)
         .width(Length::Fill);
 
     let scrollable_body = scrollable(
@@ -194,6 +253,130 @@ pub fn settings_view(state: &SettingsApp) -> Element<'_, SettingsMessage> {
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+}
+
+/// Builds the stacked card column for [`settings_view`]. Split out as a
+/// private helper so the card-per-sub-task wiring stays local without making
+/// the outer `settings_view` balloon. Returns an [`Element`] rather than a
+/// concrete column so future sub-tasks can swap in a more complex container
+/// without touching the caller.
+fn build_cards(state: &SettingsApp) -> Element<'_, SettingsMessage> {
+    let palette = state.theme.settings;
+
+    column![
+        language_card(state, palette),
+        theme_card(state, palette),
+        storage_card(state, palette),
+    ]
+    .spacing(SETTINGS_CARD_STACK_SPACING)
+    .width(Length::Fill)
+    .into()
+}
+
+/// Builds the Language card: a single row of chips covering
+/// `SystemDefault` + the three native locales.
+fn language_card<'a>(
+    state: &'a SettingsApp,
+    palette: trace_core::SettingsPalette,
+) -> Element<'a, SettingsMessage> {
+    let lang = state.language;
+    let chips: [(Language, &'a str); 4] = [
+        (Language::SystemDefault, L10n::language_system_default(lang)),
+        // Every locale renders with its endonym so the chip reads in its own
+        // script. `native_display_name` returns `None` only for
+        // `Language::SystemDefault`, which is handled above — the unwrap on
+        // these three arms is total.
+        (
+            Language::Zh,
+            Language::Zh
+                .native_display_name()
+                .expect("Zh endonym must exist"),
+        ),
+        (
+            Language::En,
+            Language::En
+                .native_display_name()
+                .expect("En endonym must exist"),
+        ),
+        (
+            Language::Ja,
+            Language::Ja
+                .native_display_name()
+                .expect("Ja endonym must exist"),
+        ),
+    ];
+
+    let chip_row = row(chips.iter().map(|(variant, label)| {
+        tiles::language_chip(
+            palette,
+            label,
+            state.language == *variant,
+            SettingsMessage::LanguageChanged(*variant),
+        )
+    }))
+    .spacing(LANGUAGE_CHIP_SPACING)
+    .width(Length::Fill);
+
+    widgets::section_card(palette, L10n::language(lang), chip_row.into())
+}
+
+/// Builds the Theme card: a vertical list of tiles, one per preset.
+fn theme_card<'a>(
+    state: &'a SettingsApp,
+    palette: trace_core::SettingsPalette,
+) -> Element<'a, SettingsMessage> {
+    let lang = state.language;
+    let presets = [
+        ThemePreset::Light,
+        ThemePreset::Dark,
+        ThemePreset::Paper,
+        ThemePreset::Dune,
+    ];
+
+    let tiles = presets.iter().map(|preset| {
+        let theme = TraceTheme::for_preset(*preset);
+        tiles::theme_preset_tile(
+            palette,
+            preset.title(),
+            preset.icon_glyph(),
+            theme.preview_swatches,
+            state.theme_preset == *preset,
+            SettingsMessage::ThemePresetChanged(*preset),
+        )
+    });
+
+    let stack = column(tiles)
+        .spacing(THEME_TILE_SPACING)
+        .width(Length::Fill);
+
+    widgets::section_card(palette, L10n::theme(lang), stack.into())
+}
+
+/// Builds the Storage card. Sub-task 3 wires only the Write Mode row — the
+/// vault path and filename template rows will be appended in sub-task 4.
+fn storage_card<'a>(
+    state: &'a SettingsApp,
+    palette: trace_core::SettingsPalette,
+) -> Element<'a, SettingsMessage> {
+    let lang = state.language;
+
+    let modes = [WriteMode::Dimension, WriteMode::Thread, WriteMode::File];
+    let tiles_row = row(modes.iter().map(|mode| {
+        tiles::write_mode_tile(
+            palette,
+            mode.compact_title(lang),
+            mode.destination_title(lang),
+            mode.icon_glyph(),
+            state.write_mode == *mode,
+            SettingsMessage::WriteModeChanged(*mode),
+        )
+    }))
+    .spacing(WRITE_MODE_TILE_SPACING)
+    .width(Length::Fill);
+
+    let write_mode_row = widgets::setting_row(palette, L10n::write_mode(lang), None, tiles_row.into());
+
+    widgets::section_card(palette, L10n::storage(lang), write_mode_row)
 }
 
 /// Returns the iced [`Theme`] derived from [`SettingsApp::theme`]. Plumbed
@@ -310,5 +493,133 @@ mod tests {
         // Lock the constants so a drift is caught at test time.
         assert_eq!(DEFAULT_SETTINGS_WINDOW_WIDTH, 720.0);
         assert_eq!(DEFAULT_SETTINGS_WINDOW_HEIGHT, 640.0);
+    }
+
+    // --- Sub-task 3 ----------------------------------------------------
+
+    #[test]
+    fn settings_app_new_seeds_theme_preset_and_write_mode_from_settings() {
+        // Shadow fields must pick up the persisted settings snapshot so the
+        // first render reflects the user's last choice without waiting for a
+        // message dispatch.
+        let persisted = AppSettings {
+            app_theme_preset: ThemePreset::Paper,
+            note_write_mode: WriteMode::File,
+            ..AppSettings::default()
+        };
+        let app = SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Paper),
+            Arc::new(persisted),
+        );
+        assert_eq!(app.theme_preset, ThemePreset::Paper);
+        assert_eq!(app.write_mode, WriteMode::File);
+    }
+
+    #[test]
+    fn settings_update_theme_preset_changed_refreshes_cached_iced_theme() {
+        let mut app = fresh_app();
+        let dark_bg = settings_theme(&app).palette().background;
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::ThemePresetChanged(ThemePreset::Light),
+        );
+        let light_bg = settings_theme(&app).palette().background;
+        assert_eq!(app.theme_preset, ThemePreset::Light);
+        assert_eq!(app.theme.preset, ThemePreset::Light);
+        assert_ne!(
+            dark_bg, light_bg,
+            "theme preset change must rebuild the cached iced theme"
+        );
+    }
+
+    #[test]
+    fn settings_update_theme_preset_changed_covers_every_preset() {
+        // Cycle through every preset to prove the match arms never miss one.
+        let mut app = fresh_app();
+        for preset in [
+            ThemePreset::Light,
+            ThemePreset::Dark,
+            ThemePreset::Paper,
+            ThemePreset::Dune,
+        ] {
+            let _ = settings_update(&mut app, SettingsMessage::ThemePresetChanged(preset));
+            assert_eq!(app.theme_preset, preset);
+            assert_eq!(app.theme.preset, preset);
+        }
+    }
+
+    #[test]
+    fn settings_update_write_mode_changed_updates_shadow_field() {
+        let mut app = fresh_app();
+        // `AppSettings::default()` uses `WriteMode::Dimension`.
+        assert_eq!(app.write_mode, WriteMode::Dimension);
+        for mode in [WriteMode::Thread, WriteMode::File, WriteMode::Dimension] {
+            let _ = settings_update(&mut app, SettingsMessage::WriteModeChanged(mode));
+            assert_eq!(app.write_mode, mode);
+        }
+    }
+
+    #[test]
+    fn settings_update_write_mode_changed_does_not_mutate_shared_settings() {
+        // Sub-task 3 only touches the shadow field — persistence to
+        // `AppSettings` is wired in sub-task 8. Guard the invariant so a
+        // future edit that leaks a write back to the Arc is caught by tests.
+        let mut app = fresh_app();
+        let original = app.settings.note_write_mode;
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::WriteModeChanged(WriteMode::Thread),
+        );
+        assert_eq!(app.settings.note_write_mode, original);
+    }
+
+    #[test]
+    fn settings_update_language_changed_still_works_after_expansion() {
+        // Regression guard: adding new `SettingsMessage` variants must not
+        // break the existing LanguageChanged branch.
+        let mut app = fresh_app();
+        let _ = settings_update(&mut app, SettingsMessage::LanguageChanged(Language::Ja));
+        assert_eq!(app.language, Language::Ja);
+    }
+
+    #[test]
+    fn settings_view_renders_language_theme_storage_cards_without_panic() {
+        // The three cards must build across every language × every preset ×
+        // every write-mode combination so a drift in the matching logic is
+        // caught at test time.
+        for lang in [
+            Language::SystemDefault,
+            Language::Zh,
+            Language::En,
+            Language::Ja,
+        ] {
+            for preset in [
+                ThemePreset::Light,
+                ThemePreset::Dark,
+                ThemePreset::Paper,
+                ThemePreset::Dune,
+            ] {
+                for mode in [WriteMode::Dimension, WriteMode::Thread, WriteMode::File] {
+                    let settings = AppSettings {
+                        language: lang,
+                        app_theme_preset: preset,
+                        note_write_mode: mode,
+                        ..AppSettings::default()
+                    };
+                    let app = SettingsApp::new(
+                        TraceTheme::for_preset(preset),
+                        Arc::new(settings),
+                    );
+                    let _element: Element<'_, SettingsMessage> = settings_view(&app);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn card_stack_spacing_matches_mac_reference() {
+        // Mac `SettingsView.swift` uses `VStack(spacing: 18)` for the card
+        // stack. Lock the constant so a drift is caught at test time.
+        assert_eq!(SETTINGS_CARD_STACK_SPACING, 18.0);
     }
 }
