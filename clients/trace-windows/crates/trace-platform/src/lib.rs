@@ -16,8 +16,16 @@
 //!   macOS `NSStatusItem` menu set up in `AppDelegate.setupStatusItem()`.
 //!   As with `global_hotkey`, the error and event enums are cross-platform
 //!   and the [`system_tray::SystemTray`] handle is Windows-only.
+//! - [`window`] — Synchronous Win32 helpers for the capture panel: topmost
+//!   / tool-window styles, foreground activation (with the
+//!   `AttachThreadInput` fallback), previous-foreground capture & restore,
+//!   and monitor-work-area enumeration. The pure monitor math
+//!   ([`window::ScreenRect`], [`window::place_on_best_monitor`]) is
+//!   cross-platform and testable on any host; the HWND-taking functions
+//!   are Windows-only.
 
 #![cfg_attr(not(windows), allow(dead_code))]
 
 pub mod global_hotkey;
 pub mod system_tray;
+pub mod window;
