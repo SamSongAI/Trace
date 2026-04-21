@@ -188,6 +188,30 @@ fn close_panel_invokes_platform_restore_foreground() {
 }
 
 #[test]
+fn close_panel_preserves_editor_draft() {
+    // Esc (→ `Message::ClosePanel`) must close the panel without clearing
+    // the editor. Mac preserves the in-flight draft so that reopening the
+    // panel picks up exactly where the user left off; the Windows port
+    // must honour the same invariant.
+    let mut app = CaptureApp::new(
+        TraceTheme::for_preset(ThemePreset::Dark),
+        sample_sections(),
+        sample_threads(),
+        AppSettings::default(),
+    );
+    app.editor_content = text_editor::Content::with_text("draft in progress");
+    assert_eq!(app.editor_text(), "draft in progress");
+
+    apply(&mut app, Message::ClosePanel);
+
+    assert_eq!(
+        app.editor_text(),
+        "draft in progress",
+        "ClosePanel must leave the editor text intact for the next reopen"
+    );
+}
+
+#[test]
 fn pin_toggled_then_focus_lost_does_not_close() {
     // When pinned, FocusLost must be absorbed silently.
     let spy = SpyHandler::new();

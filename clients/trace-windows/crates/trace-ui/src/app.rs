@@ -1282,6 +1282,41 @@ mod tests {
         assert_eq!(app.editor_text(), "");
     }
 
+    #[test]
+    fn dispatch_save_file_mode_append_behaves_like_send() {
+        // `FileWriter::save` takes no `SaveMode` parameter, so Append in
+        // File mode must produce the same outcome as a plain Send. Pin
+        // the degradation contract so a future refactor that tries to
+        // add a File-mode Append path without updating the UI plumbing
+        // fails loudly.
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let mut app = app_with_vault(&tempdir, sample_threads());
+        app.write_mode = WriteMode::File;
+        app.document_title = "append-doc".to_string();
+        write_text(&mut app, "file-mode body");
+
+        let outcome = dispatch_save(&mut app, SaveMode::AppendToLatestEntry);
+        assert_eq!(
+            outcome,
+            SaveOutcome::Written,
+            "File-mode Append must degrade to the same Written outcome as Send"
+        );
+        assert_eq!(app.editor_text(), "", "successful write clears the editor");
+
+        // Verify the writer actually produced a file under the vault so a
+        // regression that silently swallowed the write still trips the
+        // assertion.
+        let file_count = std::fs::read_dir(tempdir.path())
+            .expect("vault dir exists")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_file())
+            .count();
+        assert!(
+            file_count >= 1,
+            "File-mode Append produced at least one file in the vault"
+        );
+    }
+
     // ---------------------------------------------------------------------
     // Phase 11 — toast overlay + auto-dismiss subscription.
     //
