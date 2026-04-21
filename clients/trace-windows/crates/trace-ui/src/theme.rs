@@ -315,6 +315,40 @@ pub fn settings_secondary_button_style(
     }
 }
 
+/// Compact "remove slot" button style — used by the Quick Sections card to
+/// remove a section row (the Mac reference uses `minus.circle.fill` in
+/// `warningText`). A rounded chip on [`SettingsPalette::chip_background`] with
+/// the warning color on the glyph; the disabled branch flattens the text color
+/// to [`SettingsPalette::muted_text`] so a row at `MINIMUM_COUNT` reads as
+/// locked without hiding the affordance.
+///
+/// iced 0.14 surfaces the disabled state through `button::Status::Disabled`
+/// (emitted when the caller passes `None` via `on_press_maybe`), so this
+/// closure branches on `status` rather than asking the caller to thread in a
+/// bool.
+pub fn settings_remove_button_style(
+    palette: SettingsPalette,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_theme: &Theme, status: button::Status| {
+        let text_color = match status {
+            button::Status::Disabled => trace_color_to_iced(palette.muted_text),
+            _ => trace_color_to_iced(palette.warning_text),
+        };
+        button::Style {
+            background: Some(Background::Color(trace_color_to_iced(
+                palette.chip_background,
+            ))),
+            text_color,
+            border: Border {
+                radius: 8.0.into(),
+                width: 0.0,
+                color: Color::TRANSPARENT,
+            },
+            ..button::Style::default()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -710,5 +744,46 @@ mod tests {
         let style = style_fn(&Theme::Light, button::Status::Active);
         assert_eq!(style.border.width, 1.0);
         assert_eq!(style.border.radius.top_left, 8.0);
+    }
+
+    #[test]
+    fn settings_remove_button_active_uses_warning_text() {
+        // A reachable remove button must surface the warning color so the Mac
+        // reference's `minus.circle.fill` affordance stays recognizable across
+        // every preset.
+        for preset in [
+            ThemePreset::Light,
+            ThemePreset::Dark,
+            ThemePreset::Paper,
+            ThemePreset::Dune,
+        ] {
+            let palette = TraceTheme::for_preset(preset).settings;
+            let style_fn = settings_remove_button_style(palette);
+            let style = style_fn(&Theme::Light, button::Status::Active);
+            assert_eq!(
+                style.text_color,
+                expected_iced_color(palette.warning_text),
+                "preset {:?} remove glyph color mismatch",
+                preset
+            );
+            let expected_bg = Background::Color(expected_iced_color(palette.chip_background));
+            assert_eq!(
+                style.background,
+                Some(expected_bg),
+                "preset {:?} remove bg mismatch",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn settings_remove_button_disabled_flattens_to_muted() {
+        // At `MINIMUM_COUNT` the button is disabled. iced reports that via
+        // `Status::Disabled`; the text color must dim so the locked state is
+        // visually distinct from an active row.
+        let palette = TraceTheme::for_preset(ThemePreset::Light).settings;
+        let style_fn = settings_remove_button_style(palette);
+        let style = style_fn(&Theme::Light, button::Status::Disabled);
+        assert_eq!(style.text_color, expected_iced_color(palette.muted_text));
     }
 }
