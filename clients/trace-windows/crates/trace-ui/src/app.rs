@@ -32,7 +32,7 @@
 //! controller's default frame. See [`window_settings`].
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use iced::event::{self as iced_event};
@@ -55,6 +55,11 @@ use crate::widgets;
 /// How long a toast stays on screen before the auto-dismiss subscription
 /// fires. Matches Mac's 1.5 s fade-out.
 pub const TOAST_AUTO_DISMISS: Duration = Duration::from_millis(1500);
+/// Polling interval for the toast-expiry subscription. A short tick lets
+/// the [`Message::ToastTick`] handler compare `Instant::now()` against
+/// [`CaptureApp::toast_expires_at`] without subscribing to a new timer
+/// every time the user triggers a fresh toast.
+const TOAST_TICK_INTERVAL: Duration = Duration::from_millis(250);
 
 /// User-facing toast message shown when the editor is empty on Send/Append.
 /// Chinese literal per Phase 11 plan; L10n wiring lands in Phase 12.
@@ -124,9 +129,18 @@ pub enum Message {
     /// Requests the toast pill to display `message` for the auto-dismiss
     /// duration. Replaces any in-flight toast.
     ToastShow(String),
-    /// Timer-driven clear signal. Emitted by the [`subscription`] 1.5 s
-    /// [`time::every`] while a toast is active.
+    /// Timer-driven clear signal. Emitted manually when the handler
+    /// chooses to force-dismiss the toast. The polling pipeline uses
+    /// [`Self::ToastTick`] instead so the fade-out window is anchored to
+    /// [`CaptureApp::toast_expires_at`] rather than a repeating interval.
     ToastDismiss,
+    /// Polling tick emitted by the [`subscription`] while a toast is
+    /// active. The handler clears the toast when the current instant has
+    /// passed [`CaptureApp::toast_expires_at`]. Using a short tick plus
+    /// an expiry instant means a fresh [`Self::ToastShow`] mid-cycle
+    /// pushes the expiry forward and the next tick correctly honours
+    /// the full [`TOAST_AUTO_DISMISS`] window.
+    ToastTick,
     /// `iced::window::Event::Unfocused` translated to a domain message, only
     /// raised while `pinned == false`. Routed through the main [`update`]
     /// path so the close flow is centralised.
@@ -197,6 +211,15 @@ pub struct CaptureApp {
     /// Mutated by [`Message::ToastShow`] / [`Message::ToastDismiss`]; rendered
     /// via [`iced::widget::stack`] on top of the main column.
     pub toast: Option<String>,
+    /// Instant at which the current toast should auto-dismiss. Updated
+    /// every [`Message::ToastShow`] so rapid back-to-back toasts get the
+    /// full [`TOAST_AUTO_DISMISS`] visibility window instead of the
+    /// leftover slice of the previous toast's budget.
+    pub toast_expires_at: Option<Instant>,
+    /// Monotonically increasing counter bumped on every
+    /// [`Message::ToastShow`]. Surfaced so consumers (and tests) can
+    /// observe a fresh toast without reaching into the wall clock.
+    pub toast_generation: u64,
     /// Window id captured from [`iced::window::Event::Opened`]. Needed because
     /// the close task requires a concrete id and iced 0.14 exposes window ids
     /// only at runtime.
@@ -246,6 +269,8 @@ impl CaptureApp {
             threads,
             settings,
             toast: None,
+            toast_expires_at: None,
+            toast_generation: 0,
             capture_window_id: None,
             platform_handler: None,
         }
@@ -375,10 +400,26 @@ pub fn update(state: &mut CaptureApp, message: Message) -> Task<Message> {
         }
         Message::ToastShow(message) => {
             state.toast = Some(message);
+            state.toast_expires_at = Some(Instant::now() + TOAST_AUTO_DISMISS);
+            state.toast_generation = state.toast_generation.wrapping_add(1);
             Task::none()
         }
         Message::ToastDismiss => {
             state.toast = None;
+            state.toast_expires_at = None;
+            Task::none()
+        }
+        Message::ToastTick => {
+            // Polling tick: clear the toast only when we've crossed the
+            // expiry instant recorded by the last `ToastShow`. A mid-cycle
+            // `ToastShow` pushes `toast_expires_at` forward, so the next
+            // tick naturally honours the full auto-dismiss window.
+            if let Some(expiry) = state.toast_expires_at {
+                if Instant::now() >= expiry {
+                    state.toast = None;
+                    state.toast_expires_at = None;
+                }
+            }
             Task::none()
         }
         Message::FocusLost => {
@@ -459,8 +500,14 @@ pub fn theme(state: &CaptureApp) -> Theme {
 ///
 /// Fans out three independent streams via [`Subscription::batch`]:
 ///
-/// 1. The 1.5 s toast auto-dismiss timer — only mounted while
+/// 1. The toast auto-dismiss poller — only mounted while
 ///    [`CaptureApp::toast`] is `Some`, otherwise [`Subscription::none`].
+///    Ticks every [`TOAST_TICK_INTERVAL`] and emits [`Message::ToastTick`];
+///    the handler clears the toast once
+///    [`CaptureApp::toast_expires_at`] has passed. This indirection keeps
+///    the fade-out window anchored to the *latest* [`Message::ToastShow`]
+///    instead of the interval that happened to be mid-cycle when a new
+///    toast replaced the previous one.
 /// 2. The keyboard shortcut + window-unfocus listener, implemented as a
 ///    `fn` pointer passed to [`iced::event::listen_with`]. Because
 ///    `listen_with` requires a non-capturing function pointer, all context-
@@ -469,8 +516,13 @@ pub fn theme(state: &CaptureApp) -> Theme {
 /// 3. The window-open listener, which captures the primary [`window::Id`]
 ///    so [`Message::ClosePanel`] can emit the correct close task.
 pub fn subscription(state: &CaptureApp) -> Subscription<Message> {
+    // Poll at a short interval while a toast is live. Each tick compares
+    // `Instant::now()` against `toast_expires_at`, so a mid-cycle
+    // `ToastShow` that pushes the expiry forward gets the full
+    // `TOAST_AUTO_DISMISS` visibility budget instead of whatever slice of
+    // the previous toast's budget remained. See `Message::ToastTick`.
     let toast = if state.toast.is_some() {
-        time::every(TOAST_AUTO_DISMISS).map(|_| Message::ToastDismiss)
+        time::every(TOAST_TICK_INTERVAL).map(|_| Message::ToastTick)
     } else {
         Subscription::none()
     };
@@ -1391,6 +1443,69 @@ mod tests {
     fn toast_auto_dismiss_constant_matches_mac_reference() {
         // Mac `CaptureView` hides the toast after 1.5 s.
         assert_eq!(TOAST_AUTO_DISMISS, Duration::from_millis(1500));
+    }
+
+    #[test]
+    fn toast_show_twice_resets_the_timer() {
+        // Rapid back-to-back toasts must restart the fade-out window —
+        // otherwise the second toast gets dismissed after whatever was
+        // left of the first toast's 1.5 s slice. We expose a generation
+        // counter that rotates on every `ToastShow` so the subscription
+        // recipe changes, forcing iced to re-subscribe and reset the
+        // wall clock.
+        let mut app = fresh_app();
+        assert_eq!(app.toast_generation, 0, "toast_generation starts at zero");
+        apply(&mut app, Message::ToastShow("A".to_string()));
+        let gen_a = app.toast_generation;
+        assert!(gen_a > 0, "first ToastShow bumps the generation counter");
+
+        apply(&mut app, Message::ToastShow("B".to_string()));
+        assert!(
+            app.toast_generation > gen_a,
+            "second ToastShow bumps the generation counter again, resetting the timer"
+        );
+
+        // Expiry instant must move forward too — otherwise a late tick
+        // from the first toast could dismiss the second one early.
+        let expiry_b = app
+            .toast_expires_at
+            .expect("ToastShow sets an expiry instant");
+        assert!(
+            expiry_b >= std::time::Instant::now(),
+            "expiry must be in the future after ToastShow"
+        );
+    }
+
+    #[test]
+    fn toast_tick_before_expiry_keeps_toast_visible() {
+        // A spurious tick that fires before the expiry instant must NOT
+        // dismiss the toast — only ticks at or past the expiry clear it.
+        let mut app = fresh_app();
+        apply(&mut app, Message::ToastShow("alive".to_string()));
+        assert!(app.toast.is_some());
+        apply(&mut app, Message::ToastTick);
+        assert_eq!(
+            app.toast.as_deref(),
+            Some("alive"),
+            "ToastTick before expiry leaves the toast in place"
+        );
+    }
+
+    #[test]
+    fn toast_tick_past_expiry_dismisses_toast() {
+        let mut app = fresh_app();
+        apply(&mut app, Message::ToastShow("expiring".to_string()));
+        // Force the expiry into the past so the next tick dismisses.
+        app.toast_expires_at = Some(
+            std::time::Instant::now()
+                .checked_sub(Duration::from_millis(1))
+                .expect("instant can be rewound one millisecond"),
+        );
+        apply(&mut app, Message::ToastTick);
+        assert!(
+            app.toast.is_none(),
+            "ToastTick past expiry clears the toast"
+        );
     }
 
     #[test]
