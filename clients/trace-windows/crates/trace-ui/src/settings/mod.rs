@@ -24,6 +24,7 @@
 //! windows.
 
 mod quick_sections;
+mod shortcut_event;
 mod shortcuts;
 pub mod storage;
 mod threads;
@@ -32,8 +33,10 @@ pub mod widgets;
 
 use std::sync::Arc;
 
+use iced::event::{self as iced_event};
+use iced::keyboard::Event as KeyboardEvent;
 use iced::widget::{column, container, row, scrollable, text};
-use iced::{window, Element, Length, Pixels, Size, Subscription, Task, Theme};
+use iced::{window, Element, Event, Length, Pixels, Size, Subscription, Task, Theme};
 use trace_core::{
     join_folder_and_filename, split_target_file, AppSettings, DailyFileDateFormat, EntryTheme,
     L10n, Language, NoteSection, ShortcutSpec, ThemePreset, ThreadConfig, TraceTheme,
@@ -1212,12 +1215,58 @@ pub fn settings_theme(state: &SettingsApp) -> Theme {
     state.iced_theme.clone()
 }
 
-/// Aggregate subscription for the settings window. Sub-task 1 has no live
-/// event sources, so the subscription is
-/// [`Subscription::none`]. Later sub-tasks (e.g. shortcut recording) will
-/// expand this.
-pub fn settings_subscription(_state: &SettingsApp) -> Subscription<SettingsMessage> {
-    Subscription::none()
+/// Aggregate subscription for the settings window.
+///
+/// The subscription is mounted conditionally: when
+/// [`SettingsApp::recording_target`] is `None` the window has no live event
+/// sources and we return [`Subscription::none`] so no runtime resources are
+/// wasted on idle keystrokes. When a recorder is armed we mount
+/// [`iced::event::listen_with`] wired to [`keyboard_event_to_message`] so
+/// every `KeyPressed` event feeds [`SettingsMessage::RecordingCaptured`].
+///
+/// The gate lives *here* (at the subscription boundary) rather than inside
+/// [`keyboard_event_to_message`] because `listen_with` requires a plain
+/// `fn` pointer — the callback can't close over `recording_target`. Mac
+/// solves the same problem by attaching / removing the `NSEvent`
+/// local-monitor on demand; this is the iced analog.
+pub fn settings_subscription(state: &SettingsApp) -> Subscription<SettingsMessage> {
+    if state.recording_target.is_none() {
+        Subscription::none()
+    } else {
+        iced_event::listen_with(keyboard_event_to_message)
+    }
+}
+
+/// `listen_with` callback for the Shortcuts recorder. Must be a plain `fn`
+/// (no captures) — see [`iced::event::listen_with`]. Every
+/// [`KeyboardEvent::KeyPressed`] that decodes into a Win32 VK + modifier
+/// pair becomes a [`SettingsMessage::RecordingCaptured`]; every other
+/// event returns `None` so unrelated keys (modifier-only presses,
+/// non-US-layout characters, mouse events, …) leave the recorder idle.
+///
+/// The decoder intentionally does *not* inspect [`event::Status`]. Unlike
+/// the capture panel — which skips captured keystrokes so the text editor
+/// owns them first — the settings window treats every press as a candidate
+/// shortcut while the recorder is armed. This matches Mac's local
+/// `NSEvent` monitor behaviour, which intercepts `keyDown` before the
+/// focused control sees it.
+fn keyboard_event_to_message(
+    event: Event,
+    _status: iced_event::Status,
+    _window: window::Id,
+) -> Option<SettingsMessage> {
+    let Event::Keyboard(KeyboardEvent::KeyPressed {
+        key, modifiers, ..
+    }) = event
+    else {
+        return None;
+    };
+    let key_code = shortcut_event::key_to_vk(&key)?;
+    let modifiers = shortcut_event::modifiers_to_win32(modifiers);
+    Some(SettingsMessage::RecordingCaptured {
+        key_code,
+        modifiers,
+    })
 }
 
 #[cfg(test)]
@@ -1307,10 +1356,23 @@ mod tests {
 
     #[test]
     fn settings_subscription_starts_empty() {
-        // Sub-task 1 has no live event sources. We can't inspect the
-        // subscription tree directly, but constructing it proves the
-        // branch compiles against the current iced 0.14 surface.
+        // A fresh settings window has no recorder armed, so the aggregate
+        // subscription must resolve to the idle branch. We can't inspect
+        // the `Subscription` tree directly — iced 0.14 doesn't expose an
+        // `is_none()` helper — but constructing it both proves the branch
+        // compiles and locks the call site to the current surface.
         let app = fresh_app();
+        let _sub: Subscription<SettingsMessage> = settings_subscription(&app);
+    }
+
+    #[test]
+    fn settings_subscription_mounts_listener_while_recording() {
+        // Mirror the idle case but flip `recording_target` so the gate
+        // lands on the `listen_with` branch. Same opaque-subscription
+        // caveat — constructing it is the strongest assertion iced 0.14
+        // lets us make without running the runtime.
+        let mut app = fresh_app();
+        app.recording_target = Some(ShortcutTarget::Create);
         let _sub: Subscription<SettingsMessage> = settings_subscription(&app);
     }
 
@@ -2860,5 +2922,124 @@ mod tests {
         let mut app = fresh_app();
         app.shortcut_recorder_message = Some("conflict".to_string());
         let _element: Element<'_, SettingsMessage> = build_cards(&app);
+    }
+
+    // --- Sub-task 7 Commit 4: Keystroke → RecordingCaptured decoder -------
+
+    #[test]
+    fn keyboard_event_to_message_maps_keypressed_letter_with_ctrl() {
+        // Ctrl+N — the canonical case. The decoder must land the letter on
+        // its Win32 VK code (0x4E) and the modifier on `MOD_CONTROL`.
+        let event = Event::Keyboard(KeyboardEvent::KeyPressed {
+            key: iced::keyboard::Key::Character("n".into()),
+            modified_key: iced::keyboard::Key::Character("n".into()),
+            physical_key: iced::keyboard::key::Physical::Unidentified(
+                iced::keyboard::key::NativeCode::Unidentified,
+            ),
+            location: iced::keyboard::Location::Standard,
+            modifiers: iced::keyboard::Modifiers::CTRL,
+            text: None,
+            repeat: false,
+        });
+        let msg = keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
+        // `SettingsMessage` is intentionally not `PartialEq` (its payloads
+        // include iced task handles on other variants); destructure the
+        // tuple to assert the shape explicitly.
+        let Some(SettingsMessage::RecordingCaptured { key_code, modifiers }) = msg else {
+            panic!("expected RecordingCaptured, got {msg:?}");
+        };
+        assert_eq!(key_code, 0x4E);
+        assert_eq!(modifiers, trace_core::MOD_CONTROL);
+    }
+
+    #[test]
+    fn keyboard_event_to_message_maps_named_escape_without_modifier() {
+        // Bare Escape is a valid message — the update branch decides that
+        // "no modifier + Esc" silently cancels the recorder. The decoder
+        // itself returns a message so the handler can apply that rule.
+        let event = Event::Keyboard(KeyboardEvent::KeyPressed {
+            key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+            modified_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+            physical_key: iced::keyboard::key::Physical::Unidentified(
+                iced::keyboard::key::NativeCode::Unidentified,
+            ),
+            location: iced::keyboard::Location::Standard,
+            modifiers: iced::keyboard::Modifiers::empty(),
+            text: None,
+            repeat: false,
+        });
+        let msg = keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
+        let Some(SettingsMessage::RecordingCaptured { key_code, modifiers }) = msg else {
+            panic!("expected RecordingCaptured, got {msg:?}");
+        };
+        assert_eq!(key_code, 0x1B);
+        assert_eq!(modifiers, 0);
+    }
+
+    #[test]
+    fn keyboard_event_to_message_ignores_unsupported_character() {
+        // A non-ASCII character has no VK mapping — the decoder must drop
+        // it so the recorder stays idle rather than forwarding a garbage
+        // VK code that would later fall through to the numeric fallback
+        // in `vk_label`.
+        let event = Event::Keyboard(KeyboardEvent::KeyPressed {
+            key: iced::keyboard::Key::Character("中".into()),
+            modified_key: iced::keyboard::Key::Character("中".into()),
+            physical_key: iced::keyboard::key::Physical::Unidentified(
+                iced::keyboard::key::NativeCode::Unidentified,
+            ),
+            location: iced::keyboard::Location::Standard,
+            modifiers: iced::keyboard::Modifiers::CTRL,
+            text: None,
+            repeat: false,
+        });
+        let msg = keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn keyboard_event_to_message_ignores_modifier_only_key() {
+        // A pure modifier keyup (no accompanying letter) has no VK mapping.
+        // Mirror Mac's `NSEvent` monitor which treats these as "still
+        // recording" rather than a shortcut.
+        let event = Event::Keyboard(KeyboardEvent::KeyPressed {
+            key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Shift),
+            modified_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Shift),
+            physical_key: iced::keyboard::key::Physical::Unidentified(
+                iced::keyboard::key::NativeCode::Unidentified,
+            ),
+            location: iced::keyboard::Location::Left,
+            modifiers: iced::keyboard::Modifiers::SHIFT,
+            text: None,
+            repeat: false,
+        });
+        let msg = keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn keyboard_event_to_message_ignores_keyboard_event_released() {
+        // Only `KeyPressed` drives the recorder — key-up events must not
+        // race the press by emitting a second `RecordingCaptured`.
+        let event = Event::Keyboard(KeyboardEvent::KeyReleased {
+            key: iced::keyboard::Key::Character("n".into()),
+            modified_key: iced::keyboard::Key::Character("n".into()),
+            physical_key: iced::keyboard::key::Physical::Unidentified(
+                iced::keyboard::key::NativeCode::Unidentified,
+            ),
+            location: iced::keyboard::Location::Standard,
+            modifiers: iced::keyboard::Modifiers::CTRL,
+        });
+        let msg = keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn keyboard_event_to_message_ignores_non_keyboard_events() {
+        // Window / mouse / touch events must never produce a recorder
+        // message, so the decoder returns `None` on the first match guard.
+        let event = Event::Window(iced::window::Event::Focused);
+        let msg = keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
+        assert!(msg.is_none());
     }
 }
