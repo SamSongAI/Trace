@@ -216,15 +216,19 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
     }
 }
 
+// 下面四个布局常量仅在 settings 模块内部消费(构建 card 列、chip 行、tile
+// 列/行间距),以及同模块的回归测试。改为模块私有 `const`,避免 `pub` 暗
+// 示它们是 crate 级公共 API —— 若未来别的 card 也用到,就地提级到
+// `pub(crate)` 即可。
 /// Spacing (in pixels) between stacked settings cards inside the scrollable
 /// column. Matches Mac `SettingsView.swift`'s `VStack(spacing: 18)`.
-pub const SETTINGS_CARD_STACK_SPACING: f32 = 18.0;
+const SETTINGS_CARD_STACK_SPACING: f32 = 18.0;
 /// Spacing between adjacent language chips inside the Language card row.
-pub const LANGUAGE_CHIP_SPACING: f32 = 8.0;
+const LANGUAGE_CHIP_SPACING: f32 = 8.0;
 /// Vertical spacing between theme-preset tiles inside the Theme card column.
-pub const THEME_TILE_SPACING: f32 = 8.0;
+const THEME_TILE_SPACING: f32 = 8.0;
 /// Spacing between adjacent write-mode tiles inside the Storage card row.
-pub const WRITE_MODE_TILE_SPACING: f32 = 8.0;
+const WRITE_MODE_TILE_SPACING: f32 = 8.0;
 
 /// Renders the settings window. Returns an [`Element`] ready for use in an
 /// `iced::daemon(...).view(...)` router.

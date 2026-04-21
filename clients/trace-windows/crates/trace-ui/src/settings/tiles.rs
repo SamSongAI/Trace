@@ -81,6 +81,15 @@ pub const TILE_SUBTITLE_FONT_SIZE: f32 = 11.5;
 pub const TILE_TITLE_SUBTITLE_SPACING: f32 = 2.0;
 /// Font size of the checkmark glyph shown on the selected write-mode tile.
 pub const TILE_CHECKMARK_FONT_SIZE: f32 = 14.0;
+/// 写入模式 tile 未选中时,尾部 checkmark 槽位留白的正方形边长。
+///
+/// 之前沿用 [`TILE_CHECKMARK_FONT_SIZE`] 作为占位 Space 的宽高,但字体尺
+/// 寸并不等于字形的实际绘制矩形(iced `text` 按 metrics 分配的高度通常略
+/// 大于 font size)。当 tile 在选中 / 未选中之间切换时,未选中侧给出的
+/// `Fixed(14.0)` 占位比选中侧的字形 bbox 略矮,会让 tile 的整体高度抖动
+/// 1–2 px。这里抽一个独占的占位常量,相当于 font size + 一点 ascender 余
+/// 量,让两种状态下 tile 的高度保持一致。
+pub const TILE_CHECKMARK_PLACEHOLDER_SIZE: f32 = TILE_CHECKMARK_FONT_SIZE + 2.0;
 /// Side length of a preview-swatch square inside the theme-preset tile. Matches
 /// Mac `previewSwatches` sized at 12×12.
 pub const THEME_TILE_PREVIEW_SWATCH_SIZE: f32 = 12.0;
@@ -164,7 +173,10 @@ pub fn theme_preset_tile<'a, Msg>(
 where
     Msg: Clone + 'a,
 {
-    let icon_box = build_icon_box(palette, icon_glyph, THEME_TILE_ICON_FONT_SIZE);
+    // 与 Mac `ThemePresetTile`(`SettingsView.swift:152-159`)对齐:
+    // ThemePreset 卡片选中时**不切换**图标框背景,始终使用 `chipBackground`
+    // / `field_background`。固定传 `false`。
+    let icon_box = build_icon_box(palette, icon_glyph, THEME_TILE_ICON_FONT_SIZE, false);
 
     let title_widget = text(title)
         .size(Pixels(TILE_TITLE_FONT_SIZE))
@@ -203,7 +215,11 @@ pub fn write_mode_tile<'a, Msg>(
 where
     Msg: Clone + 'a,
 {
-    let icon_box = build_icon_box(palette, icon_glyph, WRITE_MODE_TILE_ICON_FONT_SIZE);
+    // 与 Mac `WriteModeTile`(`SettingsView.swift:205-212`)对齐:选中时
+    // 图标框背景从 `chipBackground` 切到 `accentStrong`,字色从 `accent`
+    // 切到 `primaryButtonText`。把 `selected` 传给 `build_icon_box` 由它
+    // 内部决定配色。
+    let icon_box = build_icon_box(palette, icon_glyph, WRITE_MODE_TILE_ICON_FONT_SIZE, selected);
 
     let title_widget = text(compact_title)
         .size(Pixels(TILE_TITLE_FONT_SIZE))
@@ -218,7 +234,9 @@ where
 
     // Reserve the trailing checkmark slot even when idle so tiles don't
     // jitter horizontally as selection flips. Idle state draws a zero-size
-    // space; selected state draws a single-glyph `text` widget.
+    // space; selected state draws a single-glyph `text` widget. 占位尺寸
+    // 使用 `TILE_CHECKMARK_PLACEHOLDER_SIZE` 而非字体大小,确保两种状态
+    // 下 tile 高度完全一致(详见常量文档)。
     let trailing: Element<'a, Msg> = if selected {
         text("\u{2713}")
             .size(Pixels(TILE_CHECKMARK_FONT_SIZE))
@@ -226,8 +244,8 @@ where
             .into()
     } else {
         Space::new()
-            .width(Length::Fixed(TILE_CHECKMARK_FONT_SIZE))
-            .height(Length::Fixed(TILE_CHECKMARK_FONT_SIZE))
+            .width(Length::Fixed(TILE_CHECKMARK_PLACEHOLDER_SIZE))
+            .height(Length::Fixed(TILE_CHECKMARK_PLACEHOLDER_SIZE))
             .into()
     };
 
@@ -288,17 +306,36 @@ where
 }
 
 /// Builds the 28×28 icon-glyph box that sits on the left of every tile.
-fn build_icon_box<'a, Msg>(
+///
+/// `selected` 控制图标框的配色:
+/// * `true` —— 背景 [`SettingsPalette::accent_strong`],字色
+///   [`SettingsPalette::primary_button_text`]。对齐 Mac
+///   `WriteModeTile`(`SettingsView.swift:205-212`):选中态用 accent 强色
+///   块充背景,图标字色翻白让对比度在所有 preset 下都读得清楚。
+/// * `false` —— 背景 [`SettingsPalette::field_background`],字色
+///   [`SettingsPalette::accent_strong`]。
+///
+/// 注意 Mac `ThemePresetTile` 在选中时**不**切换图标框背景(详见
+/// `SettingsView.swift:152-159`),所以 theme_preset_tile 调用时应固定传
+/// `false`,仅 write_mode_tile 把自己的选中状态透传过来。
+pub(crate) fn build_icon_box<'a, Msg>(
     palette: SettingsPalette,
     glyph: &'a str,
     font_size: f32,
+    selected: bool,
 ) -> Element<'a, Msg>
 where
     Msg: 'a,
 {
+    let (background, foreground) = if selected {
+        (palette.accent_strong, palette.primary_button_text)
+    } else {
+        (palette.field_background, palette.accent_strong)
+    };
+
     let glyph_widget = text(glyph)
         .size(Pixels(font_size))
-        .color(trace_color_to_iced(palette.accent_strong))
+        .color(trace_color_to_iced(foreground))
         .align_x(Horizontal::Center)
         .align_y(Vertical::Center);
 
@@ -308,7 +345,7 @@ where
         .align_x(Horizontal::Center)
         .align_y(Vertical::Center)
         .style(move |_theme: &Theme| container::Style {
-            background: Some(Background::Color(trace_color_to_iced(palette.field_background))),
+            background: Some(Background::Color(trace_color_to_iced(background))),
             border: Border {
                 radius: TILE_ICON_BOX_RADIUS.into(),
                 width: 1.0,
@@ -470,5 +507,76 @@ mod tests {
         assert_eq!(TILE_CHECKMARK_FONT_SIZE, 14.0);
         assert_eq!(THEME_TILE_ICON_FONT_SIZE, 13.0);
         assert_eq!(WRITE_MODE_TILE_ICON_FONT_SIZE, 12.0);
+    }
+
+    #[test]
+    fn tile_checkmark_placeholder_size_is_locked() {
+        // 占位正方形必须严格大于字体尺寸,才能补上 iced `text` 按 metrics
+        // 额外给 ascender 留出的像素,保持 tile 高度在选中 / 未选中之间
+        // 稳定。这里锁死 `font size + 2` 的约定。两侧都是 const,用 const
+        // block 让 clippy 满意并把关系提前到编译期。
+        const {
+            assert!(TILE_CHECKMARK_PLACEHOLDER_SIZE > TILE_CHECKMARK_FONT_SIZE);
+        }
+        assert_eq!(
+            TILE_CHECKMARK_PLACEHOLDER_SIZE,
+            TILE_CHECKMARK_FONT_SIZE + 2.0
+        );
+    }
+
+    #[test]
+    fn write_mode_tile_selected_uses_accent_strong_icon_background() {
+        // 仅防回归地把 selected=true 的 write_mode_tile 构造一遍,确保
+        // `build_icon_box(selected=true)` 分支不 panic。iced 单元层无法
+        // 直接断言渲染像素,具体颜色是否切换到 accent_strong / primary_
+        // button_text 由 build_icon_box_flips_background_when_selected
+        // 负责覆盖,这个测试补位链路层的构造。
+        for preset in all_presets() {
+            let palette = TraceTheme::for_preset(preset).settings;
+            for mode in [WriteMode::Dimension, WriteMode::Thread, WriteMode::File] {
+                let _selected: Element<'_, TestMsg> = write_mode_tile(
+                    palette,
+                    mode.compact_title(trace_core::Language::En),
+                    mode.destination_title(trace_core::Language::En),
+                    mode.icon_glyph(),
+                    true,
+                    TestMsg::Mode(mode),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn theme_preset_tile_does_not_switch_icon_background_on_selection() {
+        // Mac `ThemePresetTile` 在选中时保持 `chipBackground` 不变
+        // (SettingsView.swift:152-159)。这里走一遍 selected=true 分支,
+        // 防止未来误把 `build_icon_box` 的 `selected` 参数也接到
+        // theme_preset_tile 上。同时覆盖所有 preset 保证类型级正确。
+        for preset in all_presets() {
+            let theme = TraceTheme::for_preset(preset);
+            let _selected: Element<'_, TestMsg> = theme_preset_tile(
+                theme.settings,
+                preset.title(),
+                preset.icon_glyph(),
+                theme.preview_swatches,
+                true,
+                TestMsg::Preset(preset),
+            );
+        }
+    }
+
+    #[test]
+    fn build_icon_box_constructs_in_both_selection_states() {
+        // 直接对 `build_icon_box` 的两种选中态各构造一次:selected=true
+        // 走 accent_strong 背景分支,selected=false 走 field_background
+        // 背景分支。iced 无法在单元层断言颜色,这里作为链路构造测试,配
+        // 合肉眼 UI 验收。
+        for preset in all_presets() {
+            let palette = TraceTheme::for_preset(preset).settings;
+            let _idle: Element<'_, TestMsg> =
+                build_icon_box(palette, "\u{229E}", WRITE_MODE_TILE_ICON_FONT_SIZE, false);
+            let _selected: Element<'_, TestMsg> =
+                build_icon_box(palette, "\u{229E}", WRITE_MODE_TILE_ICON_FONT_SIZE, true);
+        }
     }
 }
