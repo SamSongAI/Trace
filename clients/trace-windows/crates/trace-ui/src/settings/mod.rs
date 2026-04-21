@@ -32,8 +32,8 @@ use std::sync::Arc;
 use iced::widget::{column, container, row, scrollable, text};
 use iced::{window, Element, Length, Pixels, Size, Subscription, Task, Theme};
 use trace_core::{
-    AppSettings, DailyFileDateFormat, EntryTheme, L10n, Language, ThemePreset, TraceTheme,
-    VaultPathValidationIssue, WriteMode,
+    AppSettings, DailyFileDateFormat, EntryTheme, L10n, Language, NoteSection, ThemePreset,
+    TraceTheme, VaultPathValidationIssue, WriteMode,
 };
 
 use crate::theme::to_iced_theme;
@@ -148,6 +148,20 @@ pub enum SettingsMessage {
     /// Entry Format picker. Updates
     /// [`SettingsApp::daily_entry_theme_preset`].
     DailyEntryThemePresetChanged(EntryTheme),
+    /// Fired on every keystroke in a section title text input. Writes the new
+    /// string into [`SettingsApp::section_titles`] at `index` if in bounds;
+    /// out-of-bounds indices silently no-op (iced should never emit one, but
+    /// the branch defends against stale `Message` deliveries that arrive after
+    /// a [`SectionRemoved`](SettingsMessage::SectionRemoved) shrinks the vec).
+    SectionTitleChanged(usize, String),
+    /// Adds a new section at the tail of [`SettingsApp::section_titles`] using
+    /// [`NoteSection::default_title_for`] for the new index. No-op once the
+    /// vec is already at [`NoteSection::MAXIMUM_COUNT`] (9).
+    SectionAdded,
+    /// Removes the section at `index` from [`SettingsApp::section_titles`] if
+    /// the current length is above [`NoteSection::MINIMUM_COUNT`] (1) *and*
+    /// `index` is in bounds; otherwise silently no-op.
+    SectionRemoved(usize),
 }
 
 /// Mutable application state for the settings window.
@@ -223,6 +237,15 @@ pub struct SettingsApp {
     /// contract as [`Self::vault_path_issue`]: refreshed in `settings_update`,
     /// never on the per-frame render hot path.
     pub inbox_vault_path_issue: Option<VaultPathValidationIssue>,
+    /// Shadow of [`AppSettings::section_titles`] mutated by the Quick Sections
+    /// card (sub-task 5). Each entry is a free-form title string; the vec
+    /// length is kept in `[NoteSection::MINIMUM_COUNT, NoteSection::MAXIMUM_COUNT]`
+    /// by the `SectionAdded` / `SectionRemoved` branches in
+    /// [`settings_update`]. This field is **never** written back into
+    /// [`Self::settings`]; the trim/normalize + persistence round-trip lands
+    /// in sub-task 8 so the Mac reference's save-button semantics can be
+    /// mirrored exactly there.
+    pub section_titles: Vec<String>,
 }
 
 impl SettingsApp {
@@ -252,6 +275,12 @@ impl SettingsApp {
         // touching the filesystem on every frame.
         let vault_path_issue = trace_platform::validate_vault_path(&vault_path);
         let inbox_vault_path_issue = trace_platform::validate_vault_path(&inbox_vault_path);
+        // Clone the persisted Quick Sections titles into the shadow so the
+        // card has something to render before the user edits anything. We
+        // clone instead of borrowing because `settings` is shared behind an
+        // `Arc` and the shadow must remain mutable without taking a lock on
+        // every edit.
+        let section_titles = settings.section_titles.clone();
         Self {
             theme,
             iced_theme,
@@ -266,6 +295,7 @@ impl SettingsApp {
             daily_entry_theme_preset,
             vault_path_issue,
             inbox_vault_path_issue,
+            section_titles,
         }
     }
 
@@ -349,6 +379,41 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
         }
         SettingsMessage::DailyEntryThemePresetChanged(theme) => {
             state.daily_entry_theme_preset = theme;
+            Task::none()
+        }
+        SettingsMessage::SectionTitleChanged(index, value) => {
+            // Defensive `get_mut`: iced should never route a stale index to
+            // this branch, but if a `SectionRemoved` shrinks the vec before a
+            // still-inflight keystroke arrives we must drop it rather than
+            // panic. Sub-task 8 will trim/normalize on write-back to
+            // `AppSettings`; the shadow itself stays a faithful reflection
+            // of the textfield.
+            if let Some(slot) = state.section_titles.get_mut(index) {
+                *slot = value;
+            }
+            Task::none()
+        }
+        SettingsMessage::SectionAdded => {
+            // Cap at `MAXIMUM_COUNT` so the button becomes a visual disabled
+            // state + a no-op guard in the update layer. Mirrors Mac
+            // `AppSettings.addSection()` which bails above the same cap.
+            if state.section_titles.len() < NoteSection::MAXIMUM_COUNT {
+                let next_index = state.section_titles.len();
+                state
+                    .section_titles
+                    .push(NoteSection::default_title_for(next_index));
+            }
+            Task::none()
+        }
+        SettingsMessage::SectionRemoved(index) => {
+            // Symmetric guard against the `MINIMUM_COUNT` floor. The extra
+            // `index < len()` check covers stale deliveries the same way the
+            // `SectionTitleChanged` branch does.
+            if state.section_titles.len() > NoteSection::MINIMUM_COUNT
+                && index < state.section_titles.len()
+            {
+                state.section_titles.remove(index);
+            }
             Task::none()
         }
     }
@@ -1195,5 +1260,123 @@ mod tests {
             app.inbox_vault_path_issue,
             Some(VaultPathValidationIssue::Empty)
         );
+    }
+
+    // --- Sub-task 5 ----------------------------------------------------
+
+    #[test]
+    fn settings_app_new_seeds_section_titles_from_settings() {
+        // The shadow must mirror the persisted vec on first paint so the
+        // Quick Sections card renders the user's last configuration without
+        // waiting for a dispatched message.
+        let persisted = AppSettings {
+            section_titles: vec!["想法".into(), "待办".into(), "链接".into()],
+            ..AppSettings::default()
+        };
+        let app = SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(persisted),
+        );
+        assert_eq!(app.section_titles, vec!["想法", "待办", "链接"]);
+    }
+
+    #[test]
+    fn section_title_changed_writes_shadow() {
+        let mut app = fresh_app();
+        // `AppSettings::default()` seeds the four-entry Mac-default vec.
+        let before = app.section_titles.clone();
+        assert!(!before.is_empty());
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::SectionTitleChanged(0, "想法".into()),
+        );
+        assert_eq!(app.section_titles[0], "想法");
+        // All other slots must stay untouched.
+        assert_eq!(app.section_titles[1..], before[1..]);
+    }
+
+    #[test]
+    fn section_title_changed_out_of_bounds_is_noop() {
+        // Iced should never emit a stale index, but the branch must defend
+        // against one rather than panic. Assert via `get_mut`-style shape:
+        // the vec is unchanged and the call returns normally.
+        let mut app = fresh_app();
+        let before = app.section_titles.clone();
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::SectionTitleChanged(99, "ghost".into()),
+        );
+        assert_eq!(app.section_titles, before);
+    }
+
+    #[test]
+    fn section_added_appends_default_title() {
+        let mut app = fresh_app();
+        let before_len = app.section_titles.len();
+        let _ = settings_update(&mut app, SettingsMessage::SectionAdded);
+        assert_eq!(app.section_titles.len(), before_len + 1);
+        assert_eq!(
+            app.section_titles[before_len],
+            NoteSection::default_title_for(before_len)
+        );
+    }
+
+    #[test]
+    fn section_added_at_maximum_is_noop() {
+        // Pre-fill to the cap so the branch must detect the saturated state
+        // and do nothing. Guards against a future refactor that forgets the
+        // `< MAXIMUM_COUNT` gate.
+        let mut app = fresh_app();
+        app.section_titles =
+            (0..NoteSection::MAXIMUM_COUNT)
+                .map(NoteSection::default_title_for)
+                .collect();
+        let before = app.section_titles.clone();
+        let _ = settings_update(&mut app, SettingsMessage::SectionAdded);
+        assert_eq!(app.section_titles, before);
+        assert_eq!(app.section_titles.len(), NoteSection::MAXIMUM_COUNT);
+    }
+
+    #[test]
+    fn section_removed_at_index_shifts_rest() {
+        let mut app = fresh_app();
+        app.section_titles = vec!["A".into(), "B".into(), "C".into()];
+        let _ = settings_update(&mut app, SettingsMessage::SectionRemoved(1));
+        assert_eq!(app.section_titles, vec!["A".to_string(), "C".into()]);
+    }
+
+    #[test]
+    fn section_removed_at_minimum_is_noop() {
+        // Can't drop below one section. Mirrors Mac `AppSettings.removeSection`
+        // which silently bails in the same state.
+        let mut app = fresh_app();
+        app.section_titles = vec!["Solo".into()];
+        let _ = settings_update(&mut app, SettingsMessage::SectionRemoved(0));
+        assert_eq!(app.section_titles, vec!["Solo".to_string()]);
+    }
+
+    #[test]
+    fn section_removed_out_of_bounds_is_noop() {
+        let mut app = fresh_app();
+        let before = app.section_titles.clone();
+        let before_len = before.len();
+        let _ = settings_update(&mut app, SettingsMessage::SectionRemoved(99));
+        assert_eq!(app.section_titles, before);
+        assert_eq!(app.section_titles.len(), before_len);
+    }
+
+    #[test]
+    fn section_messages_do_not_mutate_shared_settings() {
+        // Sub-task 5 still only touches the shadow. Persistence to the shared
+        // `Arc<AppSettings>` lands in sub-task 8.
+        let mut app = fresh_app();
+        let original = app.settings.section_titles.clone();
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::SectionTitleChanged(0, "新想法".into()),
+        );
+        let _ = settings_update(&mut app, SettingsMessage::SectionAdded);
+        let _ = settings_update(&mut app, SettingsMessage::SectionRemoved(0));
+        assert_eq!(app.settings.section_titles, original);
     }
 }
