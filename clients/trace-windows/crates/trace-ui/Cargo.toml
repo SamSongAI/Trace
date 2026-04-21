@@ -11,3 +11,4 @@ description = "iced-based UI layer for the Trace Windows client."
 [dependencies]
 trace-core = { path = "../trace-core" }
 iced = { workspace = true }
+uuid = { workspace = true }
