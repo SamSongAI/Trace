@@ -35,8 +35,8 @@ use iced::widget::{column, container, row, scrollable, text};
 use iced::{window, Element, Length, Pixels, Size, Subscription, Task, Theme};
 use trace_core::{
     join_folder_and_filename, split_target_file, AppSettings, DailyFileDateFormat, EntryTheme,
-    L10n, Language, NoteSection, ThemePreset, ThreadConfig, TraceTheme, VaultPathValidationIssue,
-    WriteMode,
+    L10n, Language, NoteSection, ShortcutSpec, ThemePreset, ThreadConfig, TraceTheme,
+    VaultPathValidationIssue, WriteMode,
 };
 use uuid::Uuid;
 
@@ -82,6 +82,62 @@ pub fn window_settings() -> window::Settings {
         decorations: true,
         transparent: false,
         ..window::Settings::default()
+    }
+}
+
+/// Which of the four configurable keyboard shortcuts is currently being
+/// recorded by the user. Mirrors Mac `SettingsView.swift`'s `ShortcutTarget`
+/// enum one-for-one so the cross-platform UX reads the same.
+///
+/// Used both as the discriminant carried through the record → capture round
+/// trip (see [`SettingsMessage::RecordingStarted`] /
+/// [`SettingsMessage::RecordingCaptured`]) and as the iteration handle that
+/// the Shortcuts card loops over when rendering the four configurable rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShortcutTarget {
+    /// Global capture-panel summon hotkey. Registered via Win32 `RegisterHotKey`
+    /// outside the focused window so it fires even while Trace is in the
+    /// background — matches Mac `.create`.
+    Create,
+    /// Panel-scoped "send note" shortcut. Mac `.send`.
+    Send,
+    /// Panel-scoped "append note" shortcut. Mac `.append`.
+    Append,
+    /// Panel-scoped "toggle write mode" shortcut. Mac `.toggleWriteMode`.
+    ToggleMode,
+}
+
+impl ShortcutTarget {
+    /// Every variant in display order. Used by the card renderer to emit the
+    /// four rows in a consistent sequence and by the conflict-scan helper in
+    /// `settings_update` to compare against all other targets.
+    pub const ALL: [ShortcutTarget; 4] = [
+        ShortcutTarget::Create,
+        ShortcutTarget::Send,
+        ShortcutTarget::Append,
+        ShortcutTarget::ToggleMode,
+    ];
+
+    /// Localized row label shown next to the shortcut chip. Mirrors Mac
+    /// `ShortcutTarget.name`.
+    pub fn name(self, lang: Language) -> &'static str {
+        match self {
+            ShortcutTarget::Create => L10n::shortcut_create(lang),
+            ShortcutTarget::Send => L10n::shortcut_send(lang),
+            ShortcutTarget::Append => L10n::shortcut_append(lang),
+            ShortcutTarget::ToggleMode => L10n::shortcut_toggle_mode(lang),
+        }
+    }
+
+    /// Localized "Global" / "Panel" category caption shown below the row
+    /// label. Mirrors Mac `ShortcutTarget.category`.
+    pub fn category(self, lang: Language) -> &'static str {
+        match self {
+            ShortcutTarget::Create => L10n::shortcut_category_global(lang),
+            ShortcutTarget::Send | ShortcutTarget::Append | ShortcutTarget::ToggleMode => {
+                L10n::shortcut_category_panel(lang)
+            }
+        }
     }
 }
 
@@ -213,6 +269,39 @@ pub enum SettingsMessage {
     /// stale message delivered after the button is already disabled cannot
     /// drop the last thread.
     ThreadRemoved(Uuid),
+    /// Fired when the user clicks the "Edit" (pencil) button on a shortcut
+    /// row in the Shortcuts card. Puts the settings state into "recording"
+    /// mode for the given target, clears any stale validation message, and
+    /// lets the keyboard subscription (sub-task 7 Commit 4) start capturing
+    /// keystrokes. A second click on the same target or a click on a different
+    /// target's Edit button simply re-arms the state for the new target.
+    RecordingStarted(ShortcutTarget),
+    /// Fired when the user presses Esc with no modifiers during recording, or
+    /// clicks the Cancel button. Clears
+    /// [`SettingsApp::recording_target`] and
+    /// [`SettingsApp::shortcut_recorder_message`] without touching any
+    /// shortcut shadow field. Mirrors Mac `stopRecording()`'s bare Esc case
+    /// which returns `nil` from the `NSEvent` monitor.
+    RecordingCancelled,
+    /// Fired by the keyboard subscription (sub-task 7 Commit 4) when a key
+    /// press arrives while a target is being recorded. The update branch
+    /// validates the candidate (modifier required, Esc reserved, ⌘/Ctrl+1-9
+    /// reserved for panel targets, conflict-free across all four targets) and
+    /// either stores the new [`ShortcutSpec`] into the target's shadow field or
+    /// stages an error message on [`SettingsApp::shortcut_recorder_message`].
+    ///
+    /// `key_code` is a Win32 virtual-key code; `modifiers` uses the
+    /// `MOD_ALT|MOD_CONTROL|MOD_SHIFT|MOD_WIN` bit set from
+    /// [`trace_core::ShortcutSpec`]. The split into a pair of `u32`s (rather
+    /// than passing a `ShortcutSpec` directly) keeps the subscription's
+    /// message type trivially [`Clone`] without forcing `ShortcutSpec` into
+    /// the message hot path for every other variant.
+    RecordingCaptured {
+        /// Win32 virtual-key code of the captured key.
+        key_code: u32,
+        /// Bitmask of modifier flags (`MOD_ALT|MOD_CONTROL|MOD_SHIFT|MOD_WIN`).
+        modifiers: u32,
+    },
 }
 
 /// Mutable application state for the settings window.
@@ -310,6 +399,36 @@ pub struct SettingsApp {
     /// `ThreadAdded` / `ThreadRemoved` branches; persistence to
     /// [`Self::settings`] is deferred to sub-task 8.
     pub thread_configs: Vec<ThreadConfig>,
+    /// Shadow of [`AppSettings::hot_key_code`] + `hot_key_modifiers` pair,
+    /// driving the Shortcuts card's "Create Note" row (sub-task 7). Seeded
+    /// from the persisted `u32` pair in [`Self::new`] and mutated in-place by
+    /// [`SettingsMessage::RecordingCaptured`] when the user records a new
+    /// binding for [`ShortcutTarget::Create`].
+    pub global_hotkey: ShortcutSpec,
+    /// Shadow of the Mac-equivalent `send_note_*` pair, driving the Shortcuts
+    /// card's "Send Note" row (sub-task 7). Same seeding / mutation contract
+    /// as [`Self::global_hotkey`] but scoped to
+    /// [`ShortcutTarget::Send`].
+    pub send_note_shortcut: ShortcutSpec,
+    /// Shadow of the `append_note_*` pair, driving the Shortcuts card's
+    /// "Append Note" row (sub-task 7).
+    pub append_note_shortcut: ShortcutSpec,
+    /// Shadow of the `mode_toggle_*` pair, driving the Shortcuts card's
+    /// "Toggle Write Mode" row (sub-task 7).
+    pub mode_toggle_shortcut: ShortcutSpec,
+    /// Which shortcut target is currently recording keystrokes, if any.
+    /// `None` means the Shortcuts card is in its resting state; `Some(t)`
+    /// means the keyboard subscription (sub-task 7 Commit 4) should route
+    /// key events into the validation pipeline. Mirrors Mac
+    /// `SettingsView.recordingTarget`.
+    pub recording_target: Option<ShortcutTarget>,
+    /// Stale error message from the most recent [`SettingsMessage::RecordingCaptured`]
+    /// validation failure, or `None` when recording succeeded / never
+    /// started. Rendered directly by the Shortcuts card's footer and cleared
+    /// on the next [`SettingsMessage::RecordingStarted`] /
+    /// [`SettingsMessage::RecordingCancelled`]. Matches Mac
+    /// `SettingsView.shortcutRecorderMessage`.
+    pub shortcut_recorder_message: Option<String>,
 }
 
 impl SettingsApp {
@@ -349,6 +468,21 @@ impl SettingsApp {
         // reason — the Threads card (sub-task 6) mutates the shadow freely
         // without taking a lock on the `Arc<AppSettings>`.
         let thread_configs = settings.thread_configs.clone();
+        // Pack each persisted `(key_code, modifiers)` `u32` pair into a
+        // `ShortcutSpec` once at construction. The shadow then carries the
+        // struct directly so the card renderer and validation pipeline read
+        // a single value instead of two parallel fields.
+        let global_hotkey = ShortcutSpec::new(settings.hot_key_code, settings.hot_key_modifiers);
+        let send_note_shortcut =
+            ShortcutSpec::new(settings.send_note_key_code, settings.send_note_modifiers);
+        let append_note_shortcut = ShortcutSpec::new(
+            settings.append_note_key_code,
+            settings.append_note_modifiers,
+        );
+        let mode_toggle_shortcut = ShortcutSpec::new(
+            settings.mode_toggle_key_code,
+            settings.mode_toggle_modifiers,
+        );
         Self {
             theme,
             iced_theme,
@@ -365,6 +499,36 @@ impl SettingsApp {
             inbox_vault_path_issue,
             section_titles,
             thread_configs,
+            global_hotkey,
+            send_note_shortcut,
+            append_note_shortcut,
+            mode_toggle_shortcut,
+            recording_target: None,
+            shortcut_recorder_message: None,
+        }
+    }
+
+    /// Returns the shadow [`ShortcutSpec`] for `target`. Centralized so the
+    /// view layer and the conflict-scan logic share one read path per target
+    /// instead of each match arm re-splitting the four fields.
+    pub fn shortcut_for(&self, target: ShortcutTarget) -> ShortcutSpec {
+        match target {
+            ShortcutTarget::Create => self.global_hotkey,
+            ShortcutTarget::Send => self.send_note_shortcut,
+            ShortcutTarget::Append => self.append_note_shortcut,
+            ShortcutTarget::ToggleMode => self.mode_toggle_shortcut,
+        }
+    }
+
+    /// Writes `spec` into the shadow field for `target`. Mirror of
+    /// [`Self::shortcut_for`] on the mutable side; keeps the per-target match
+    /// out of [`settings_update`]'s `RecordingCaptured` branch.
+    pub fn set_shortcut(&mut self, target: ShortcutTarget, spec: ShortcutSpec) {
+        match target {
+            ShortcutTarget::Create => self.global_hotkey = spec,
+            ShortcutTarget::Send => self.send_note_shortcut = spec,
+            ShortcutTarget::Append => self.append_note_shortcut = spec,
+            ShortcutTarget::ToggleMode => self.mode_toggle_shortcut = spec,
         }
     }
 
@@ -556,7 +720,113 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
             }
             Task::none()
         }
+        SettingsMessage::RecordingStarted(target) => {
+            // Arm the recorder for `target`; any stale validation message from
+            // a previous attempt is cleared so the chip's footer only shows
+            // the live recording hint. Mirrors Mac `startRecording(for:)`
+            // which sets both fields in lockstep.
+            state.recording_target = Some(target);
+            state.shortcut_recorder_message = None;
+            Task::none()
+        }
+        SettingsMessage::RecordingCancelled => {
+            // Disarm the recorder and drop any error message so the Shortcuts
+            // card returns to its resting state. Matches Mac `stopRecording()`.
+            state.recording_target = None;
+            state.shortcut_recorder_message = None;
+            Task::none()
+        }
+        SettingsMessage::RecordingCaptured { key_code, modifiers } => {
+            // No target armed: defensive no-op for the (very rare) race where
+            // a keystroke arrives after the recorder has already been
+            // cancelled.
+            let Some(target) = state.recording_target else {
+                return Task::none();
+            };
+
+            let candidate = ShortcutSpec::new(key_code, modifiers);
+
+            // Bare Esc (no modifiers) silently cancels the recorder. Matches
+            // the Mac reference's `NSEvent` monitor, which returns `nil`
+            // before any validation runs — so we gate on this case first.
+            if candidate.key_code == VK_ESCAPE && !candidate.has_modifier() {
+                state.recording_target = None;
+                state.shortcut_recorder_message = None;
+                return Task::none();
+            }
+
+            // Modifier required — a bare F1/Tab/Enter with no ⌘/⌥/⇧/⌃ would
+            // otherwise collide with typical in-app typing and is rejected
+            // the same way Mac `handleRecordedShortcut` does.
+            if !candidate.has_modifier() {
+                state.shortcut_recorder_message =
+                    Some(L10n::need_modifier_key(state.language).to_string());
+                return Task::none();
+            }
+
+            // Modifier + Esc (e.g. ⌃+Esc) is reserved for the panel's close
+            // gesture. Mirror Mac's second validation step verbatim.
+            if candidate.key_code == VK_ESCAPE {
+                state.shortcut_recorder_message =
+                    Some(L10n::esc_reserved(state.language).to_string());
+                return Task::none();
+            }
+
+            // Ctrl+1..9 (Win32 analog of Mac's ⌘+1..9) is reserved for panel
+            // section switching. Only the global Create hotkey may claim one
+            // of those combos — all three panel targets must reject them.
+            if target != ShortcutTarget::Create && candidate.is_reserved_section_switch() {
+                state.shortcut_recorder_message =
+                    Some(L10n::cmd_number_reserved(state.language).to_string());
+                return Task::none();
+            }
+
+            // Conflict check: the four shortcuts must be unique across the
+            // whole Shortcuts card. `conflicting_target` scans all other
+            // targets (excluding `target` itself) and returns the first one
+            // whose shadow already holds `candidate`.
+            if let Some(conflict) = conflicting_target(state, candidate, target) {
+                state.shortcut_recorder_message = Some(L10n::shortcut_conflict(
+                    state.language,
+                    conflict.name(state.language),
+                ));
+                return Task::none();
+            }
+
+            // All checks pass — commit the candidate into the shadow, disarm
+            // the recorder, and clear any stale message. Write-back to
+            // [`AppSettings`] lands in sub-task 8.
+            state.set_shortcut(target, candidate);
+            state.recording_target = None;
+            state.shortcut_recorder_message = None;
+            Task::none()
+        }
     }
+}
+
+/// Win32 virtual-key code for the Escape key. Hoisted out of the match arms
+/// so the (Esc, modifier) validation branches name the constant rather than
+/// an inline magic number.
+const VK_ESCAPE: u32 = 0x1B;
+
+/// Returns the first [`ShortcutTarget`] (other than `current`) whose shadow
+/// shortcut matches `candidate`, or `None` when the candidate is free.
+///
+/// Iterates [`ShortcutTarget::ALL`] so the scan order stays stable across
+/// edits and mirrors Mac `conflictingShortcutTarget(for:excluding:)`. Split
+/// into a free function so the validation branches in [`settings_update`]
+/// stay readable and the tests in this module can exercise the scan without
+/// constructing a whole message pipeline.
+fn conflicting_target(
+    state: &SettingsApp,
+    candidate: ShortcutSpec,
+    current: ShortcutTarget,
+) -> Option<ShortcutTarget> {
+    ShortcutTarget::ALL
+        .iter()
+        .copied()
+        .filter(|t| *t != current)
+        .find(|t| state.shortcut_for(*t) == candidate)
 }
 
 /// Default filename used when a user picks a folder for a thread row whose
@@ -2176,5 +2446,352 @@ mod tests {
             );
             let _element: Element<'_, SettingsMessage> = build_cards(&app);
         }
+    }
+
+    // --- Sub-task 7 Commit 2: Shortcut target + recorder update branches
+    //
+    // Cover every validation gate in `RecordingCaptured` plus the shadow
+    // seeding and `start / cancel` flows so the card renderer (Commit 3) and
+    // keyboard subscription (Commit 4) can trust the update pipeline.
+
+    use trace_core::{
+        DEFAULT_APPEND_NOTE_MODIFIERS, DEFAULT_APPEND_NOTE_VKEY, DEFAULT_GLOBAL_HOTKEY_MODIFIERS,
+        DEFAULT_GLOBAL_HOTKEY_VKEY, DEFAULT_MODE_TOGGLE_MODIFIERS, DEFAULT_MODE_TOGGLE_VKEY,
+        DEFAULT_SEND_NOTE_MODIFIERS, DEFAULT_SEND_NOTE_VKEY, MOD_ALT, MOD_CONTROL, MOD_SHIFT,
+    };
+
+    #[test]
+    fn shortcut_target_name_and_category_cover_all_variants_and_languages() {
+        // Every target must resolve its name + category in every language
+        // without falling through to an empty string; a stale L10n key would
+        // surface here as an empty label.
+        for lang in [
+            Language::SystemDefault,
+            Language::Zh,
+            Language::En,
+            Language::Ja,
+        ] {
+            for target in ShortcutTarget::ALL {
+                assert!(!target.name(lang).is_empty());
+                assert!(!target.category(lang).is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn shortcut_target_all_lists_every_variant_in_display_order() {
+        // Order matters: the Shortcuts card renders rows in this sequence and
+        // the conflict scan iterates it, so freeze the order with an explicit
+        // test rather than relying on the derive to preserve declaration
+        // order implicitly.
+        assert_eq!(
+            ShortcutTarget::ALL,
+            [
+                ShortcutTarget::Create,
+                ShortcutTarget::Send,
+                ShortcutTarget::Append,
+                ShortcutTarget::ToggleMode,
+            ]
+        );
+    }
+
+    #[test]
+    fn settings_app_new_seeds_all_four_shortcut_shadows_from_persisted_settings() {
+        // Defaults on `AppSettings` decode into defaults on `SettingsApp`.
+        let app = fresh_app();
+        assert_eq!(
+            app.global_hotkey,
+            ShortcutSpec::new(DEFAULT_GLOBAL_HOTKEY_VKEY, DEFAULT_GLOBAL_HOTKEY_MODIFIERS)
+        );
+        assert_eq!(
+            app.send_note_shortcut,
+            ShortcutSpec::new(DEFAULT_SEND_NOTE_VKEY, DEFAULT_SEND_NOTE_MODIFIERS)
+        );
+        assert_eq!(
+            app.append_note_shortcut,
+            ShortcutSpec::new(DEFAULT_APPEND_NOTE_VKEY, DEFAULT_APPEND_NOTE_MODIFIERS)
+        );
+        assert_eq!(
+            app.mode_toggle_shortcut,
+            ShortcutSpec::new(DEFAULT_MODE_TOGGLE_VKEY, DEFAULT_MODE_TOGGLE_MODIFIERS)
+        );
+        assert!(app.recording_target.is_none());
+        assert!(app.shortcut_recorder_message.is_none());
+    }
+
+    #[test]
+    fn settings_app_new_seeds_shortcut_shadows_from_non_default_settings() {
+        // Pin a non-default `(code, modifiers)` tuple on every shortcut so
+        // the round-trip through `ShortcutSpec::new` is exercised by more
+        // than just the all-default path.
+        let persisted = AppSettings {
+            hot_key_code: 0x41,       // A
+            hot_key_modifiers: MOD_ALT,
+            send_note_key_code: 0x42, // B
+            send_note_modifiers: MOD_SHIFT,
+            append_note_key_code: 0x43, // C
+            append_note_modifiers: MOD_CONTROL | MOD_SHIFT,
+            mode_toggle_key_code: 0x44, // D
+            mode_toggle_modifiers: MOD_CONTROL,
+            ..AppSettings::default()
+        };
+        let app = SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(persisted),
+        );
+        assert_eq!(app.global_hotkey, ShortcutSpec::new(0x41, MOD_ALT));
+        assert_eq!(app.send_note_shortcut, ShortcutSpec::new(0x42, MOD_SHIFT));
+        assert_eq!(
+            app.append_note_shortcut,
+            ShortcutSpec::new(0x43, MOD_CONTROL | MOD_SHIFT)
+        );
+        assert_eq!(
+            app.mode_toggle_shortcut,
+            ShortcutSpec::new(0x44, MOD_CONTROL)
+        );
+    }
+
+    #[test]
+    fn shortcut_for_and_set_shortcut_round_trip_every_target() {
+        let mut app = fresh_app();
+        for target in ShortcutTarget::ALL {
+            // Use a distinct key code per target so a swapped-match arm in
+            // `set_shortcut`/`shortcut_for` would fail the round-trip.
+            let probe = ShortcutSpec::new(0x70 + target as u32, MOD_CONTROL | MOD_ALT);
+            app.set_shortcut(target, probe);
+            assert_eq!(app.shortcut_for(target), probe);
+        }
+    }
+
+    #[test]
+    fn recording_started_arms_target_and_clears_stale_message() {
+        let mut app = fresh_app();
+        app.shortcut_recorder_message = Some("stale".to_string());
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::RecordingStarted(ShortcutTarget::Send),
+        );
+        assert_eq!(app.recording_target, Some(ShortcutTarget::Send));
+        assert_eq!(app.shortcut_recorder_message, None);
+    }
+
+    #[test]
+    fn recording_cancelled_disarms_target_and_clears_message() {
+        let mut app = fresh_app();
+        app.recording_target = Some(ShortcutTarget::Append);
+        app.shortcut_recorder_message = Some("stale".to_string());
+        let _ = settings_update(&mut app, SettingsMessage::RecordingCancelled);
+        assert_eq!(app.recording_target, None);
+        assert_eq!(app.shortcut_recorder_message, None);
+    }
+
+    #[test]
+    fn recording_captured_without_armed_target_is_no_op() {
+        let mut app = fresh_app();
+        let before = app.global_hotkey;
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::RecordingCaptured {
+                key_code: 0x4E,
+                modifiers: MOD_CONTROL,
+            },
+        );
+        assert_eq!(app.global_hotkey, before);
+        assert_eq!(app.shortcut_recorder_message, None);
+    }
+
+    #[test]
+    fn recording_captured_bare_escape_silently_cancels_recording() {
+        // Mac reference: bare Esc returns `nil` from the NSEvent monitor,
+        // i.e. disarms the recorder without flagging an error. The Win32
+        // port must match so the Esc chord behaves predictably.
+        let mut app = fresh_app();
+        app.recording_target = Some(ShortcutTarget::Send);
+        let before = app.send_note_shortcut;
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::RecordingCaptured {
+                key_code: 0x1B,
+                modifiers: 0,
+            },
+        );
+        assert_eq!(app.recording_target, None);
+        assert_eq!(app.shortcut_recorder_message, None);
+        assert_eq!(app.send_note_shortcut, before);
+    }
+
+    #[test]
+    fn recording_captured_without_modifier_reports_need_modifier_message() {
+        let mut app = fresh_app();
+        app.recording_target = Some(ShortcutTarget::Send);
+        let before = app.send_note_shortcut;
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::RecordingCaptured {
+                key_code: 0x41, // A without any modifier
+                modifiers: 0,
+            },
+        );
+        // Target stays armed so the user can retry without reopening.
+        assert_eq!(app.recording_target, Some(ShortcutTarget::Send));
+        assert_eq!(app.send_note_shortcut, before);
+        assert_eq!(
+            app.shortcut_recorder_message.as_deref(),
+            Some(L10n::need_modifier_key(app.language))
+        );
+    }
+
+    #[test]
+    fn recording_captured_escape_with_modifier_reports_esc_reserved_message() {
+        let mut app = fresh_app();
+        app.recording_target = Some(ShortcutTarget::Send);
+        let before = app.send_note_shortcut;
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::RecordingCaptured {
+                key_code: 0x1B,
+                modifiers: MOD_CONTROL,
+            },
+        );
+        assert_eq!(app.recording_target, Some(ShortcutTarget::Send));
+        assert_eq!(app.send_note_shortcut, before);
+        assert_eq!(
+            app.shortcut_recorder_message.as_deref(),
+            Some(L10n::esc_reserved(app.language))
+        );
+    }
+
+    #[test]
+    fn recording_captured_ctrl_digit_on_panel_target_reports_cmd_number_reserved() {
+        // Ctrl+1..9 is reserved for panel section switching; the three panel
+        // targets must reject it. Sweep all three to prove the gate is not
+        // special-cased to `Send` alone.
+        for target in [
+            ShortcutTarget::Send,
+            ShortcutTarget::Append,
+            ShortcutTarget::ToggleMode,
+        ] {
+            let mut app = fresh_app();
+            app.recording_target = Some(target);
+            let before = app.shortcut_for(target);
+            let _ = settings_update(
+                &mut app,
+                SettingsMessage::RecordingCaptured {
+                    key_code: 0x31, // '1'
+                    modifiers: MOD_CONTROL,
+                },
+            );
+            assert_eq!(app.recording_target, Some(target), "{target:?}");
+            assert_eq!(app.shortcut_for(target), before, "{target:?}");
+            assert_eq!(
+                app.shortcut_recorder_message.as_deref(),
+                Some(L10n::cmd_number_reserved(app.language)),
+                "{target:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn recording_captured_ctrl_digit_on_create_target_is_accepted() {
+        // The global Create hotkey sits outside the panel scope, so Ctrl+1..9
+        // is a valid capture there — the reservation gate must not apply.
+        let mut app = fresh_app();
+        app.recording_target = Some(ShortcutTarget::Create);
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::RecordingCaptured {
+                key_code: 0x32, // '2'
+                modifiers: MOD_CONTROL,
+            },
+        );
+        assert_eq!(app.recording_target, None);
+        assert_eq!(app.shortcut_recorder_message, None);
+        assert_eq!(app.global_hotkey, ShortcutSpec::new(0x32, MOD_CONTROL));
+    }
+
+    #[test]
+    fn recording_captured_conflict_reports_conflicting_target_name() {
+        // Seed the Send shadow with a known combo, then try to record the
+        // same combo on Append. The update branch must stage the conflict
+        // message naming "Send Note" (or its localized equivalent).
+        let mut app = fresh_app();
+        let conflict_spec = ShortcutSpec::new(0x4E, MOD_ALT | MOD_CONTROL); // Ctrl+Alt+N
+        app.send_note_shortcut = conflict_spec;
+        app.recording_target = Some(ShortcutTarget::Append);
+        let before = app.append_note_shortcut;
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::RecordingCaptured {
+                key_code: 0x4E,
+                modifiers: MOD_ALT | MOD_CONTROL,
+            },
+        );
+        assert_eq!(app.recording_target, Some(ShortcutTarget::Append));
+        assert_eq!(app.append_note_shortcut, before);
+        let expected = L10n::shortcut_conflict(
+            app.language,
+            ShortcutTarget::Send.name(app.language),
+        );
+        assert_eq!(app.shortcut_recorder_message.as_deref(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn recording_captured_same_combo_on_current_target_is_not_a_self_conflict() {
+        // Recording the already-set shortcut onto its own row must succeed —
+        // the conflict scan excludes `current` from the walk. This guards
+        // against an accidental off-by-one in `conflicting_target`. The
+        // chosen combo deliberately avoids every default shadow slot so a
+        // real conflict cannot muddy the self-exclusion assertion.
+        let mut app = fresh_app();
+        let spec = ShortcutSpec::new(0x50, MOD_CONTROL | MOD_SHIFT); // Ctrl+Shift+P
+        app.send_note_shortcut = spec;
+        app.recording_target = Some(ShortcutTarget::Send);
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::RecordingCaptured {
+                key_code: 0x50,
+                modifiers: MOD_CONTROL | MOD_SHIFT,
+            },
+        );
+        assert_eq!(app.recording_target, None);
+        assert_eq!(app.shortcut_recorder_message, None);
+        assert_eq!(app.send_note_shortcut, spec);
+    }
+
+    #[test]
+    fn recording_captured_success_commits_spec_and_disarms_recorder() {
+        let mut app = fresh_app();
+        app.recording_target = Some(ShortcutTarget::ToggleMode);
+        app.shortcut_recorder_message = Some("stale".to_string());
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::RecordingCaptured {
+                key_code: 0x54, // T
+                modifiers: MOD_CONTROL | MOD_ALT,
+            },
+        );
+        assert_eq!(app.recording_target, None);
+        assert_eq!(app.shortcut_recorder_message, None);
+        assert_eq!(
+            app.mode_toggle_shortcut,
+            ShortcutSpec::new(0x54, MOD_CONTROL | MOD_ALT)
+        );
+    }
+
+    #[test]
+    fn conflicting_target_skips_current_and_finds_first_match() {
+        // Lock the scan order: seed Send and Append with the same combo,
+        // record onto ToggleMode, and assert the scan returns Send (the
+        // first in `ShortcutTarget::ALL`).
+        let mut app = fresh_app();
+        let spec = ShortcutSpec::new(0x50, MOD_CONTROL); // Ctrl+P
+        app.send_note_shortcut = spec;
+        app.append_note_shortcut = spec;
+        let found = conflicting_target(&app, spec, ShortcutTarget::ToggleMode);
+        assert_eq!(found, Some(ShortcutTarget::Send));
+
+        // Excluding Send should surface Append next.
+        let found = conflicting_target(&app, spec, ShortcutTarget::Send);
+        assert_eq!(found, Some(ShortcutTarget::Append));
     }
 }
