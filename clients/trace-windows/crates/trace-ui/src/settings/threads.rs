@@ -22,7 +22,7 @@ use iced::alignment::Vertical;
 use iced::font::Weight;
 use iced::widget::{button, column, row, text, text_input};
 use iced::{Element, Font, Length, Pixels};
-use trace_core::{L10n, Language, SettingsPalette, ThreadConfig};
+use trace_core::{split_target_file, L10n, Language, SettingsPalette, ThreadConfig};
 
 use crate::theme::{
     settings_field_style, settings_remove_button_style, settings_secondary_button_style,
@@ -49,7 +49,11 @@ const NAME_WIDTH: f32 = 100.0;
 /// (only `Fixed` / `Fill` / `Shrink` / `FillPortion`), so the Windows port
 /// uses `Length::Fill` on the folder row instead. The constant is kept as
 /// documentation of the Mac contract and as a fixture for the layout-
-/// constant regression test.
+/// constant regression test. The only reference lives under `#[cfg(test)]`
+/// so the non-test build's `dead_code` lint fires — the `#[allow]` here
+/// anchors the constant in the source-of-truth file regardless of build
+/// flavour, which is cheaper than duplicating the value into the test
+/// module.
 #[allow(dead_code)]
 const FOLDER_MIN_WIDTH: f32 = 380.0;
 /// Fixed width of the filename column. Matches Mac `.frame(width: 120)` on
@@ -191,7 +195,7 @@ fn thread_config_row<'a>(
     can_remove: bool,
 ) -> Element<'a, SettingsMessage> {
     let thread_id = thread.id;
-    let (folder, filename) = trace_core::split_target_file(&thread.target_file);
+    let (folder, filename) = split_target_file(&thread.target_file);
 
     let name_field = text_input(L10n::thread_name(lang), &thread.name)
         .on_input(move |value| SettingsMessage::ThreadNameChanged(thread_id, value))
