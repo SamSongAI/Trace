@@ -1,10 +1,14 @@
 //! `CaptureApp` state and `Message` enum for the iced capture panel.
 //!
-//! Phase 10 scope is deliberately narrow: [`update`] only mutates
-//! `CaptureApp` state for the subset of messages that let us exercise the
-//! footer branching and chip selection visuals. Cross-cutting interactions
-//! such as submit, global hotkeys, image paste, toast rendering, and window
-//! pinning side-effects are Phase 11 concerns.
+//! Phase 11 wires the keyboard-driven interactions on top of the Phase 10
+//! shell: panel-scoped shortcuts (Ctrl+Enter / Ctrl+Shift+Enter / Shift+Tab /
+//! Ctrl+1..9 / Ctrl+P / Esc), writer dispatch, toast notifications with a
+//! timed auto-dismiss, and auto-close on focus loss when not pinned.
+//!
+//! Platform-specific effects (topmost window bit, keyboard-focus restoration)
+//! are routed through the [`crate::platform::PlatformHandler`] trait so
+//! `trace-ui` stays pure — `trace-app` plugs in the real Win32-backed
+//! implementation in a later phase.
 //!
 //! # View layout
 //!
@@ -17,6 +21,9 @@
 //!    vertical space
 //! 4. [`crate::widgets::footer`] — switched on [`trace_core::WriteMode`]
 //!
+//! A toast pill overlay is rendered on top of the stack via
+//! [`iced::widget::stack`] when [`CaptureApp::toast`] is `Some`.
+//!
 //! # Window settings
 //!
 //! The capture panel is frameless, transparent-to-false, and resizable from
@@ -24,12 +31,15 @@
 //! SwiftUI `.frame(minWidth:360, minHeight:220)` and the Mac window
 //! controller's default frame. See [`window_settings`].
 
+use std::sync::Arc;
+
 use iced::widget::{column, container, text_editor, Space};
-use iced::window;
+use iced::{window, Task};
 use iced::{Element, Length, Size, Theme};
-use trace_core::{NoteSection, ThreadConfig, TraceTheme, WriteMode};
+use trace_core::{AppSettings, NoteSection, ThreadConfig, TraceTheme, WriteMode};
 use uuid::Uuid;
 
+use crate::platform::PlatformHandler;
 use crate::theme::{panel_container_style, separator_container_style, to_iced_theme};
 use crate::widgets;
 
@@ -48,30 +58,62 @@ pub const SEPARATOR_HEIGHT: f32 = 1.0;
 
 /// Messages consumed by [`update`].
 ///
-/// The Phase 10 surface is intentionally small — every variant either mutates
-/// in-memory state or is a no-op placeholder to be wired up in Phase 11.
+/// Phase 11 extends the surface with keyboard-driven interactions (Send /
+/// Append / CycleMode / SelectByIndex / ClosePanel) and toast plumbing.
+/// Every variant either mutates in-memory state, issues an [`iced::Task`],
+/// or both.
 #[derive(Debug, Clone)]
 pub enum Message {
     /// Forwarded from [`iced::widget::text_editor`] — mutates
     /// [`CaptureApp::editor_content`].
     EditorAction(text_editor::Action),
-    /// Switches the active footer mode. In Phase 10 this is only ever raised
-    /// by tests; Phase 11 will also emit it from the mode-toggle hotkey.
+    /// Switches the active footer mode. Phase 10 only raised this from tests;
+    /// Phase 11 also emits it from [`Self::CycleModeForward`].
     WriteModeChanged(WriteMode),
-    /// Dimension footer chip tap. Phase 10 only persists the selection in
-    /// memory; Phase 11 wires the write path.
+    /// Dimension footer chip tap.
     SectionSelected(SectionId),
-    /// Thread footer chip tap. Same Phase-10-is-state-only rule as
-    /// [`Self::SectionSelected`].
+    /// Thread footer chip tap.
     ThreadSelected(ThreadId),
     /// Text change in the document title input.
     DocumentTitleChanged(String),
-    /// Pin button tap — toggles [`CaptureApp::pinned`]. The panel-level
-    /// "stay on top" effect lives in Phase 11.
+    /// Pin button tap — toggles [`CaptureApp::pinned`] and notifies the
+    /// platform handler so the window's topmost bit stays in sync.
     PinToggled,
     /// Settings button tap. Recorded for assertions; opening the settings
     /// window is a Phase 12 task.
     SettingsRequested,
+    /// Ctrl+Enter / Send: write the current editor content as a **new** entry
+    /// via the writer appropriate for the active [`WriteMode`], then clear
+    /// the editor and close the panel if not pinned.
+    SendNote,
+    /// Ctrl+Shift+Enter / Append: append the current editor content to the
+    /// latest entry. Falls back to create-new when the writer reports no
+    /// prior entry anchor (handled inside the writer).
+    AppendNote,
+    /// Shift+Tab: cycles [`CaptureApp::write_mode`] through
+    /// Dimension → Thread → File → Dimension.
+    CycleModeForward,
+    /// Ctrl+1..9: jump to the zero-indexed chip in the currently active
+    /// mode's list (sections for Dimension, threads for Thread). Silent
+    /// no-op in File mode or when the index is out of bounds.
+    SelectByIndex(usize),
+    /// Esc / post-send when not pinned: close the capture window. Emits an
+    /// [`iced::window::close`] task when a window id has been captured via
+    /// [`Self::WindowOpened`].
+    ClosePanel,
+    /// Requests the toast pill to display `message` for the auto-dismiss
+    /// duration. Replaces any in-flight toast.
+    ToastShow(String),
+    /// Timer-driven clear signal. Emitted by the [`subscription`] 1.5 s
+    /// [`time::every`] while a toast is active.
+    ToastDismiss,
+    /// `iced::window::Event::Unfocused` translated to a domain message, only
+    /// raised while `pinned == false`. Routed through the main [`update`]
+    /// path so the close flow is centralised.
+    FocusLost,
+    /// `iced::window::Event::Opened` translated to a domain message so
+    /// [`CaptureApp`] can capture the window id for the close task.
+    WindowOpened(window::Id),
 }
 
 /// Stable identifier for a section chip, mirroring the index-based identity
@@ -114,7 +156,7 @@ pub struct CaptureApp {
     /// WriteMode::File`.
     pub document_title: String,
     /// Whether the panel wants to stay on top. The actual z-order effect is
-    /// handled by the platform layer in Phase 11.
+    /// routed through [`CaptureApp::platform_handler`] in Phase 11.
     pub pinned: bool,
     /// Whether a settings-open request was observed. Exposed mainly for
     /// testability — Phase 12 will upgrade this to an outbound action.
@@ -125,15 +167,46 @@ pub struct CaptureApp {
     /// Threads as configured by the user. Already sorted by `order` so
     /// rendering is deterministic.
     pub threads: Vec<ThreadConfig>,
+    /// Settings snapshot used by the writers in [`Message::SendNote`] /
+    /// [`Message::AppendNote`]. We hold an owned [`AppSettings`] so writers
+    /// can be constructed cheaply per-call without borrowing across the
+    /// iced event loop; Phase 12 swaps this to an `Arc` when settings-edit
+    /// flows need live reload.
+    pub settings: AppSettings,
+    /// Message shown in the overlay toast pill. `None` hides the overlay.
+    /// Mutated by [`Message::ToastShow`] / [`Message::ToastDismiss`]; rendered
+    /// via [`iced::widget::stack`] on top of the main column.
+    pub toast: Option<String>,
+    /// Window id captured from [`iced::window::Event::Opened`]. Needed because
+    /// the close task requires a concrete id and iced 0.14 exposes window ids
+    /// only at runtime.
+    pub capture_window_id: Option<window::Id>,
+    /// Optional platform hook. `None` in unit tests that don't care about
+    /// side effects; `Some` when `trace-app` plugs in its
+    /// `trace-platform`-backed implementation. Stored behind an `Arc` so it
+    /// survives any `Clone` of the handler across iced's internal task
+    /// plumbing.
+    pub platform_handler: Option<Arc<dyn PlatformHandler + Send + Sync>>,
 }
 
 impl CaptureApp {
     /// Builds a fresh [`CaptureApp`] seeded from a resolved [`TraceTheme`],
-    /// the configured sections, and the configured threads.
+    /// the configured sections, the configured threads, and an
+    /// [`AppSettings`] snapshot used by the writers in
+    /// [`Message::SendNote`] / [`Message::AppendNote`].
     ///
     /// The editor starts empty, the write mode defaults to
-    /// [`WriteMode::default`] (dimension), and no chip is highlighted.
-    pub fn new(theme: TraceTheme, sections: Vec<NoteSection>, threads: Vec<ThreadConfig>) -> Self {
+    /// [`WriteMode::default`] (dimension), no chip is highlighted, no toast is
+    /// visible, no window id has been captured yet, and
+    /// [`CaptureApp::platform_handler`] is `None` — attach one via
+    /// [`CaptureApp::with_platform_handler`] during app wire-up when real
+    /// platform effects are required.
+    pub fn new(
+        theme: TraceTheme,
+        sections: Vec<NoteSection>,
+        threads: Vec<ThreadConfig>,
+        settings: AppSettings,
+    ) -> Self {
         // Sort threads by `order` eagerly so the footer grid renders in a
         // stable order without re-sorting per frame.
         let mut threads = threads;
@@ -151,7 +224,24 @@ impl CaptureApp {
             settings_requested: false,
             sections,
             threads,
+            settings,
+            toast: None,
+            capture_window_id: None,
+            platform_handler: None,
         }
+    }
+
+    /// Plugs a platform handler into an already-constructed [`CaptureApp`].
+    ///
+    /// Chained after [`CaptureApp::new`] in `trace-app`'s wire-up so
+    /// `trace-ui` never has to know how a real handler is built. Unit tests
+    /// that care about side effects can pass in a mock.
+    pub fn with_platform_handler(
+        mut self,
+        handler: Arc<dyn PlatformHandler + Send + Sync>,
+    ) -> Self {
+        self.platform_handler = Some(handler);
+        self
     }
 
     /// Returns the current editor text. Convenience wrapper around
@@ -170,36 +260,87 @@ impl CaptureApp {
     }
 }
 
-/// Mutates the supplied [`CaptureApp`] in response to a [`Message`].
+/// Mutates the supplied [`CaptureApp`] in response to a [`Message`] and
+/// returns an [`iced::Task`] describing any follow-up effect.
 ///
 /// Split out as a free function (rather than an inherent method on
 /// [`CaptureApp`]) to match the iced builder API style and to make unit
 /// testing trivial: callers can construct an app, push messages one by one,
-/// and assert on the final state.
-pub fn update(state: &mut CaptureApp, message: Message) {
+/// and assert on the final state. Follow-up tasks returned by this function
+/// are `Task::none()` in sub-task 1; sub-tasks 3 and 5 wire in the real
+/// writer-dispatch and close-window effects.
+pub fn update(state: &mut CaptureApp, message: Message) -> Task<Message> {
     match message {
         Message::EditorAction(action) => {
             state.editor_content.perform(action);
+            Task::none()
         }
         Message::WriteModeChanged(mode) => {
             state.write_mode = mode;
+            Task::none()
         }
         Message::SectionSelected(id) => {
             state.selected_section = Some(id);
+            Task::none()
         }
         Message::ThreadSelected(id) => {
             state.selected_thread = Some(id);
+            Task::none()
         }
         Message::DocumentTitleChanged(title) => {
             state.document_title = title;
+            Task::none()
         }
         Message::PinToggled => {
             state.pinned = !state.pinned;
+            // Side-effect routing through the platform handler lands in
+            // sub-task 2 — the skeleton keeps UI state authoritative.
+            Task::none()
         }
         Message::SettingsRequested => {
-            // Phase 10: only record the request. Phase 11 will translate this
-            // into an iced Task that opens the settings window.
+            // Recorded for test visibility. Phase 12 upgrades this to an
+            // outbound task that opens the settings window.
             state.settings_requested = true;
+            Task::none()
+        }
+        Message::SendNote => {
+            // Writer dispatch lands in sub-task 3.
+            Task::none()
+        }
+        Message::AppendNote => {
+            // Writer dispatch lands in sub-task 3.
+            Task::none()
+        }
+        Message::CycleModeForward => {
+            state.write_mode = state.write_mode.next();
+            Task::none()
+        }
+        Message::SelectByIndex(_index) => {
+            // Bounds-aware dispatch lands in sub-task 5. Until then, the
+            // handler is a silent no-op so unknown shortcuts don't explode.
+            Task::none()
+        }
+        Message::ClosePanel => {
+            // Close flow lands in sub-task 5. Skeleton: nothing to do.
+            Task::none()
+        }
+        Message::ToastShow(message) => {
+            state.toast = Some(message);
+            Task::none()
+        }
+        Message::ToastDismiss => {
+            state.toast = None;
+            Task::none()
+        }
+        Message::FocusLost => {
+            // Unpinned-close routing lands in sub-task 5. Until then, only
+            // record the signal via state mutation (no-op here since there
+            // is no state to record yet).
+            Task::none()
+        }
+        Message::WindowOpened(id) => {
+            state.capture_window_id = Some(id);
+            Task::none()
         }
     }
 }
@@ -289,7 +430,17 @@ mod tests {
             TraceTheme::for_preset(ThemePreset::Dark),
             sample_sections(),
             sample_threads(),
+            AppSettings::default(),
         )
+    }
+
+    /// Test-only wrapper around [`update`] that discards the returned
+    /// [`Task`]. The production code treats the task as load-bearing (that is
+    /// what drives window closes / file writes under iced), but unit tests in
+    /// this module only care about the state mutation, so we drop it
+    /// explicitly to keep call sites terse and clippy happy.
+    fn apply(app: &mut CaptureApp, message: Message) {
+        let _ = update(app, message);
     }
 
     #[test]
@@ -331,6 +482,7 @@ mod tests {
             TraceTheme::for_preset(ThemePreset::Dark),
             sample_sections(),
             threads,
+            AppSettings::default(),
         );
         let names: Vec<_> = app.threads.iter().map(|t| t.name.clone()).collect();
         assert_eq!(names, vec!["a", "c", "b"]);
@@ -340,13 +492,13 @@ mod tests {
     fn write_mode_changed_switches_mode() {
         let mut app = fresh_app();
 
-        update(&mut app, Message::WriteModeChanged(WriteMode::Thread));
+        apply(&mut app, Message::WriteModeChanged(WriteMode::Thread));
         assert_eq!(app.write_mode, WriteMode::Thread);
 
-        update(&mut app, Message::WriteModeChanged(WriteMode::File));
+        apply(&mut app, Message::WriteModeChanged(WriteMode::File));
         assert_eq!(app.write_mode, WriteMode::File);
 
-        update(&mut app, Message::WriteModeChanged(WriteMode::Dimension));
+        apply(&mut app, Message::WriteModeChanged(WriteMode::Dimension));
         assert_eq!(app.write_mode, WriteMode::Dimension);
     }
 
@@ -354,7 +506,7 @@ mod tests {
     fn section_selected_updates_state_only() {
         let mut app = fresh_app();
         assert!(app.selected_section.is_none());
-        update(&mut app, Message::SectionSelected(2));
+        apply(&mut app, Message::SectionSelected(2));
         assert_eq!(app.selected_section, Some(2));
         // Other state unchanged.
         assert!(app.selected_thread.is_none());
@@ -365,7 +517,7 @@ mod tests {
     fn thread_selected_updates_state_only() {
         let mut app = fresh_app();
         let id = app.threads[0].id;
-        update(&mut app, Message::ThreadSelected(id));
+        apply(&mut app, Message::ThreadSelected(id));
         assert_eq!(app.selected_thread, Some(id));
         assert!(app.selected_section.is_none());
     }
@@ -373,15 +525,9 @@ mod tests {
     #[test]
     fn document_title_changed_is_replaced_wholesale() {
         let mut app = fresh_app();
-        update(
-            &mut app,
-            Message::DocumentTitleChanged("draft".to_string()),
-        );
+        apply(&mut app, Message::DocumentTitleChanged("draft".to_string()));
         assert_eq!(app.document_title, "draft");
-        update(
-            &mut app,
-            Message::DocumentTitleChanged("final".to_string()),
-        );
+        apply(&mut app, Message::DocumentTitleChanged("final".to_string()));
         assert_eq!(app.document_title, "final");
     }
 
@@ -389,9 +535,9 @@ mod tests {
     fn pin_toggled_flips_flag() {
         let mut app = fresh_app();
         assert!(!app.pinned);
-        update(&mut app, Message::PinToggled);
+        apply(&mut app, Message::PinToggled);
         assert!(app.pinned);
-        update(&mut app, Message::PinToggled);
+        apply(&mut app, Message::PinToggled);
         assert!(!app.pinned);
     }
 
@@ -399,7 +545,7 @@ mod tests {
     fn settings_requested_is_recorded_without_side_effects() {
         let mut app = fresh_app();
         assert!(!app.settings_requested);
-        update(&mut app, Message::SettingsRequested);
+        apply(&mut app, Message::SettingsRequested);
         assert!(app.settings_requested);
         // Phase 10 guarantees no other state changes.
         assert_eq!(app.write_mode, WriteMode::Dimension);
@@ -465,7 +611,7 @@ mod tests {
     fn view_builds_for_every_write_mode() {
         let mut app = fresh_app();
         for mode in [WriteMode::Dimension, WriteMode::Thread, WriteMode::File] {
-            update(&mut app, Message::WriteModeChanged(mode));
+            apply(&mut app, Message::WriteModeChanged(mode));
             let _element: Element<'_, Message> = view(&app);
         }
     }
@@ -474,8 +620,148 @@ mod tests {
     fn view_builds_with_chip_selection() {
         let mut app = fresh_app();
         let thread_id = app.threads[0].id;
-        update(&mut app, Message::SectionSelected(0));
-        update(&mut app, Message::ThreadSelected(thread_id));
+        apply(&mut app, Message::SectionSelected(0));
+        apply(&mut app, Message::ThreadSelected(thread_id));
         let _element: Element<'_, Message> = view(&app);
+    }
+
+    // ---------------------------------------------------------------------
+    // Phase 11 — new field defaults and skeleton handler behaviour.
+    //
+    // Every variant added in Phase 11 gets a dedicated state-mutation test so
+    // future sub-tasks that widen the handler (write_mode dispatch, window
+    // close, etc.) can extend the assertions without having to re-discover
+    // which variants exist.
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn new_starts_without_toast_or_window_id() {
+        let app = fresh_app();
+        assert!(app.toast.is_none());
+        assert!(app.capture_window_id.is_none());
+    }
+
+    #[test]
+    fn new_has_no_platform_handler_by_default() {
+        let app = fresh_app();
+        assert!(app.platform_handler.is_none());
+    }
+
+    #[test]
+    fn with_platform_handler_plugs_in_and_returns_self() {
+        struct NoopHandler;
+        impl PlatformHandler for NoopHandler {
+            fn set_topmost(&self, _pinned: bool) {}
+            fn restore_foreground(&self) {}
+        }
+        let handler: Arc<dyn PlatformHandler + Send + Sync> = Arc::new(NoopHandler);
+        let app = fresh_app().with_platform_handler(handler);
+        assert!(app.platform_handler.is_some());
+    }
+
+    #[test]
+    fn new_carries_the_supplied_app_settings() {
+        // The settings field drives writer construction in sub-task 3, so
+        // confirm the ctor hands off an owned copy. We pick `vault_path`
+        // because it's a user-visible scalar on `AppSettings`.
+        let settings = AppSettings {
+            vault_path: "/tmp/trace-phase11".to_string(),
+            ..AppSettings::default()
+        };
+        let app = CaptureApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            sample_sections(),
+            sample_threads(),
+            settings,
+        );
+        assert_eq!(app.settings.vault_path, "/tmp/trace-phase11");
+    }
+
+    #[test]
+    fn send_note_is_a_state_noop_in_skeleton() {
+        // Sub-task 3 swaps this for writer dispatch; sub-task 1 only
+        // guarantees the variant is exhaustive and leaves state untouched.
+        let mut app = fresh_app();
+        let before = app.editor_text();
+        apply(&mut app, Message::SendNote);
+        assert_eq!(app.editor_text(), before);
+        assert!(app.toast.is_none());
+    }
+
+    #[test]
+    fn append_note_is_a_state_noop_in_skeleton() {
+        let mut app = fresh_app();
+        let before = app.editor_text();
+        apply(&mut app, Message::AppendNote);
+        assert_eq!(app.editor_text(), before);
+        assert!(app.toast.is_none());
+    }
+
+    #[test]
+    fn cycle_mode_forward_walks_dimension_thread_file_dimension() {
+        let mut app = fresh_app();
+        assert_eq!(app.write_mode, WriteMode::Dimension);
+        apply(&mut app, Message::CycleModeForward);
+        assert_eq!(app.write_mode, WriteMode::Thread);
+        apply(&mut app, Message::CycleModeForward);
+        assert_eq!(app.write_mode, WriteMode::File);
+        apply(&mut app, Message::CycleModeForward);
+        assert_eq!(app.write_mode, WriteMode::Dimension);
+    }
+
+    #[test]
+    fn select_by_index_is_a_state_noop_in_skeleton() {
+        let mut app = fresh_app();
+        apply(&mut app, Message::SelectByIndex(0));
+        // Section/thread selection stays untouched; sub-task 5 wires the
+        // per-mode dispatch.
+        assert!(app.selected_section.is_none());
+        assert!(app.selected_thread.is_none());
+    }
+
+    #[test]
+    fn close_panel_is_a_state_noop_in_skeleton() {
+        let mut app = fresh_app();
+        apply(&mut app, Message::ClosePanel);
+        // No state field exists for "closing"; sub-task 5 emits a window
+        // close task instead. Test locks the skeleton contract: nothing
+        // changes yet.
+        assert!(!app.pinned);
+        assert!(app.toast.is_none());
+    }
+
+    #[test]
+    fn toast_show_sets_message_and_dismiss_clears_it() {
+        let mut app = fresh_app();
+        apply(&mut app, Message::ToastShow("空内容未保存".to_string()));
+        assert_eq!(app.toast.as_deref(), Some("空内容未保存"));
+        apply(&mut app, Message::ToastDismiss);
+        assert!(app.toast.is_none());
+    }
+
+    #[test]
+    fn toast_show_replaces_any_in_flight_message() {
+        let mut app = fresh_app();
+        apply(&mut app, Message::ToastShow("first".to_string()));
+        apply(&mut app, Message::ToastShow("second".to_string()));
+        assert_eq!(app.toast.as_deref(), Some("second"));
+    }
+
+    #[test]
+    fn focus_lost_is_a_state_noop_in_skeleton() {
+        let mut app = fresh_app();
+        apply(&mut app, Message::FocusLost);
+        // Sub-task 5 routes this into ClosePanel when !pinned; for now
+        // the skeleton explicitly leaves state untouched.
+        assert!(!app.pinned);
+        assert!(app.capture_window_id.is_none());
+    }
+
+    #[test]
+    fn window_opened_records_the_window_id() {
+        let mut app = fresh_app();
+        let id = window::Id::unique();
+        apply(&mut app, Message::WindowOpened(id));
+        assert_eq!(app.capture_window_id, Some(id));
     }
 }
