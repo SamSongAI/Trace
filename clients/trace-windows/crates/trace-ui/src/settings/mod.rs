@@ -23,7 +23,7 @@
 //! top-level `iced::daemon` wiring that routes messages between the two
 //! windows.
 
-pub mod quick_sections;
+mod quick_sections;
 pub mod storage;
 pub mod tiles;
 pub mod widgets;
