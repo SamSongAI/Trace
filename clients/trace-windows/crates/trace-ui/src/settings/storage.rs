@@ -48,8 +48,11 @@ pub const VAULT_WARNING_FONT_SIZE: f32 = 11.0;
 /// to [`DailyFileDateFormat::title`], so iced's `pick_list` can render the
 /// full `"{raw}  →  {example}"` label without the UI layer having to format
 /// the option strings manually on every view pass.
+///
+/// Scoped to `pub(super)` because this is a purely presentational adapter
+/// consumed only by the Storage card's row factories inside this module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DailyFileDateFormatOption(pub DailyFileDateFormat);
+pub(super) struct DailyFileDateFormatOption(pub DailyFileDateFormat);
 
 impl fmt::Display for DailyFileDateFormatOption {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -61,8 +64,12 @@ impl fmt::Display for DailyFileDateFormatOption {
 /// Wrapper around ([`EntryTheme`], [`Language`]) that delegates its `Display`
 /// impl to [`EntryTheme::title`]. The language is captured at construction
 /// time so switching the active language re-renders the pick-list labels.
+///
+/// Scoped to `pub(super)` for the same reason as
+/// [`DailyFileDateFormatOption`] — the newtype is an internal helper of the
+/// Storage card, not a `trace-ui` public API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EntryThemeOption(pub EntryTheme, pub Language);
+pub(super) struct EntryThemeOption(pub EntryTheme, pub Language);
 
 impl fmt::Display for EntryThemeOption {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
