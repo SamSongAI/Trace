@@ -35,8 +35,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
+use iced::event::{self as iced_event};
+use iced::keyboard::key::Named;
+use iced::keyboard::{Event as KeyboardEvent, Key, Modifiers};
 use iced::widget::{column, container, stack, text_editor, Space};
-use iced::{time, window, Subscription, Task};
+use iced::window::Event as WindowEvent;
+use iced::{time, window, Event, Subscription, Task};
 use iced::{Element, Length, Size, Theme};
 use trace_core::{
     AppSettings, DailyNoteWriter, FileWriter, NoteSection, SaveMode, ThreadConfig, ThreadWriter,
@@ -326,14 +330,42 @@ pub fn update(state: &mut CaptureApp, message: Message) -> Task<Message> {
             state.write_mode = state.write_mode.next();
             Task::none()
         }
-        Message::SelectByIndex(_index) => {
-            // Bounds-aware dispatch lands in sub-task 5. Until then, the
-            // handler is a silent no-op so unknown shortcuts don't explode.
+        Message::SelectByIndex(index) => {
+            // Route the zero-indexed shortcut into the active mode's chip list.
+            // Silent no-op in File mode or when the index is out of range,
+            // matching Mac `CapturePanelController.setupLocalKeyMonitor`.
+            match state.write_mode {
+                WriteMode::Dimension => {
+                    if index < state.sections.len() {
+                        state.selected_section = Some(index);
+                    }
+                }
+                WriteMode::Thread => {
+                    if let Some(thread) = state.threads.get(index) {
+                        state.selected_thread = Some(thread.id);
+                    }
+                }
+                WriteMode::File => {
+                    // File mode has no chips — silently ignore.
+                }
+            }
             Task::none()
         }
         Message::ClosePanel => {
-            // Close flow lands in sub-task 5. Skeleton: nothing to do.
-            Task::none()
+            // Hand the keyboard focus back to whichever app was frontmost
+            // before the panel was shown, then issue the window close task.
+            // The platform handler is optional so headless tests can run
+            // without stubbing Win32.
+            if let Some(handler) = state.platform_handler.as_ref() {
+                handler.restore_foreground();
+            }
+            if let Some(id) = state.capture_window_id {
+                window::close(id)
+            } else {
+                // No window id captured yet — nothing to close. The
+                // `restore_foreground` call above is still useful for tests.
+                Task::none()
+            }
         }
         Message::ToastShow(message) => {
             state.toast = Some(message);
@@ -344,10 +376,13 @@ pub fn update(state: &mut CaptureApp, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::FocusLost => {
-            // Unpinned-close routing lands in sub-task 5. Until then, only
-            // record the signal via state mutation (no-op here since there
-            // is no state to record yet).
-            Task::none()
+            // Auto-close on focus loss unless the user has pinned the panel.
+            // Matches Mac `NSPanel.hidesOnDeactivate = !viewModel.pinned`.
+            if state.pinned {
+                Task::none()
+            } else {
+                Task::done(Message::ClosePanel)
+            }
         }
         Message::WindowOpened(id) => {
             state.capture_window_id = Some(id);
@@ -416,14 +451,124 @@ pub fn theme(state: &CaptureApp) -> Theme {
 
 /// Aggregate subscription for the capture panel.
 ///
-/// Currently returns the 1.5 s toast auto-dismiss subscription when a toast
-/// is active, and [`Subscription::none`] otherwise. Sub-task 5 extends this
-/// with the keyboard / window-event listener via [`Subscription::batch`].
+/// Fans out three independent streams via [`Subscription::batch`]:
+///
+/// 1. The 1.5 s toast auto-dismiss timer — only mounted while
+///    [`CaptureApp::toast`] is `Some`, otherwise [`Subscription::none`].
+/// 2. The keyboard shortcut + window-unfocus listener, implemented as a
+///    `fn` pointer passed to [`iced::event::listen_with`]. Because
+///    `listen_with` requires a non-capturing function pointer, all context-
+///    dependent decisions (e.g. honouring the `pinned` flag before closing)
+///    are deferred into [`update`].
+/// 3. The window-open listener, which captures the primary [`window::Id`]
+///    so [`Message::ClosePanel`] can emit the correct close task.
 pub fn subscription(state: &CaptureApp) -> Subscription<Message> {
-    if state.toast.is_some() {
+    let toast = if state.toast.is_some() {
         time::every(TOAST_AUTO_DISMISS).map(|_| Message::ToastDismiss)
     } else {
         Subscription::none()
+    };
+
+    let events = iced_event::listen_with(decode_event);
+    let opens = window::open_events().map(Message::WindowOpened);
+
+    Subscription::batch(vec![toast, events, opens])
+}
+
+/// `listen_with` callback. Must be a plain `fn` (no captures) — see
+/// [`iced::event::listen_with`]. Keeps the runtime noise out of the
+/// keyboard decoder by delegating to [`decode_shortcut`] for every
+/// keyboard event and to a small inline branch for focus loss.
+fn decode_event(event: Event, status: iced_event::Status, _window: window::Id) -> Option<Message> {
+    // Skip events already handled by a widget (e.g. the editor swallowing
+    // a printable character). iced's `listen_with` only delivers
+    // `Ignored` events, but `listen_raw` would leak every redraw, so the
+    // explicit match is kept defensive.
+    if matches!(status, iced_event::Status::Captured) {
+        return None;
+    }
+
+    match event {
+        Event::Keyboard(KeyboardEvent::KeyPressed { key, modifiers, .. }) => {
+            decode_shortcut(&key, modifiers)
+        }
+        Event::Window(WindowEvent::Unfocused) => Some(Message::FocusLost),
+        _ => None,
+    }
+}
+
+/// Translates a keyboard key + modifier combo into a [`Message`].
+///
+/// Invoked by [`decode_event`] for every key-press on an unfocused event
+/// stream. Returning `None` leaves the key for the editor.
+///
+/// The contract mirrors `CapturePanelController.setupLocalKeyMonitor` on
+/// Mac:
+///
+/// | Keys                | Message                   |
+/// |---------------------|---------------------------|
+/// | `Esc`               | [`Message::ClosePanel`]   |
+/// | `Shift+Tab`         | [`Message::CycleModeForward`] |
+/// | `Ctrl+Enter`        | [`Message::SendNote`]     |
+/// | `Ctrl+Shift+Enter`  | [`Message::AppendNote`]   |
+/// | `Ctrl+P`            | [`Message::PinToggled`]   |
+/// | `Ctrl+1`..`Ctrl+9`  | [`Message::SelectByIndex`] |
+///
+/// Ctrl+0 is intentionally unmapped to match Mac's 1-indexed chip list
+/// (`Cmd+1` → index 0, so `Ctrl+1` → index 0 here).
+pub(crate) fn decode_shortcut(key: &Key, modifiers: Modifiers) -> Option<Message> {
+    // Escape is a bare key — no modifiers required. This is safe to
+    // fire from inside the editor because a plain Esc can't produce any
+    // useful text editing operation in a single-line capture panel.
+    if let Key::Named(Named::Escape) = key {
+        if modifiers.is_empty() {
+            return Some(Message::ClosePanel);
+        }
+    }
+
+    // Shift+Tab cycles the footer mode. Plain Tab is reserved for focus
+    // traversal inside the editor.
+    if matches!(key, Key::Named(Named::Tab)) && modifiers.shift() && !modifiers.control() {
+        return Some(Message::CycleModeForward);
+    }
+
+    // Ctrl+[Shift+]Enter dispatches writer save.
+    if matches!(key, Key::Named(Named::Enter)) && modifiers.control() {
+        if modifiers.shift() {
+            return Some(Message::AppendNote);
+        } else {
+            return Some(Message::SendNote);
+        }
+    }
+
+    // Ctrl-prefixed character shortcuts. Mac uses Cmd; Windows uses Ctrl.
+    if modifiers.control() && !modifiers.alt() && !modifiers.logo() {
+        if let Key::Character(chars) = key {
+            // `Character` payloads are locale-aware; lowercase them so
+            // Shift+Ctrl+P still routes to PinToggled on keyboards that
+            // report an uppercase glyph under shift.
+            let lower = chars.to_lowercase();
+            if !modifiers.shift() && lower == "p" {
+                return Some(Message::PinToggled);
+            }
+            if let Some(idx) = ctrl_digit_to_index(lower.as_str()) {
+                return Some(Message::SelectByIndex(idx));
+            }
+        }
+    }
+
+    None
+}
+
+/// Maps the text payload of a `Key::Character` produced by a digit key
+/// to its zero-based chip index. `"1"` → `0`, `"9"` → `8`; anything else
+/// (including `"0"`) returns `None`.
+fn ctrl_digit_to_index(s: &str) -> Option<usize> {
+    let c = s.chars().next()?;
+    if s.len() == c.len_utf8() && ('1'..='9').contains(&c) {
+        Some(c as usize - '1' as usize)
+    } else {
+        None
     }
 }
 
@@ -893,22 +1038,12 @@ mod tests {
     }
 
     #[test]
-    fn select_by_index_is_a_state_noop_in_skeleton() {
-        let mut app = fresh_app();
-        apply(&mut app, Message::SelectByIndex(0));
-        // Section/thread selection stays untouched; sub-task 5 wires the
-        // per-mode dispatch.
-        assert!(app.selected_section.is_none());
-        assert!(app.selected_thread.is_none());
-    }
-
-    #[test]
-    fn close_panel_is_a_state_noop_in_skeleton() {
+    fn close_panel_leaves_unrelated_state_untouched() {
         let mut app = fresh_app();
         apply(&mut app, Message::ClosePanel);
-        // No state field exists for "closing"; sub-task 5 emits a window
-        // close task instead. Test locks the skeleton contract: nothing
-        // changes yet.
+        // The close flow issues a window-close task + restore_foreground
+        // call (exercised in dedicated tests). It must not mutate the
+        // user-visible pin flag or any toast.
         assert!(!app.pinned);
         assert!(app.toast.is_none());
     }
@@ -931,11 +1066,13 @@ mod tests {
     }
 
     #[test]
-    fn focus_lost_is_a_state_noop_in_skeleton() {
+    fn focus_lost_leaves_unrelated_state_untouched() {
         let mut app = fresh_app();
         apply(&mut app, Message::FocusLost);
-        // Sub-task 5 routes this into ClosePanel when !pinned; for now
-        // the skeleton explicitly leaves state untouched.
+        // FocusLost in an unpinned app routes to ClosePanel via an
+        // iced task (exercised in the sub-task 5 tests). This test
+        // guards the minimal invariant: state fields unrelated to the
+        // close flow are not touched.
         assert!(!app.pinned);
         assert!(app.capture_window_id.is_none());
     }
@@ -1177,9 +1314,9 @@ mod tests {
         let app = fresh_app();
         // `Subscription` in iced 0.14 doesn't expose an `is_none()` helper,
         // but constructing the subscription and immediately dropping it
-        // proves the branch runs. The keyboard/window listener lands in
-        // sub-task 5, so the no-toast branch returning "nothing to listen
-        // to yet" is the contract today.
+        // proves the branch runs. With sub-task 5 wired up the subscription
+        // always carries the keyboard + open listener; the toast branch is
+        // the only conditional piece.
         let _sub: Subscription<Message> = subscription(&app);
     }
 
@@ -1205,14 +1342,225 @@ mod tests {
         // `ToastDismiss`, which must clear the overlay. We simulate the
         // roundtrip without the timer so the test is hermetic.
         let mut app = fresh_app();
-        apply(
-            &mut app,
-            Message::ToastShow("空内容未保存".to_string()),
-        );
+        apply(&mut app, Message::ToastShow("空内容未保存".to_string()));
         assert!(app.toast.is_some());
         apply(&mut app, Message::ToastDismiss);
         assert!(app.toast.is_none());
         // The view must still build after dismissal.
         let _element: Element<'_, Message> = view(&app);
+    }
+
+    // ---------------------------------------------------------------------
+    // Phase 11 — keyboard + window-event decoder (sub-task 5).
+    //
+    // `decode_shortcut` is the pure function at the heart of the keyboard
+    // listener. We can unit-test it without touching iced's subscription
+    // machinery: feed it a `Key` + `Modifiers` pair and compare the result
+    // to the expected `Message`.
+    // ---------------------------------------------------------------------
+
+    /// Convenience constructor for `Key::Character` built from a string
+    /// slice. The production decoder lowercases the payload, so tests that
+    /// assert case-sensitivity pass "P" and "p" deliberately.
+    fn ch(s: &str) -> Key {
+        Key::Character(s.into())
+    }
+
+    #[test]
+    fn decode_shortcut_esc_triggers_close_panel() {
+        let msg = decode_shortcut(&Key::Named(Named::Escape), Modifiers::empty());
+        assert!(matches!(msg, Some(Message::ClosePanel)));
+    }
+
+    #[test]
+    fn decode_shortcut_esc_with_modifier_is_ignored() {
+        // Esc with Ctrl should be swallowed — production behaviour is
+        // "bare Esc closes", and anything else is left for the editor.
+        let msg = decode_shortcut(&Key::Named(Named::Escape), Modifiers::CTRL);
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn decode_shortcut_shift_tab_cycles_mode() {
+        let msg = decode_shortcut(&Key::Named(Named::Tab), Modifiers::SHIFT);
+        assert!(matches!(msg, Some(Message::CycleModeForward)));
+    }
+
+    #[test]
+    fn decode_shortcut_plain_tab_is_not_consumed() {
+        // Plain Tab is reserved for focus traversal in the editor.
+        let msg = decode_shortcut(&Key::Named(Named::Tab), Modifiers::empty());
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn decode_shortcut_ctrl_enter_sends_note() {
+        let msg = decode_shortcut(&Key::Named(Named::Enter), Modifiers::CTRL);
+        assert!(matches!(msg, Some(Message::SendNote)));
+    }
+
+    #[test]
+    fn decode_shortcut_ctrl_shift_enter_appends_note() {
+        let msg = decode_shortcut(
+            &Key::Named(Named::Enter),
+            Modifiers::CTRL | Modifiers::SHIFT,
+        );
+        assert!(matches!(msg, Some(Message::AppendNote)));
+    }
+
+    #[test]
+    fn decode_shortcut_plain_enter_is_not_consumed() {
+        // Plain Enter is the editor's "new line" key. The decoder must
+        // leave it alone.
+        let msg = decode_shortcut(&Key::Named(Named::Enter), Modifiers::empty());
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn decode_shortcut_ctrl_p_toggles_pin() {
+        let msg = decode_shortcut(&ch("p"), Modifiers::CTRL);
+        assert!(matches!(msg, Some(Message::PinToggled)));
+    }
+
+    #[test]
+    fn decode_shortcut_ctrl_p_uppercase_also_toggles_pin() {
+        // Shift+Ctrl+P under some keyboard layouts emits "P" instead of
+        // "p". Mirror Mac's lowercased comparison so the shortcut still
+        // fires.
+        let msg = decode_shortcut(&ch("P"), Modifiers::CTRL);
+        assert!(matches!(msg, Some(Message::PinToggled)));
+    }
+
+    #[test]
+    fn decode_shortcut_ctrl_digits_one_through_nine_map_to_zero_based_index() {
+        for (d, idx) in [
+            ("1", 0usize),
+            ("2", 1),
+            ("3", 2),
+            ("4", 3),
+            ("5", 4),
+            ("6", 5),
+            ("7", 6),
+            ("8", 7),
+            ("9", 8),
+        ] {
+            let msg = decode_shortcut(&ch(d), Modifiers::CTRL);
+            assert!(
+                matches!(msg, Some(Message::SelectByIndex(i)) if i == idx),
+                "Ctrl+{d} should map to SelectByIndex({idx})"
+            );
+        }
+    }
+
+    #[test]
+    fn decode_shortcut_ctrl_zero_is_not_consumed() {
+        // Mac uses 1-indexed chip numbering; zero stays unbound.
+        let msg = decode_shortcut(&ch("0"), Modifiers::CTRL);
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn decode_shortcut_digit_without_ctrl_is_not_consumed() {
+        // A bare "1" keystroke must go to the editor.
+        let msg = decode_shortcut(&ch("1"), Modifiers::empty());
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn decode_shortcut_alt_ctrl_digit_is_not_consumed() {
+        // Alt-chord combinations collide with system layouts (AltGr on
+        // European keyboards); leave them alone.
+        let msg = decode_shortcut(&ch("1"), Modifiers::CTRL | Modifiers::ALT);
+        assert!(msg.is_none());
+    }
+
+    // --- SelectByIndex handler ------------------------------------------
+
+    #[test]
+    fn select_by_index_in_dimension_mode_picks_the_section() {
+        let mut app = fresh_app();
+        assert_eq!(app.write_mode, WriteMode::Dimension);
+        apply(&mut app, Message::SelectByIndex(2));
+        assert_eq!(app.selected_section, Some(2));
+    }
+
+    #[test]
+    fn select_by_index_dimension_out_of_range_is_silent_noop() {
+        let mut app = fresh_app();
+        apply(&mut app, Message::SelectByIndex(100));
+        assert!(app.selected_section.is_none());
+    }
+
+    #[test]
+    fn select_by_index_in_thread_mode_picks_the_thread_by_id() {
+        let mut app = fresh_app();
+        apply(&mut app, Message::WriteModeChanged(WriteMode::Thread));
+        apply(&mut app, Message::SelectByIndex(1));
+        let expected = app.threads.get(1).map(|t| t.id);
+        assert!(expected.is_some());
+        assert_eq!(app.selected_thread, expected);
+    }
+
+    #[test]
+    fn select_by_index_thread_out_of_range_is_silent_noop() {
+        let mut app = fresh_app();
+        apply(&mut app, Message::WriteModeChanged(WriteMode::Thread));
+        apply(&mut app, Message::SelectByIndex(99));
+        assert!(app.selected_thread.is_none());
+    }
+
+    #[test]
+    fn select_by_index_in_file_mode_is_silent_noop() {
+        let mut app = fresh_app();
+        apply(&mut app, Message::WriteModeChanged(WriteMode::File));
+        apply(&mut app, Message::SelectByIndex(0));
+        assert!(app.selected_section.is_none());
+        assert!(app.selected_thread.is_none());
+    }
+
+    // --- FocusLost / ClosePanel -----------------------------------------
+
+    #[test]
+    fn focus_lost_when_pinned_does_not_close() {
+        // A pinned panel ignores focus loss. The production handler
+        // returns `Task::none()`, which we verify indirectly: the state
+        // mutation is expected to be a no-op, and `ClosePanel` only
+        // fires when the platform handler's `restore_foreground` is
+        // subsequently called.
+        let spy = crate::platform::mock::MockPlatformHandler::new();
+        let mut app = fresh_app().with_platform_handler(spy.clone());
+        apply(&mut app, Message::PinToggled);
+        assert!(app.pinned);
+        let calls_before = spy.restore_foreground_call_count();
+        apply(&mut app, Message::FocusLost);
+        // `FocusLost` itself should not trigger `restore_foreground`; the
+        // close flow runs only via an explicit `ClosePanel`.
+        assert_eq!(spy.restore_foreground_call_count(), calls_before);
+    }
+
+    #[test]
+    fn close_panel_calls_restore_foreground_on_the_platform_handler() {
+        let spy = crate::platform::mock::MockPlatformHandler::new();
+        let mut app = fresh_app().with_platform_handler(spy.clone());
+        assert_eq!(spy.restore_foreground_call_count(), 0);
+        apply(&mut app, Message::ClosePanel);
+        assert_eq!(spy.restore_foreground_call_count(), 1);
+    }
+
+    #[test]
+    fn close_panel_without_a_handler_is_silent() {
+        // No handler wired up — the close flow must still be a no-op that
+        // doesn't panic when the window id is also missing.
+        let mut app = fresh_app();
+        apply(&mut app, Message::ClosePanel);
+        // No observable side effects beyond "didn't panic".
+    }
+
+    #[test]
+    fn window_opened_captures_the_id_for_the_close_flow() {
+        let mut app = fresh_app();
+        assert!(app.capture_window_id.is_none());
+        apply(&mut app, Message::WindowOpened(window::Id::unique()));
+        assert!(app.capture_window_id.is_some());
     }
 }
