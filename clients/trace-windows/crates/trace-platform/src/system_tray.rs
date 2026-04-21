@@ -210,9 +210,32 @@ mod imp {
         'C' as u16, 'r' as u16, 'e' as u16, 'a' as u16, 't' as u16, 'e' as u16, 'd' as u16, 0,
     ];
 
-    /// One-shot class registration. Matches the pattern in
-    /// `global_hotkey.rs`: a single registration per process, result cached.
+    /// One-shot class registration. Calling `RegisterClassExW` twice with the
+    /// same name fails with `ERROR_CLASS_ALREADY_EXISTS` — we gate it behind
+    /// a `OnceLock` and cache the result so all subsequent tray installations
+    /// reuse the same class atom (or the same failure).
+    ///
+    /// The failure branch is intentionally permanent for the lifetime of the
+    /// process. `RegisterClassExW` failures are nearly always configuration-
+    /// or resource-limit errors that don't self-heal; caching the error code
+    /// lets subsequent `install()` calls fail fast with the same diagnostic
+    /// instead of retrying and potentially making things worse.
     static WND_CLASS_REGISTRATION: OnceLock<Result<(), u32>> = OnceLock::new();
+
+    /// RAII wrapper for `HMENU` that calls `DestroyMenu` on drop. Guarantees
+    /// the menu is released even if a future edit introduces an early return
+    /// or panic between `TrackPopupMenu` and the explicit `DestroyMenu` call.
+    struct MenuGuard(HMENU);
+
+    impl Drop for MenuGuard {
+        fn drop(&mut self) {
+            if !self.0.0.is_null() {
+                unsafe {
+                    let _ = DestroyMenu(self.0);
+                }
+            }
+        }
+    }
 
     /// An installed Windows tray icon.
     ///
@@ -368,7 +391,13 @@ mod imp {
 
         let hwnd = match hwnd {
             Ok(hwnd) if !hwnd.0.is_null() => hwnd,
-            _ => {
+            Ok(_) => {
+                let _ = boot_tx.send(BootstrapMessage::Failed(
+                    SystemTrayError::WindowCreationFailed(last_error_code()),
+                ));
+                return;
+            }
+            Err(_) => {
                 let _ = boot_tx.send(BootstrapMessage::Failed(
                     SystemTrayError::WindowCreationFailed(last_error_code()),
                 ));
@@ -381,7 +410,17 @@ mod imp {
             CreateIconFromResourceEx(TRAY_ICON_PNG, true, ICON_VERSION, 32, 32, LR_DEFAULTCOLOR)
         } {
             Ok(icon) if !icon.0.is_null() => icon,
-            _ => {
+            Ok(_) => {
+                let err_code = last_error_code();
+                unsafe {
+                    let _ = DestroyWindow(hwnd);
+                }
+                let _ = boot_tx.send(BootstrapMessage::Failed(SystemTrayError::IconLoadFailed(
+                    err_code,
+                )));
+                return;
+            }
+            Err(_) => {
                 let err_code = last_error_code();
                 unsafe {
                     let _ = DestroyWindow(hwnd);
@@ -394,7 +433,10 @@ mod imp {
         };
 
         // 4. Register the shell-broadcast message ID so we can recreate the
-        //    icon if Explorer restarts.
+        //    icon if Explorer restarts. `RegisterWindowMessageW` returns 0 on
+        //    failure (documented); the message loop guards against this value
+        //    to avoid spuriously matching `WM_NULL` (also 0) and re-adding
+        //    the icon after every menu close.
         let taskbar_created_msg =
             unsafe { RegisterWindowMessageW(PCWSTR(TASKBAR_CREATED_NAME.as_ptr())) };
 
@@ -510,8 +552,12 @@ mod imp {
 
             // WM_TASKBARCREATED is a dynamically-registered message (not a
             // compile-time const) so it needs the value we learned at
-            // startup.
-            if msg.message == taskbar_created_msg {
+            // startup. Guard against `taskbar_created_msg == 0` because
+            // `RegisterWindowMessageW` returns 0 on failure and `WM_NULL`
+            // is also 0 — we post `WM_NULL` to ourselves after every
+            // `TrackPopupMenu` call, so an unchecked match would re-add
+            // the tray icon on every menu close.
+            if taskbar_created_msg != 0 && msg.message == taskbar_created_msg {
                 re_add_tray_icon();
                 continue;
             }
@@ -576,9 +622,11 @@ mod imp {
     fn show_context_menu(hwnd: HWND) {
         // Build a fresh popup menu each time so language/app-name changes
         // between install and invocation (should any later phase add live
-        // refresh) just work.
-        let hmenu: HMENU = match unsafe { CreatePopupMenu() } {
-            Ok(m) => m,
+        // refresh) just work. The `MenuGuard` ensures the menu is destroyed
+        // on every return path, including any future panic between
+        // `TrackPopupMenu` and the end of the function.
+        let menu = match unsafe { CreatePopupMenu() } {
+            Ok(m) => MenuGuard(m),
             Err(_) => return, // Menu couldn't be created; nothing sensible to do.
         };
 
@@ -591,21 +639,21 @@ mod imp {
 
             unsafe {
                 let _ = AppendMenuW(
-                    hmenu,
+                    menu.0,
                     MF_STRING,
                     CMD_NEW_NOTE as usize,
                     PCWSTR(state.new_note_utf16.as_ptr()),
                 );
-                let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, PCWSTR(std::ptr::null()));
+                let _ = AppendMenuW(menu.0, MF_SEPARATOR, 0, PCWSTR(std::ptr::null()));
                 let _ = AppendMenuW(
-                    hmenu,
+                    menu.0,
                     MF_STRING,
                     CMD_SETTINGS as usize,
                     PCWSTR(state.open_settings_utf16.as_ptr()),
                 );
-                let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, PCWSTR(std::ptr::null()));
+                let _ = AppendMenuW(menu.0, MF_SEPARATOR, 0, PCWSTR(std::ptr::null()));
                 let _ = AppendMenuW(
-                    hmenu,
+                    menu.0,
                     MF_STRING,
                     CMD_QUIT as usize,
                     PCWSTR(state.quit_label_utf16.as_ptr()),
@@ -624,7 +672,7 @@ mod imp {
 
         let cmd = unsafe {
             TrackPopupMenu(
-                hmenu,
+                menu.0,
                 TPM_RIGHTBUTTON | TPM_RETURNCMD,
                 pt.x,
                 pt.y,
@@ -636,8 +684,9 @@ mod imp {
 
         unsafe {
             let _ = PostMessageW(hwnd, WM_NULL, WPARAM(0), LPARAM(0));
-            let _ = DestroyMenu(hmenu);
         }
+        // `menu` drops at end of scope, which calls `DestroyMenu` — no
+        // explicit cleanup needed here.
 
         // TPM_RETURNCMD returns the selected command id, or 0 if the menu
         // was dismissed without a selection.
