@@ -3329,6 +3329,7 @@ dependencies = [
  "rfd",
  "tempfile",
  "trace-core",
+ "trace-platform",
  "uuid",
 ]
 

@@ -10,6 +10,13 @@ description = "iced-based UI layer for the Trace Windows client."
 
 [dependencies]
 trace-core = { path = "../trace-core" }
+# `trace-platform` provides the filesystem-backed vault-path validation used
+# by the Storage card. The crate compiles to a near-empty shell on non-Windows
+# hosts (see `trace-platform/src/lib.rs`) so pulling it into `trace-ui` keeps
+# the workspace buildable on macOS/Linux developer machines while giving the
+# Windows build the same write-probe / is-directory checks the Mac reference
+# runs inside its settings view.
+trace-platform = { path = "../trace-platform" }
 iced = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
