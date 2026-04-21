@@ -542,17 +542,24 @@ pub fn subscription(state: &CaptureApp) -> Subscription<Message> {
 /// [`iced::event::listen_with`]. Keeps the runtime noise out of the
 /// keyboard decoder by delegating to [`decode_shortcut`] for every
 /// keyboard event and to a small inline branch for focus loss.
+///
+/// The `Captured` filter is scoped to keyboard events only. Window
+/// events like [`WindowEvent::Unfocused`] are lifecycle notifications —
+/// they are never "captured" by a widget in the same sense a keystroke
+/// might be, so applying the keyboard-level short-circuit to them is
+/// architecturally misleading even if iced 0.14 happens to always
+/// flag Window events `Ignored` today.
 fn decode_event(event: Event, status: iced_event::Status, _window: window::Id) -> Option<Message> {
-    // Skip events already handled by a widget (e.g. the editor swallowing
-    // a printable character). iced's `listen_with` only delivers
-    // `Ignored` events, but `listen_raw` would leak every redraw, so the
-    // explicit match is kept defensive.
-    if matches!(status, iced_event::Status::Captured) {
-        return None;
-    }
-
     match event {
-        Event::Keyboard(KeyboardEvent::KeyPressed { key, modifiers, .. }) => {
+        // Skip keyboard events already handled by a widget (e.g. the
+        // editor swallowing a printable character). iced's
+        // `listen_with` only delivers `Ignored` events, but
+        // `listen_raw` would leak every redraw, so the explicit guard
+        // is kept defensive — and narrowly bound to keyboard events
+        // where the "captured" concept is meaningful.
+        Event::Keyboard(KeyboardEvent::KeyPressed { key, modifiers, .. })
+            if !matches!(status, iced_event::Status::Captured) =>
+        {
             decode_shortcut(&key, modifiers)
         }
         Event::Window(WindowEvent::Unfocused) => Some(Message::FocusLost),
