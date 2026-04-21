@@ -65,9 +65,6 @@ pub const ROW_SPACING: f32 = 6.0;
 /// Horizontal spacing between the row label and its inline hint. Matches Mac
 /// `HStack(alignment: .firstTextBaseline, spacing: 6)` in `SettingRow`.
 pub const ROW_LABEL_HINT_SPACING: f32 = 6.0;
-/// Minimum height of a setting row. Guarantees that a bare `text` control
-/// aligns with a tall field (picker, text input) without jitter.
-pub const ROW_MIN_HEIGHT: f32 = 28.0;
 
 /// Builds a settings card shell — a rounded container carrying a bold title
 /// and an arbitrary body element.
@@ -285,6 +282,5 @@ mod tests {
         assert_eq!(ROW_HINT_FONT_SIZE, 13.0);
         assert_eq!(ROW_SPACING, 6.0);
         assert_eq!(ROW_LABEL_HINT_SPACING, 6.0);
-        assert_eq!(ROW_MIN_HEIGHT, 28.0);
     }
 }

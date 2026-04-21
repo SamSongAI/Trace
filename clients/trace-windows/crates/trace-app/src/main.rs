@@ -112,7 +112,21 @@ fn update(state: &mut TraceApp, message: Message) -> Task<Message> {
                     ));
                 }
             }
-            capture_app::update(&mut state.capture, capture_message).map(Message::Capture)
+            let task =
+                capture_app::update(&mut state.capture, capture_message).map(Message::Capture);
+            // After the capture layer has processed the message, mirror the
+            // "settings window is gone" state at the top level. The capture
+            // `update` clears `settings_window_id` when a matching close
+            // event arrives; we take the same cue to drop the `SettingsApp`
+            // so its memory is released and a subsequent `SettingsRequested`
+            // rebuilds a fresh instance that reads the latest shared
+            // `AppSettings`. Both fields must move to `None` together —
+            // otherwise the next request would build a new window but reuse
+            // a stale `SettingsApp` against the new id.
+            if state.capture.settings_window_id.is_none() {
+                state.settings = None;
+            }
+            task
         }
         Message::Settings(settings_message) => {
             if let Some(settings) = state.settings.as_mut() {
@@ -140,6 +154,12 @@ fn view(state: &TraceApp, window: window::Id) -> Element<'_, Message> {
             }
         }
     }
+    // Fallback: unknown `window_id` renders the capture view. Today the
+    // daemon only owns two windows (capture + settings), so any id that
+    // isn't the settings one must be the capture one. This is a **known
+    // trade-off**: Phase 14's tray bubble window (if added) must extend
+    // this routing before relying on the default branch — otherwise the
+    // bubble would silently render the capture panel.
     capture_app::view(&state.capture).map(Message::Capture)
 }
 

@@ -115,6 +115,17 @@ pub enum Message {
     /// [`Self::SettingsRequested`] clicks can re-focus an already-open window
     /// instead of spawning a second instance.
     SettingsWindowOpened(window::Id),
+    /// Emitted by the [`iced::window::close_events`] subscription when any
+    /// window is closed (user clicks the X, Alt+F4, etc.). The handler
+    /// clears [`CaptureApp::settings_window_id`] **only when** the payload
+    /// matches the stored settings window id, so a capture-window close
+    /// never accidentally unblocks the "already open" guard for the settings
+    /// window. Without this reset, a second
+    /// [`Self::SettingsRequested`] click would route through
+    /// [`iced::window::gain_focus`] against a stale id and iced silently
+    /// dropping the call — the user would never see the settings window
+    /// reopen.
+    SettingsWindowClosed(window::Id),
     /// Ctrl+Enter / Send: write the current editor content as a **new** entry
     /// via the writer appropriate for the active [`WriteMode`], then clear
     /// the editor and close the panel if not pinned.
@@ -386,6 +397,18 @@ pub fn update(state: &mut CaptureApp, message: Message) -> Task<Message> {
             state.settings_window_id = Some(id);
             Task::none()
         }
+        Message::SettingsWindowClosed(id) => {
+            // ID-guarded reset. `window::close_events()` fires for **every**
+            // closed window (capture panel included), so we must compare the
+            // payload to the stored settings id before clearing. A mismatch
+            // — e.g. the capture window closing while the settings window is
+            // open — must leave `settings_window_id` untouched so the next
+            // `SettingsRequested` still finds the real settings window.
+            if state.settings_window_id == Some(id) {
+                state.settings_window_id = None;
+            }
+            Task::none()
+        }
         Message::SendNote => {
             let outcome = dispatch_save(state, SaveMode::CreateNewEntry);
             finalize_save_outcome(state, outcome)
@@ -535,7 +558,7 @@ pub fn theme(state: &CaptureApp) -> Theme {
 
 /// Aggregate subscription for the capture panel.
 ///
-/// Fans out three independent streams via [`Subscription::batch`]:
+/// Fans out four independent streams via [`Subscription::batch`]:
 ///
 /// 1. The toast auto-dismiss poller — only mounted while
 ///    [`CaptureApp::toast`] is `Some`, otherwise [`Subscription::none`].
@@ -552,6 +575,11 @@ pub fn theme(state: &CaptureApp) -> Theme {
 ///    are deferred into [`update`].
 /// 3. The window-open listener, which captures the primary [`window::Id`]
 ///    so [`Message::ClosePanel`] can emit the correct close task.
+/// 4. The window-close listener, which feeds
+///    [`Message::SettingsWindowClosed`]. Combined with the id-guarded
+///    reset in [`update`], this closes the loop on the
+///    [`Message::SettingsRequested`] guard so the settings window can be
+///    re-opened after the user dismisses it via the window chrome.
 pub fn subscription(state: &CaptureApp) -> Subscription<Message> {
     // Poll at a short interval while a toast is live. Each tick compares
     // `Instant::now()` against `toast_expires_at`, so a mid-cycle
@@ -566,8 +594,9 @@ pub fn subscription(state: &CaptureApp) -> Subscription<Message> {
 
     let events = iced_event::listen_with(decode_event);
     let opens = window::open_events().map(Message::WindowOpened);
+    let closes = window::close_events().map(Message::SettingsWindowClosed);
 
-    Subscription::batch(vec![toast, events, opens])
+    Subscription::batch(vec![toast, events, opens, closes])
 }
 
 /// `listen_with` callback. Must be a plain `fn` (no captures) — see
@@ -1024,6 +1053,69 @@ mod tests {
         let id = window::Id::unique();
         apply(&mut app, Message::SettingsWindowOpened(id));
         assert_eq!(app.settings_window_id, Some(id));
+    }
+
+    #[test]
+    fn settings_window_closed_clears_window_id() {
+        // When the user dismisses the settings window via its chrome (the X
+        // button, Alt+F4, etc.), iced emits `window::Event::Closed`. The
+        // `close_events` subscription forwards it as
+        // `Message::SettingsWindowClosed(id)` and the handler must reset
+        // `settings_window_id` so the next `SettingsRequested` spawns a
+        // fresh window instead of attempting to `gain_focus` a destroyed one.
+        let mut app = fresh_app();
+        let id = window::Id::unique();
+        app.settings_window_id = Some(id);
+        apply(&mut app, Message::SettingsWindowClosed(id));
+        assert!(
+            app.settings_window_id.is_none(),
+            "matching SettingsWindowClosed must clear the cached id"
+        );
+    }
+
+    #[test]
+    fn settings_window_closed_other_id_does_not_clear() {
+        // `window::close_events()` fires for every closed window in the
+        // daemon. A capture-window close must NOT clear `settings_window_id`
+        // — the id guard in the handler exists precisely to avoid this
+        // cross-window confusion.
+        let mut app = fresh_app();
+        let settings_id = window::Id::unique();
+        let other_id = window::Id::unique();
+        assert_ne!(settings_id, other_id, "unique() must return distinct ids");
+        app.settings_window_id = Some(settings_id);
+        apply(&mut app, Message::SettingsWindowClosed(other_id));
+        assert_eq!(
+            app.settings_window_id,
+            Some(settings_id),
+            "non-matching SettingsWindowClosed leaves the cached id intact"
+        );
+    }
+
+    #[test]
+    fn settings_requested_after_close_reopens_window() {
+        // End-to-end regression guard: open the settings window, close it,
+        // then request it again. The second `SettingsRequested` must take
+        // the "spawn a new window" branch — i.e. the stored id must change
+        // — rather than route through `gain_focus` against the dead id.
+        let mut app = fresh_app();
+        let _ = update(&mut app, Message::SettingsRequested);
+        let first_id = app
+            .settings_window_id
+            .expect("first SettingsRequested stored an id");
+        apply(&mut app, Message::SettingsWindowClosed(first_id));
+        assert!(
+            app.settings_window_id.is_none(),
+            "close must clear the cached id before the second request"
+        );
+        let _ = update(&mut app, Message::SettingsRequested);
+        let second_id = app
+            .settings_window_id
+            .expect("second SettingsRequested stored a fresh id");
+        assert_ne!(
+            first_id, second_id,
+            "second SettingsRequested must allocate a new window id, not reuse the dead one"
+        );
     }
 
     #[test]
