@@ -29,8 +29,9 @@
 //! needing an extra style branch outside
 //! [`crate::theme::settings_remove_button_style`].
 
+use iced::font::Weight;
 use iced::widget::{button, column, row, text, text_input};
-use iced::{Element, Length, Pixels};
+use iced::{Element, Font, Length, Pixels};
 use trace_core::{L10n, Language, NoteSection, SettingsPalette};
 
 use crate::theme::{
@@ -40,6 +41,17 @@ use crate::theme::{
 
 use super::widgets::{section_card, CARD_VERTICAL_SPACING};
 use super::SettingsMessage;
+
+/// Font used for the 1-based display-index label. Matches Mac
+/// `Text("\(section.displayIndex)").font(.system(size: 11, weight: .bold,
+/// design: .monospaced))` in `SectionTitleRow` (`SettingsView.swift:764-814`).
+/// Built from `Font::MONOSPACE` to inherit the default stretch / style, then
+/// overridden to `Weight::Bold` for the monospaced digits' bolder optical
+/// weight.
+const SECTION_INDEX_FONT: Font = Font {
+    weight: Weight::Bold,
+    ..Font::MONOSPACE
+};
 
 /// Horizontal spacing inside every section-title row. Matches Mac
 /// `HStack(spacing: 8)` in `SectionTitleRow`.
@@ -89,7 +101,11 @@ pub(super) fn quick_sections_card<'a>(
     // Trailing "Add section" row lives in its own vec slot so the iterator
     // stays homogeneous — iced's `column(_)` takes an `IntoIterator<Item =
     // Element<_, _>>`.
-    let add_button = button(text(L10n::add_section(lang)))
+    // Mac renders `Label(L10n.addSection, systemImage: "plus")`, which prefixes
+    // the label with a `plus` SF Symbol. iced 0.14 has no SF Symbols shim, so
+    // the Windows port uses the ASCII `+` character to reproduce the Mac visual
+    // — the same substitution already applied to the remove-button glyph above.
+    let add_button = button(text(format!("+ {}", L10n::add_section(lang))))
         .on_press_maybe(can_add.then_some(SettingsMessage::SectionAdded))
         .style(settings_secondary_button_style(palette));
 
@@ -123,6 +139,7 @@ fn section_title_row<'a>(
     let display_index = index + 1;
     let index_label = text(display_index.to_string())
         .size(Pixels(INDEX_LABEL_FONT_SIZE))
+        .font(SECTION_INDEX_FONT)
         .color(trace_color_to_iced(palette.muted_text))
         .width(Length::Fixed(INDEX_LABEL_WIDTH));
 
