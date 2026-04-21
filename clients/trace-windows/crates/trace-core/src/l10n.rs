@@ -572,6 +572,28 @@ impl L10n {
         pick(lang, "稍后", "後で", "Later")
     }
 
+    // --- System Tray Menu
+
+    /// "New Note" tray menu entry. Mirrors the first item of the macOS
+    /// `setupStatusItem` menu in `AppDelegate.swift`, but unlike the Mac
+    /// reference (hard-coded English) the Windows port localizes the label.
+    pub fn new_note(lang: Language) -> &'static str {
+        pick(lang, "新建笔记", "新規ノート", "New Note")
+    }
+
+    /// "Quit <AppName>" tray menu entry. Interpolates the application display
+    /// name exactly like the Swift reference `"Quit \(BrandAssets.displayName)"`.
+    ///
+    /// Returns `String` (not `&'static str`) because each call synthesizes a
+    /// fresh buffer containing the runtime-provided name.
+    pub fn quit(lang: Language, app_name: &str) -> String {
+        match lang {
+            Language::Zh => format!("退出 {app_name}"),
+            Language::Ja => format!("{app_name}を終了"),
+            Language::En | Language::SystemDefault => format!("Quit {app_name}"),
+        }
+    }
+
     // --- Writer Errors
 
     pub fn vault_not_configured(lang: Language) -> &'static str {
@@ -1734,5 +1756,58 @@ mod tests {
             "en variant must wrap the name in ASCII double-quotes: {en}"
         );
         assert_eq!(en.matches('"').count(), 2, "exactly two quotes expected");
+    }
+
+    // --- System Tray Menu
+
+    #[test]
+    fn new_note_menu_label() {
+        assert_eq!(L10n::new_note(Language::Zh), "新建笔记");
+        assert_eq!(L10n::new_note(Language::Ja), "新規ノート");
+        assert_eq!(L10n::new_note(Language::En), "New Note");
+    }
+
+    #[test]
+    fn new_note_system_default_falls_back_to_english() {
+        assert_eq!(
+            L10n::new_note(Language::SystemDefault),
+            L10n::new_note(Language::En)
+        );
+    }
+
+    #[test]
+    fn quit_interpolates_app_name() {
+        assert_eq!(L10n::quit(Language::Zh, "Trace"), "退出 Trace");
+        assert_eq!(L10n::quit(Language::Ja, "Trace"), "Traceを終了");
+        assert_eq!(L10n::quit(Language::En, "Trace"), "Quit Trace");
+    }
+
+    #[test]
+    fn quit_system_default_falls_back_to_english() {
+        assert_eq!(
+            L10n::quit(Language::SystemDefault, "Trace"),
+            L10n::quit(Language::En, "Trace")
+        );
+    }
+
+    #[test]
+    fn quit_returns_owned_string_containing_app_name() {
+        // Assigning to a `String` binding is a compile-time assertion that
+        // `quit` doesn't return `&'static str` — this would fail to build if
+        // the signature regressed to a borrowed return type.
+        let rendered: String = L10n::quit(Language::En, "MyCoolApp");
+        assert!(
+            rendered.contains("MyCoolApp"),
+            "quit output must embed the passed app name, got {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn quit_handles_empty_app_name_without_panicking() {
+        // Degenerate case: passing an empty name should produce a prefix-only
+        // string (possibly with a trailing space) rather than panicking.
+        assert_eq!(L10n::quit(Language::En, ""), "Quit ");
+        assert_eq!(L10n::quit(Language::Zh, ""), "退出 ");
+        assert_eq!(L10n::quit(Language::Ja, ""), "を終了");
     }
 }
