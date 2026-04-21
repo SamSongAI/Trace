@@ -293,8 +293,9 @@ pub fn update(state: &mut CaptureApp, message: Message) -> Task<Message> {
         }
         Message::PinToggled => {
             state.pinned = !state.pinned;
-            // Side-effect routing through the platform handler lands in
-            // sub-task 2 — the skeleton keeps UI state authoritative.
+            if let Some(handler) = state.platform_handler.as_ref() {
+                handler.set_topmost(state.pinned);
+            }
             Task::none()
         }
         Message::SettingsRequested => {
@@ -649,14 +650,42 @@ mod tests {
 
     #[test]
     fn with_platform_handler_plugs_in_and_returns_self() {
-        struct NoopHandler;
-        impl PlatformHandler for NoopHandler {
-            fn set_topmost(&self, _pinned: bool) {}
-            fn restore_foreground(&self) {}
-        }
-        let handler: Arc<dyn PlatformHandler + Send + Sync> = Arc::new(NoopHandler);
+        let handler = crate::platform::mock::MockPlatformHandler::new();
         let app = fresh_app().with_platform_handler(handler);
         assert!(app.platform_handler.is_some());
+    }
+
+    #[test]
+    fn pin_toggled_forwards_state_to_the_platform_handler() {
+        let spy = crate::platform::mock::MockPlatformHandler::new();
+        let mut app = fresh_app().with_platform_handler(spy.clone());
+        assert_eq!(spy.set_topmost_call_count(), 0);
+        apply(&mut app, Message::PinToggled);
+        assert!(app.pinned);
+        assert_eq!(spy.set_topmost_call_count(), 1);
+        assert!(
+            spy.last_set_topmost(),
+            "handler sees pinned=true after first toggle"
+        );
+        apply(&mut app, Message::PinToggled);
+        assert!(!app.pinned);
+        assert_eq!(spy.set_topmost_call_count(), 2);
+        assert!(
+            !spy.last_set_topmost(),
+            "handler sees pinned=false after second toggle"
+        );
+    }
+
+    #[test]
+    fn pin_toggled_without_a_handler_still_mutates_state() {
+        // Not every wire-up provides a handler (headless tests, hypothetical
+        // CI probes). Sub-task 2's contract is that the handler is optional,
+        // so state must still flip even when `platform_handler` is `None`.
+        let mut app = fresh_app();
+        apply(&mut app, Message::PinToggled);
+        assert!(app.pinned);
+        apply(&mut app, Message::PinToggled);
+        assert!(!app.pinned);
     }
 
     #[test]
