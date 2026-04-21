@@ -67,9 +67,9 @@ pub(super) fn modifiers_to_win32(mods: Modifiers) -> u32 {
 ///
 /// Returns `None` for keys outside the covered set so the event decoder can
 /// drop them silently; the recorder only reacts to keys it can round-trip
-/// back through [`trace_core::vk_label`]. The coverage intentionally matches
-/// [`trace_core::vk_label`] so every captured key renders with a stable
-/// text label.
+/// back through `trace_core::ShortcutSpec::display_label` (and its internal
+/// `vk_label` helper). The coverage intentionally matches that helper so
+/// every captured key renders with a stable text label.
 ///
 /// # Covered
 ///
@@ -127,7 +127,8 @@ fn character_to_vk(chars: &str) -> Option<u32> {
     }
 
     // OEM punctuation on a US layout. The match arms lock the VK codes to
-    // the values in `trace_core::vk_label` so `display_label` round-trips.
+    // the values in `trace-core`'s internal `vk_label` helper so
+    // `ShortcutSpec::display_label` round-trips.
     match lower {
         '-' => Some(0xBD),
         '=' => Some(0xBB),

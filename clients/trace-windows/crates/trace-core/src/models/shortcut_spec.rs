@@ -9,8 +9,11 @@
 //! rather than the SF Symbols glyphs (`⌃⇧N`) the Mac reference emits — iced
 //! 0.14 has no SF Symbols equivalent, and Windows users expect the text
 //! spelling in every OS-level shortcut UI.
-
-use serde::{Deserialize, Serialize};
+//!
+//! `ShortcutSpec` deliberately does **not** derive `Serialize` /
+//! `Deserialize`: persistence stores the VK code and modifier mask as two
+//! independent `u32` fields on `AppSettings`, not a struct payload.
+//! `ShortcutSpec` is an in-memory UI shadow only.
 
 /// `MOD_ALT` bit in the `modifiers: u32` on-disk storage. Matches Win32
 /// `RegisterHotKey` `MOD_ALT = 0x0001`. Exposed so the UI layer can compose
@@ -40,7 +43,7 @@ const ALL_MODIFIERS: u32 = MOD_ALT | MOD_CONTROL | MOD_SHIFT | MOD_WIN;
 /// Mirrors Mac `KeyboardShortcut` (`Sources/Trace/Utils/KeyboardShortcut.swift`)
 /// but re-encoded for Windows. The struct itself is `Copy` because it holds
 /// only two `u32`s.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShortcutSpec {
     /// Win32 Virtual-Key code. `VK_RETURN = 0x0D`, `VK_TAB = 0x09`, letter
     /// keys `A..Z` at `0x41..0x5A`, digits `0..9` at `0x30..0x39`, and so on.

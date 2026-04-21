@@ -15,9 +15,9 @@ pub mod writer;
 pub use error::TraceError;
 pub use l10n::L10n;
 pub use models::{
-    join_folder_and_filename, split_target_file, vk_label, DailyFileDateFormat, Entry, EntryTheme,
-    Language, NoteSection, PanelFrame, SeparatorStyle, ShortcutSpec, ThemePreset, ThreadConfig,
-    WriteMode, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, RESERVED_SECTION_MOD,
+    join_folder_and_filename, split_target_file, DailyFileDateFormat, Entry, EntryTheme, Language,
+    NoteSection, PanelFrame, SeparatorStyle, ShortcutSpec, ThemePreset, ThreadConfig, WriteMode,
+    MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, RESERVED_SECTION_MOD,
 };
 pub use paths::{
     format_date, resolve_within_vault, sanitize_filename, sanitize_filename_preserve_extension,

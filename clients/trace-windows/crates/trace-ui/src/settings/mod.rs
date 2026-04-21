@@ -725,12 +725,18 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
             Task::none()
         }
         SettingsMessage::RecordingStarted(target) => {
-            // Arm the recorder for `target`; any stale validation message from
-            // a previous attempt is cleared so the chip's footer only shows
-            // the live recording hint. Mirrors Mac `startRecording(for:)`
-            // which sets both fields in lockstep.
-            state.recording_target = Some(target);
+            // Toggle semantics mirror Mac `toggleRecording(for:)`: clicking
+            // Edit on the same row that is already recording disarms the
+            // recorder, while clicking a different row simply switches the
+            // target. Any stale validation message from a previous attempt
+            // is cleared so the chip's footer only shows the live recording
+            // hint.
             state.shortcut_recorder_message = None;
+            state.recording_target = if state.recording_target == Some(target) {
+                None
+            } else {
+                Some(target)
+            };
             Task::none()
         }
         SettingsMessage::RecordingCancelled => {
@@ -2644,6 +2650,45 @@ mod tests {
     }
 
     #[test]
+    fn recording_started_toggles_off_on_second_invocation_for_same_target() {
+        // Mirror Mac `toggleRecording(for:)`: pressing Edit on a target that
+        // is already recording must disarm the recorder rather than re-arm
+        // it. Without the toggle check the row is stuck in recording mode
+        // with no way to exit short of pressing Cancel.
+        let mut app = fresh_app();
+        // First click — enters recording for Send.
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::RecordingStarted(ShortcutTarget::Send),
+        );
+        assert_eq!(app.recording_target, Some(ShortcutTarget::Send));
+        // Second click on the same target — exits recording.
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::RecordingStarted(ShortcutTarget::Send),
+        );
+        assert_eq!(app.recording_target, None);
+    }
+
+    #[test]
+    fn recording_started_switches_to_different_target_without_nulling() {
+        // Clicking Edit on a different row while another row is recording
+        // must switch the armed target outright, not drop to `None` and
+        // force the user to click twice.
+        let mut app = fresh_app();
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::RecordingStarted(ShortcutTarget::Send),
+        );
+        assert_eq!(app.recording_target, Some(ShortcutTarget::Send));
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::RecordingStarted(ShortcutTarget::Append),
+        );
+        assert_eq!(app.recording_target, Some(ShortcutTarget::Append));
+    }
+
+    #[test]
     fn recording_cancelled_disarms_target_and_clears_message() {
         let mut app = fresh_app();
         app.recording_target = Some(ShortcutTarget::Append);
@@ -2912,6 +2957,20 @@ mod tests {
         let mut app = fresh_app();
         app.recording_target = Some(ShortcutTarget::Create);
         let _element: Element<'_, SettingsMessage> = build_cards(&app);
+    }
+
+    #[test]
+    fn settings_view_renders_with_recording_active_for_every_target() {
+        // `build_cards_renders_shortcuts_card_while_recording` above only
+        // covers `ShortcutTarget::Create`. Each target has its own row and
+        // trailing button, so iterate `ShortcutTarget::ALL` through the full
+        // `settings_view` surface to catch a dropped match arm in either
+        // the card renderer or the outer scroll container.
+        for target in ShortcutTarget::ALL {
+            let mut app = fresh_app();
+            app.recording_target = Some(target);
+            let _element: Element<'_, SettingsMessage> = settings_view(&app);
+        }
     }
 
     #[test]

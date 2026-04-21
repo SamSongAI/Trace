@@ -56,12 +56,12 @@ const CATEGORY_FONT_SIZE: f32 = 9.0;
 /// Target name font size. Mac `.font(.system(size: 12, weight: .medium))`.
 const TARGET_NAME_FONT_SIZE: f32 = 12.0;
 /// Chip label font size. Mac `.font(.system(size: 12, weight: .semibold, design: .monospaced))`.
-const CHIP_FONT_SIZE: f32 = 12.0;
+const SHORTCUT_CHIP_FONT_SIZE: f32 = 12.0;
 /// Edit / Cancel button font size. Mac `.font(.system(size: 11, weight: .medium))`.
-const ACTION_BUTTON_FONT_SIZE: f32 = 11.0;
+const EDIT_BUTTON_FONT_SIZE: f32 = 11.0;
 /// Fixed row label + chip font size. Same as the configurable row so the two
 /// blocks read as one card body.
-const FIXED_ROW_FONT_SIZE: f32 = 12.0;
+const FIXED_ROW_LABEL_FONT_SIZE: f32 = 12.0;
 /// Horizontal padding inside the chip. Mac `.padding(.horizontal, 8)`.
 const CHIP_HORIZONTAL_PADDING: u16 = 8;
 /// Vertical padding inside the chip. Mac `.padding(.vertical, 4)`.
@@ -72,15 +72,21 @@ const CHIP_CORNER_RADIUS: f32 = 6.0;
 /// label column. Mac `VStack(spacing: 2)`.
 const LABEL_COLUMN_SPACING: f32 = 2.0;
 /// Footer font size for the recorder error message. Mac `.font(.system(size: 11, weight: .medium))`.
-const FOOTER_FONT_SIZE: f32 = 11.0;
+const ERROR_MESSAGE_FONT_SIZE: f32 = 11.0;
 /// Vertical padding above the footer message. Mac `.padding(.top, 6)`.
-const FOOTER_TOP_PADDING: u16 = 6;
+const ERROR_MESSAGE_TOP_PADDING: u16 = 6;
 /// Height of the divider rule. iced 0.14 has no `Divider` widget; we render a
 /// 1-pt filled `Space` + colored container instead.
 const DIVIDER_HEIGHT: f32 = 1.0;
 /// Vertical padding flanking the divider. Mac `.padding(.vertical, 6)` on
 /// `Divider()`.
-const DIVIDER_VERTICAL_PADDING: u16 = 6;
+const DIVIDER_VERTICAL_SPACING: u16 = 6;
+
+/// Fixed-row chip label for the panel-section-switch shortcut. The `–` glyph
+/// is U+2013 (EN DASH), matching the Mac reference's `⌘1–9` spelling. The
+/// escape form keeps the character unambiguous when reading the source with
+/// a dash-collapsing editor setup.
+const FIXED_LABEL_SECTION_SWITCH: &str = "Ctrl+1\u{2013}9";
 
 /// Monospaced font used for the shortcut chip. Matches the Mac reference's
 /// `design: .monospaced` so ⌘/Ctrl glyphs align in a vertical stack.
@@ -125,7 +131,7 @@ pub(super) fn shortcuts_card<'a>(
     body.push(fixed_row(
         palette,
         lang,
-        "Ctrl+1~9",
+        FIXED_LABEL_SECTION_SWITCH,
         L10n::shortcut_switch_section(lang),
     ));
 
@@ -134,12 +140,12 @@ pub(super) fn shortcuts_card<'a>(
         body.push(
             container(
                 text(message)
-                    .size(Pixels(FOOTER_FONT_SIZE))
+                    .size(Pixels(ERROR_MESSAGE_FONT_SIZE))
                     .color(trace_color_to_iced(palette.warning_text))
                     .font(label_font()),
             )
             .padding(Padding {
-                top: FOOTER_TOP_PADDING as f32,
+                top: ERROR_MESSAGE_TOP_PADDING as f32,
                 right: 0.0,
                 bottom: 0.0,
                 left: 0.0,
@@ -194,7 +200,7 @@ fn configurable_row<'a>(
     let action: Element<'a, SettingsMessage> = if is_recording {
         button(
             text(L10n::cancel(lang))
-                .size(Pixels(ACTION_BUTTON_FONT_SIZE))
+                .size(Pixels(EDIT_BUTTON_FONT_SIZE))
                 .color(trace_color_to_iced(palette.muted_text))
                 .font(label_font()),
         )
@@ -205,7 +211,7 @@ fn configurable_row<'a>(
     } else {
         button(
             text(L10n::edit(lang))
-                .size(Pixels(ACTION_BUTTON_FONT_SIZE))
+                .size(Pixels(EDIT_BUTTON_FONT_SIZE))
                 .color(trace_color_to_iced(palette.accent))
                 .font(label_font()),
         )
@@ -238,12 +244,12 @@ fn fixed_row<'a>(
     body_label: &'a str,
 ) -> Element<'a, SettingsMessage> {
     let body = text(body_label)
-        .size(Pixels(FIXED_ROW_FONT_SIZE))
+        .size(Pixels(FIXED_ROW_LABEL_FONT_SIZE))
         .color(trace_color_to_iced(palette.muted_text))
         .font(label_font());
 
     let chip = text(chip_label)
-        .size(Pixels(FIXED_ROW_FONT_SIZE))
+        .size(Pixels(FIXED_ROW_LABEL_FONT_SIZE))
         .color(trace_color_to_iced(dim_color(palette.muted_text)))
         .font(chip_font());
 
@@ -301,7 +307,7 @@ fn shortcut_chip<'a>(
     };
 
     let chip_label = text(label)
-        .size(Pixels(CHIP_FONT_SIZE))
+        .size(Pixels(SHORTCUT_CHIP_FONT_SIZE))
         .color(trace_color_to_iced(text_color))
         .font(chip_font());
 
@@ -391,9 +397,9 @@ fn divider_rule<'a>(palette: SettingsPalette) -> Element<'a, SettingsMessage> {
 
     container(rule)
         .padding(Padding {
-            top: DIVIDER_VERTICAL_PADDING as f32,
+            top: DIVIDER_VERTICAL_SPACING as f32,
             right: 0.0,
-            bottom: DIVIDER_VERTICAL_PADDING as f32,
+            bottom: DIVIDER_VERTICAL_SPACING as f32,
             left: 0.0,
         })
         .width(Length::Fill)
@@ -521,13 +527,24 @@ mod tests {
         assert_eq!(ROW_VERTICAL_PADDING, 8);
         assert_eq!(CATEGORY_FONT_SIZE, 9.0);
         assert_eq!(TARGET_NAME_FONT_SIZE, 12.0);
-        assert_eq!(CHIP_FONT_SIZE, 12.0);
-        assert_eq!(ACTION_BUTTON_FONT_SIZE, 11.0);
+        assert_eq!(SHORTCUT_CHIP_FONT_SIZE, 12.0);
+        assert_eq!(EDIT_BUTTON_FONT_SIZE, 11.0);
+        assert_eq!(FIXED_ROW_LABEL_FONT_SIZE, 12.0);
         assert_eq!(CHIP_HORIZONTAL_PADDING, 8);
         assert_eq!(CHIP_VERTICAL_PADDING, 4);
         assert_eq!(CHIP_CORNER_RADIUS, 6.0);
         assert_eq!(LABEL_COLUMN_SPACING, 2.0);
-        assert_eq!(FOOTER_FONT_SIZE, 11.0);
-        assert_eq!(FOOTER_TOP_PADDING, 6);
+        assert_eq!(ERROR_MESSAGE_FONT_SIZE, 11.0);
+        assert_eq!(ERROR_MESSAGE_TOP_PADDING, 6);
+        assert_eq!(DIVIDER_VERTICAL_SPACING, 6);
+    }
+
+    #[test]
+    fn fixed_row_section_switch_label_uses_en_dash() {
+        // Guard the fixed row's section-switch chip label against drift back
+        // to the ASCII `~` placeholder — the Mac reference's `⌘1–9` uses
+        // U+2013 EN DASH and this is the Windows-side mirror.
+        assert_eq!(FIXED_LABEL_SECTION_SWITCH, "Ctrl+1\u{2013}9");
+        assert!(!FIXED_LABEL_SECTION_SWITCH.contains('~'));
     }
 }

@@ -18,7 +18,7 @@ pub use panel_frame::PanelFrame;
 pub use section::NoteSection;
 pub use separator::SeparatorStyle;
 pub use shortcut_spec::{
-    vk_label, ShortcutSpec, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, RESERVED_SECTION_MOD,
+    ShortcutSpec, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, RESERVED_SECTION_MOD,
 };
 pub use theme_preset::ThemePreset;
 pub use thread_config::{join_folder_and_filename, split_target_file, ThreadConfig};
