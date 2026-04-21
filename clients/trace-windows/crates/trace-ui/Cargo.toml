@@ -13,6 +13,9 @@ trace-core = { path = "../trace-core" }
 iced = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+# Native folder picker for the Storage card's Browse buttons. Driven via
+# `iced::Task::perform` so the picker runs outside the iced view thread.
+rfd = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
