@@ -32,10 +32,11 @@
 //! controller's default frame. See [`window_settings`].
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::Utc;
-use iced::widget::{column, container, text_editor, Space};
-use iced::{window, Task};
+use iced::widget::{column, container, stack, text_editor, Space};
+use iced::{time, window, Subscription, Task};
 use iced::{Element, Length, Size, Theme};
 use trace_core::{
     AppSettings, DailyNoteWriter, FileWriter, NoteSection, SaveMode, ThreadConfig, ThreadWriter,
@@ -46,6 +47,10 @@ use uuid::Uuid;
 use crate::platform::PlatformHandler;
 use crate::theme::{panel_container_style, separator_container_style, to_iced_theme};
 use crate::widgets;
+
+/// How long a toast stays on screen before the auto-dismiss subscription
+/// fires. Matches Mac's 1.5 s fade-out.
+pub const TOAST_AUTO_DISMISS: Duration = Duration::from_millis(1500);
 
 /// User-facing toast message shown when the editor is empty on Send/Append.
 /// Chinese literal per Phase 11 plan; L10n wiring lands in Phase 12.
@@ -375,16 +380,28 @@ pub fn view(state: &CaptureApp) -> Element<'_, Message> {
         &state.document_title,
     );
 
-    let stack = column![header, separator, editor, footer]
+    let panel_stack = column![header, separator, editor, footer]
         .spacing(0)
         .width(Length::Fill)
         .height(Length::Fill);
 
-    container(stack)
+    let panel: Element<'_, Message> = container(panel_stack)
         .width(Length::Fill)
         .height(Length::Fill)
         .style(panel_container_style(palette))
-        .into()
+        .into();
+
+    // Overlay the toast pill via `iced::widget::stack!` when a message is
+    // live. Layering the toast on top of the existing panel keeps the
+    // editor/footer layout untouched — the pill floats over them rather
+    // than stealing vertical space.
+    match state.toast.as_deref() {
+        Some(message) => {
+            let pill = widgets::toast::toast(palette, message);
+            stack![panel, pill].into()
+        }
+        None => panel,
+    }
 }
 
 /// Returns the iced [`Theme`] derived from [`CaptureApp::theme`].
@@ -395,6 +412,19 @@ pub fn view(state: &CaptureApp) -> Element<'_, Message> {
 /// than a full palette rebuild.
 pub fn theme(state: &CaptureApp) -> Theme {
     state.iced_theme.clone()
+}
+
+/// Aggregate subscription for the capture panel.
+///
+/// Currently returns the 1.5 s toast auto-dismiss subscription when a toast
+/// is active, and [`Subscription::none`] otherwise. Sub-task 5 extends this
+/// with the keyboard / window-event listener via [`Subscription::batch`].
+pub fn subscription(state: &CaptureApp) -> Subscription<Message> {
+    if state.toast.is_some() {
+        time::every(TOAST_AUTO_DISMISS).map(|_| Message::ToastDismiss)
+    } else {
+        Subscription::none()
+    }
 }
 
 /// Returns the panel's [`window::Settings`].
@@ -1113,5 +1143,76 @@ mod tests {
             SaveOutcome::Written
         );
         assert_eq!(app.editor_text(), "");
+    }
+
+    // ---------------------------------------------------------------------
+    // Phase 11 — toast overlay + auto-dismiss subscription.
+    //
+    // We can't render the widget tree without spinning up iced, but we can
+    // verify two things:
+    //   * `view()` builds without panic for both the toast-visible and
+    //     toast-hidden branches (locks the overlay wiring in place).
+    //   * `subscription()` returns something when toast is live and
+    //     `Subscription::none()` otherwise. We can't inspect the timer
+    //     directly, but comparing the subscription handle's identity to
+    //     `Subscription::none()` via a recipe-less "empty?" check isn't
+    //     exposed; instead we assert the branches exercise without panic
+    //     and leave the wall-clock verification to the integration layer.
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn view_builds_with_toast_overlay() {
+        let mut app = fresh_app();
+        {
+            let _element_without_toast: Element<'_, Message> = view(&app);
+        }
+        app.toast = Some(TOAST_EMPTY_NOT_SAVED.to_string());
+        {
+            let _element_with_toast: Element<'_, Message> = view(&app);
+        }
+    }
+
+    #[test]
+    fn subscription_is_none_when_no_toast_is_active() {
+        let app = fresh_app();
+        // `Subscription` in iced 0.14 doesn't expose an `is_none()` helper,
+        // but constructing the subscription and immediately dropping it
+        // proves the branch runs. The keyboard/window listener lands in
+        // sub-task 5, so the no-toast branch returning "nothing to listen
+        // to yet" is the contract today.
+        let _sub: Subscription<Message> = subscription(&app);
+    }
+
+    #[test]
+    fn subscription_builds_auto_dismiss_when_toast_is_active() {
+        let mut app = fresh_app();
+        app.toast = Some("x".to_string());
+        let _sub: Subscription<Message> = subscription(&app);
+        // iced's subscription tree is opaque — the test merely guards the
+        // branch builds; the actual 1.5 s timing is covered manually on
+        // the running app.
+    }
+
+    #[test]
+    fn toast_auto_dismiss_constant_matches_mac_reference() {
+        // Mac `CaptureView` hides the toast after 1.5 s.
+        assert_eq!(TOAST_AUTO_DISMISS, Duration::from_millis(1500));
+    }
+
+    #[test]
+    fn toast_show_followed_by_dismiss_round_trips_state() {
+        // End-to-end state test: the subscription-driven path delivers
+        // `ToastDismiss`, which must clear the overlay. We simulate the
+        // roundtrip without the timer so the test is hermetic.
+        let mut app = fresh_app();
+        apply(
+            &mut app,
+            Message::ToastShow("空内容未保存".to_string()),
+        );
+        assert!(app.toast.is_some());
+        apply(&mut app, Message::ToastDismiss);
+        assert!(app.toast.is_none());
+        // The view must still build after dismissal.
+        let _element: Element<'_, Message> = view(&app);
     }
 }

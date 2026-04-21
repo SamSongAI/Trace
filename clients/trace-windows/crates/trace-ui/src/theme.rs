@@ -198,6 +198,24 @@ pub fn capture_editor_style(
     }
 }
 
+/// Container style for the toast pill. Uses the darker [`CapturePalette::chrome_background`]
+/// so the overlay reads over any editor content, with an accent-tinted border
+/// for contrast and the primary text color for the message glyphs.
+pub fn toast_container_style(palette: CapturePalette) -> impl Fn(&Theme) -> container::Style {
+    move |_theme: &Theme| {
+        container::Style::default()
+            .background(Background::Color(trace_color_to_iced(
+                palette.chrome_background,
+            )))
+            .color(trace_color_to_iced(palette.text_primary))
+            .border(Border {
+                radius: 10.0.into(),
+                width: 1.0,
+                color: trace_color_to_iced(palette.border),
+            })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
