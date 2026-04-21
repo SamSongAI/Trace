@@ -31,10 +31,24 @@
 //!   the two most common lookups. The error type
 //!   [`app_paths::AppPathsError`] is cross-platform; the path functions
 //!   themselves are Windows-only.
+//! - [`single_instance`] — Named-mutex based single-instance enforcement.
+//!   macOS gets this from the bundle identifier; on Windows we must
+//!   create a `Local\` scoped mutex at startup and exit if another copy
+//!   is already running. The error type and the [`single_instance::SingleInstance`]
+//!   outcome are cross-platform; [`single_instance::acquire`] and the
+//!   guard type are Windows-only.
+//! - [`autostart`] — Launch-at-login integration via the
+//!   `HKCU\...\CurrentVersion\Run` registry key. User-scope (no
+//!   elevation), mirrors the macOS `SMAppService.launchAtLogin` toggle.
+//!   The error type [`autostart::AutostartError`] is cross-platform; the
+//!   [`autostart::enable`] / [`autostart::disable`] / [`autostart::is_enabled`]
+//!   functions are Windows-only.
 
 #![cfg_attr(not(windows), allow(dead_code))]
 
 pub mod app_paths;
+pub mod autostart;
 pub mod global_hotkey;
+pub mod single_instance;
 pub mod system_tray;
 pub mod window;
