@@ -40,6 +40,17 @@ impl L10n {
         pick(lang, "语言", "言語", "Language")
     }
 
+    /// Label for the "follow the OS" language option. The Mac reference has
+    /// no equivalent entry because `AppLanguage` on macOS omits the
+    /// `.systemDefault` sentinel — Swift resolves the preferred locale at
+    /// read time and stores a concrete variant. On Windows the settings UI
+    /// exposes "System default" as a first-class choice so the user can
+    /// opt out of an explicit override, which means L10n needs its own
+    /// string for the chip label.
+    pub fn language_system_default(lang: Language) -> &'static str {
+        pick(lang, "系统默认", "システム既定", "System default")
+    }
+
     pub fn theme(lang: Language) -> &'static str {
         pick(lang, "主题", "テーマ", "Theme")
     }
@@ -689,6 +700,22 @@ mod tests {
         assert_eq!(L10n::language(Language::Zh), "语言");
         assert_eq!(L10n::language(Language::Ja), "言語");
         assert_eq!(L10n::language(Language::En), "Language");
+    }
+
+    #[test]
+    fn l10n_language_system_default_covers_three_langs() {
+        assert_eq!(L10n::language_system_default(Language::Zh), "系统默认");
+        assert_eq!(
+            L10n::language_system_default(Language::Ja),
+            "システム既定"
+        );
+        assert_eq!(L10n::language_system_default(Language::En), "System default");
+        // SystemDefault sentinel falls back to English, matching the rest of
+        // the L10n table (see `pick` in this file).
+        assert_eq!(
+            L10n::language_system_default(Language::SystemDefault),
+            "System default"
+        );
     }
 
     #[test]
