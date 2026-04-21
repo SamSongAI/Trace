@@ -21,7 +21,7 @@
 use iced::border::Border;
 use iced::widget::{button, container, text_editor, text_input};
 use iced::{Background, Color, Theme};
-use trace_core::{CapturePalette, TraceColor, TraceTheme};
+use trace_core::{CapturePalette, SettingsPalette, TraceColor, TraceTheme};
 
 /// Converts a [`TraceColor`] (0-255 sRGB + f32 alpha) into an [`iced::Color`].
 ///
@@ -213,6 +213,104 @@ pub fn toast_container_style(palette: CapturePalette) -> impl Fn(&Theme) -> cont
                 width: 1.0,
                 color: trace_color_to_iced(palette.border),
             })
+    }
+}
+
+/// Outermost container for the settings window. Paints the whole surface with
+/// [`SettingsPalette::shell_middle`] — the middle stop of the Mac reference's
+/// vertical gradient. iced 0.14's stable container API can't render a
+/// multi-stop gradient without widgets-overdraw tricks, so Phase 12 locks a
+/// single mid-tone to keep contrast consistent across presets. The text color
+/// is seeded from [`SettingsPalette::header_title`] so nested `text` widgets
+/// that don't set their own color inherit a legible default.
+pub fn settings_shell_style(palette: SettingsPalette) -> impl Fn(&Theme) -> container::Style {
+    move |_theme: &Theme| {
+        container::Style::default()
+            .background(Background::Color(trace_color_to_iced(palette.shell_middle)))
+            .color(trace_color_to_iced(palette.header_title))
+    }
+}
+
+/// Container style for a settings card (the rounded rectangle that wraps a
+/// related group of rows). Background is [`SettingsPalette::card_background`],
+/// with a hairline border tuned by preset (`card_border`) and the Mac
+/// reference's 16-pt corner radius.
+pub fn card_container_style(palette: SettingsPalette) -> impl Fn(&Theme) -> container::Style {
+    move |_theme: &Theme| {
+        container::Style::default()
+            .background(Background::Color(trace_color_to_iced(
+                palette.card_background,
+            )))
+            .color(trace_color_to_iced(palette.section_title))
+            .border(Border {
+                radius: 16.0.into(),
+                width: 1.0,
+                color: trace_color_to_iced(palette.card_border),
+            })
+    }
+}
+
+/// Shared text-input style for every settings field (vault path, filename
+/// template, hotkey display, …). Uses [`SettingsPalette::field_background`] /
+/// `field_border` / `field_text` so the field reads as its own sunken surface
+/// against the card. Placeholder and selection are tied to the palette's
+/// `muted_text` and `accent` so light/dark presets stay balanced.
+pub fn settings_field_style(
+    palette: SettingsPalette,
+) -> impl Fn(&Theme, text_input::Status) -> text_input::Style {
+    move |_theme: &Theme, _status: text_input::Status| text_input::Style {
+        background: Background::Color(trace_color_to_iced(palette.field_background)),
+        border: Border {
+            radius: 8.0.into(),
+            width: 1.0,
+            color: trace_color_to_iced(palette.field_border),
+        },
+        icon: trace_color_to_iced(palette.muted_text),
+        placeholder: trace_color_to_iced(palette.muted_text),
+        value: trace_color_to_iced(palette.field_text),
+        selection: trace_color_to_iced(palette.accent),
+    }
+}
+
+/// Primary (filled) button style used for affirmative actions in the settings
+/// window (e.g. "Choose Folder"). Background tracks
+/// [`SettingsPalette::accent_strong`], text tracks `primary_button_text`.
+/// Hover/press states are flattened with the active state in Phase 12 — the
+/// interaction polish lands in a later sub-task.
+pub fn settings_primary_button_style(
+    palette: SettingsPalette,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_theme: &Theme, _status: button::Status| button::Style {
+        background: Some(Background::Color(trace_color_to_iced(
+            palette.accent_strong,
+        ))),
+        text_color: trace_color_to_iced(palette.primary_button_text),
+        border: Border {
+            radius: 8.0.into(),
+            width: 0.0,
+            color: Color::TRANSPARENT,
+        },
+        ..button::Style::default()
+    }
+}
+
+/// Secondary (outlined) button style for low-emphasis actions — e.g. "Reset"
+/// or "Cancel". Background uses [`SettingsPalette::secondary_button_background`]
+/// with the matching `secondary_button_border` outline and text color.
+pub fn settings_secondary_button_style(
+    palette: SettingsPalette,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_theme: &Theme, _status: button::Status| button::Style {
+        background: Some(Background::Color(trace_color_to_iced(
+            palette.secondary_button_background,
+        ))),
+        text_color: trace_color_to_iced(palette.secondary_button_text),
+        border: Border {
+            radius: 8.0.into(),
+            width: 1.0,
+            color: trace_color_to_iced(palette.secondary_button_border),
+        },
+        ..button::Style::default()
     }
 }
 
@@ -415,5 +513,200 @@ mod tests {
         let expected_bg = Background::Color(expected_iced_color(palette.panel_background));
         assert_eq!(style.background, expected_bg);
         assert_eq!(style.value, expected_iced_color(palette.editor_text));
+    }
+
+    #[test]
+    fn settings_shell_style_paints_shell_middle() {
+        // The outer shell uses `shell_middle` on every preset so a drift in
+        // the palette (or in the closure) is caught immediately.
+        for preset in [
+            ThemePreset::Light,
+            ThemePreset::Dark,
+            ThemePreset::Paper,
+            ThemePreset::Dune,
+        ] {
+            let palette = TraceTheme::for_preset(preset).settings;
+            let style_fn = settings_shell_style(palette);
+            let style = style_fn(&Theme::Light);
+            let expected = Background::Color(expected_iced_color(palette.shell_middle));
+            assert_eq!(
+                style.background,
+                Some(expected),
+                "preset {:?} shell background mismatch",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn settings_shell_style_inherits_header_title_color() {
+        let palette = TraceTheme::for_preset(ThemePreset::Dark).settings;
+        let style_fn = settings_shell_style(palette);
+        let style = style_fn(&Theme::Dark);
+        assert_eq!(
+            style.text_color,
+            Some(expected_iced_color(palette.header_title))
+        );
+    }
+
+    #[test]
+    fn card_container_style_uses_card_background_and_border() {
+        for preset in [
+            ThemePreset::Light,
+            ThemePreset::Dark,
+            ThemePreset::Paper,
+            ThemePreset::Dune,
+        ] {
+            let palette = TraceTheme::for_preset(preset).settings;
+            let style_fn = card_container_style(palette);
+            let style = style_fn(&Theme::Light);
+            let expected_bg = Background::Color(expected_iced_color(palette.card_background));
+            assert_eq!(
+                style.background,
+                Some(expected_bg),
+                "preset {:?} card background mismatch",
+                preset
+            );
+            assert_eq!(
+                style.border.color,
+                expected_iced_color(palette.card_border),
+                "preset {:?} card border mismatch",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn card_container_style_uses_sixteen_point_radius() {
+        // Phase 12 locks the 16-pt corner radius to match Mac
+        // `SettingsView.swift`. A drift here would make cards look sharper
+        // or softer than the reference.
+        let palette = TraceTheme::for_preset(ThemePreset::Light).settings;
+        let style_fn = card_container_style(palette);
+        let style = style_fn(&Theme::Light);
+        assert_eq!(style.border.radius.top_left, 16.0);
+        assert_eq!(style.border.width, 1.0);
+    }
+
+    #[test]
+    fn settings_field_style_uses_field_background_and_text() {
+        for preset in [
+            ThemePreset::Light,
+            ThemePreset::Dark,
+            ThemePreset::Paper,
+            ThemePreset::Dune,
+        ] {
+            let palette = TraceTheme::for_preset(preset).settings;
+            let style_fn = settings_field_style(palette);
+            let style = style_fn(&Theme::Light, text_input::Status::Active);
+            let expected_bg = Background::Color(expected_iced_color(palette.field_background));
+            assert_eq!(
+                style.background, expected_bg,
+                "preset {:?} field bg mismatch",
+                preset
+            );
+            assert_eq!(
+                style.value,
+                expected_iced_color(palette.field_text),
+                "preset {:?} field text mismatch",
+                preset
+            );
+            assert_eq!(
+                style.border.color,
+                expected_iced_color(palette.field_border),
+                "preset {:?} field border mismatch",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn settings_field_style_uses_muted_placeholder_and_accent_selection() {
+        let palette = TraceTheme::for_preset(ThemePreset::Light).settings;
+        let style_fn = settings_field_style(palette);
+        let style = style_fn(&Theme::Light, text_input::Status::Active);
+        assert_eq!(style.placeholder, expected_iced_color(palette.muted_text));
+        assert_eq!(style.selection, expected_iced_color(palette.accent));
+    }
+
+    #[test]
+    fn settings_primary_button_uses_accent_strong_background() {
+        for preset in [
+            ThemePreset::Light,
+            ThemePreset::Dark,
+            ThemePreset::Paper,
+            ThemePreset::Dune,
+        ] {
+            let palette = TraceTheme::for_preset(preset).settings;
+            let style_fn = settings_primary_button_style(palette);
+            let style = style_fn(&Theme::Light, button::Status::Active);
+            let expected_bg = Background::Color(expected_iced_color(palette.accent_strong));
+            assert_eq!(
+                style.background,
+                Some(expected_bg),
+                "preset {:?} primary bg mismatch",
+                preset
+            );
+            assert_eq!(
+                style.text_color,
+                expected_iced_color(palette.primary_button_text),
+                "preset {:?} primary text mismatch",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn settings_primary_button_has_no_border() {
+        // The filled variant is borderless — width 0. Radius stays 8 pt.
+        let palette = TraceTheme::for_preset(ThemePreset::Light).settings;
+        let style_fn = settings_primary_button_style(palette);
+        let style = style_fn(&Theme::Light, button::Status::Active);
+        assert_eq!(style.border.width, 0.0);
+        assert_eq!(style.border.radius.top_left, 8.0);
+    }
+
+    #[test]
+    fn settings_secondary_button_uses_secondary_palette_slots() {
+        for preset in [
+            ThemePreset::Light,
+            ThemePreset::Dark,
+            ThemePreset::Paper,
+            ThemePreset::Dune,
+        ] {
+            let palette = TraceTheme::for_preset(preset).settings;
+            let style_fn = settings_secondary_button_style(palette);
+            let style = style_fn(&Theme::Light, button::Status::Active);
+            let expected_bg =
+                Background::Color(expected_iced_color(palette.secondary_button_background));
+            assert_eq!(
+                style.background,
+                Some(expected_bg),
+                "preset {:?} secondary bg mismatch",
+                preset
+            );
+            assert_eq!(
+                style.text_color,
+                expected_iced_color(palette.secondary_button_text),
+                "preset {:?} secondary text mismatch",
+                preset
+            );
+            assert_eq!(
+                style.border.color,
+                expected_iced_color(palette.secondary_button_border),
+                "preset {:?} secondary border mismatch",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn settings_secondary_button_has_hairline_outline() {
+        // Outlined variant: 1-pixel border, 8-pt radius.
+        let palette = TraceTheme::for_preset(ThemePreset::Light).settings;
+        let style_fn = settings_secondary_button_style(palette);
+        let style = style_fn(&Theme::Light, button::Status::Active);
+        assert_eq!(style.border.width, 1.0);
+        assert_eq!(style.border.radius.top_left, 8.0);
     }
 }

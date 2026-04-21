@@ -23,6 +23,8 @@
 //! top-level `iced::daemon` wiring that routes messages between the two
 //! windows.
 
+pub mod widgets;
+
 use std::sync::Arc;
 
 use iced::widget::{column, container, scrollable, text, Space};
