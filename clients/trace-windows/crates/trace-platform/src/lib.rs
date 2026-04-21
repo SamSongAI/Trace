@@ -43,6 +43,11 @@
 //!   The error type [`autostart::AutostartError`] is cross-platform; the
 //!   [`autostart::enable`] / [`autostart::disable`] / [`autostart::is_enabled`]
 //!   functions are Windows-only.
+//! - [`vault_validation`] — Cross-platform vault-path classification.
+//!   Layers `std::fs::metadata` + a write-probe on top of the
+//!   [`trace_core::VaultPathValidationIssue::is_blank`] helper so the
+//!   settings UI can distinguish Empty / DoesNotExist / NotDirectory /
+//!   NotWritable without reaching into the filesystem itself.
 
 #![cfg_attr(not(windows), allow(dead_code))]
 
@@ -51,4 +56,7 @@ pub mod autostart;
 pub mod global_hotkey;
 pub mod single_instance;
 pub mod system_tray;
+pub mod vault_validation;
 pub mod window;
+
+pub use vault_validation::validate_vault_path;

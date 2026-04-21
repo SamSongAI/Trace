@@ -3030,7 +3030,9 @@ dependencies = [
 name = "trace-platform"
 version = "0.1.0"
 dependencies = [
+ "tempfile",
  "trace-core",
+ "uuid",
  "windows 0.58.0",
 ]
 

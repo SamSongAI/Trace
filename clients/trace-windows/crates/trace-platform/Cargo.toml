@@ -10,6 +10,10 @@ description = "Windows-only system integration for the Trace client (global hotk
 
 [dependencies]
 trace-core = { path = "../trace-core" }
+# `uuid` seeds unique probe-file names inside `vault_validation` so a
+# parallel writeability check cannot race another probe on the same
+# directory.
+uuid = { workspace = true }
 
 # `windows` is only declared on Windows targets so the workspace remains
 # buildable on macOS/Linux developer machines (the crate body stays empty on
@@ -27,3 +31,6 @@ windows = { workspace = true, features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[dev-dependencies]
+tempfile = "3"
