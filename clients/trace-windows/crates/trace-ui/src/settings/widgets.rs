@@ -3,11 +3,13 @@
 //! Phase 12 sub-task 2 adds the two reusable shapes every settings card needs:
 //!
 //! * [`section_card`] — the rounded rectangle wrapper that carries a card
-//!   title, an optional description, and an arbitrary body built by the caller
-//!   (a column of `setting_row`s in the typical case).
-//! * [`setting_row`] — a left-aligned label + right-aligned control pair used
-//!   inside a card body for every labeled field (language picker, vault path,
-//!   hotkey display, …).
+//!   title and an arbitrary body built by the caller (a column of
+//!   `setting_row`s in the typical case). The shell itself never renders a
+//!   description line; cards that need caption text add a `text()` inside
+//!   their own body.
+//! * [`setting_row`] — a label (with an optional inline hint) stacked above
+//!   an arbitrary control. Used inside a card body for every labeled field
+//!   (language picker, vault path, hotkey display, …).
 //!
 //! Both factories are generic over the caller's message type so settings cards
 //! can emit their own [`crate::settings::SettingsMessage`] variants without
@@ -17,53 +19,58 @@
 //!
 //! # Layout reference
 //!
-//! The Mac source (`SettingsView.swift` / `SectionCard.swift`) renders each
-//! card with:
+//! The Mac source (`SettingsView.swift`) renders each card with:
 //!
-//! * 16 pt corner radius and a 1 px border.
-//! * 20 pt interior padding on the card itself.
-//! * An 18 pt title, optional 13 pt description, and 12 pt vertical spacing
-//!   between title, description, and body.
-//! * Rows laid out as an `HStack` with `Spacer()` between label and control.
+//! * 14 pt corner radius and a 1 px border (`SectionCard` body).
+//! * 18 pt interior padding on the card itself.
+//! * A 15 pt bold title directly above the body — no description line.
+//! * Rows laid out as a `VStack(spacing: 6)` with a label/hint `HStack` on
+//!   top of the control.
 //!
 //! Phase 12 locks these constants in named `pub const` items so tests and
 //! future sub-tasks can keep the values in sync with the Swift source.
 
-use iced::alignment::{Horizontal, Vertical};
-use iced::widget::{column, container, row, text, Space};
+use iced::alignment::Vertical;
+use iced::widget::{column, container, row, text};
 use iced::{Element, Length, Pixels};
 use trace_core::SettingsPalette;
 
 use crate::theme::card_container_style;
 
-/// Corner radius of the card container, matching Mac `SectionCard.swift`.
+/// Corner radius of the card container, matching Mac `SettingsView.swift`'s
+/// private `SectionCard` (`RoundedRectangle(cornerRadius: 14, …)`).
 /// Duplicated as a `pub const` so layout-level code can pad/align around it
 /// without re-reading the style function.
-pub const CARD_CORNER_RADIUS: f32 = 16.0;
-/// Interior padding of the card body. Matches Mac `SectionCard.swift`.
-pub const CARD_INNER_PADDING: u16 = 20;
-/// Spacing between the title, description, and body inside a card. Stored as
-/// `f32` because iced's `column::spacing` takes `Into<Pixels>` (which is
-/// implemented for `f32` / `u32` but not `u16`).
-pub const CARD_VERTICAL_SPACING: f32 = 12.0;
-/// Font size of the card title. Matches Mac `.font(.title3)` in
-/// `SectionCard.swift`.
-pub const CARD_TITLE_FONT_SIZE: f32 = 18.0;
-/// Font size of the card description. Matches Mac `.font(.footnote)` in
-/// `SectionCard.swift`.
-pub const CARD_DESCRIPTION_FONT_SIZE: f32 = 13.0;
-/// Font size of the row label. Matches Mac `.font(.body)` for settings rows.
+pub const CARD_CORNER_RADIUS: f32 = 14.0;
+/// Interior padding of the card body. Matches Mac `SectionCard.padding(18)`.
+pub const CARD_INNER_PADDING: u16 = 18;
+/// Spacing between the title and the body inside a card. Stored as `f32`
+/// because iced's `column::spacing` takes `Into<Pixels>` (which is
+/// implemented for `f32` / `u32` but not `u16`). Matches Mac
+/// `VStack(alignment: .leading, spacing: 14)` in `SectionCard`.
+pub const CARD_VERTICAL_SPACING: f32 = 14.0;
+/// Font size of the card title. Matches Mac
+/// `.font(.system(size: 15, weight: .bold))` in `SectionCard`.
+pub const CARD_TITLE_FONT_SIZE: f32 = 15.0;
+/// Font size of the row label. Windows renders the label in a regular weight
+/// (Mac uses uppercase + tracking; iced 0.14 has no `tracking` knob, so the
+/// Windows port keeps it as a plain label at 14 pt).
 pub const ROW_LABEL_FONT_SIZE: f32 = 14.0;
-/// Horizontal spacing between a row's label and its trailing control.
-/// Kept as a hard minimum — the [`row!`] macro inserts a `Space` that grows to
-/// fill the remaining width and pushes the control to the trailing edge.
-pub const ROW_LABEL_CONTROL_SPACING: f32 = 12.0;
+/// Font size of the optional inline hint next to the row label. Matches the
+/// Mac reference's 10 pt hint scaled up slightly for Windows readability.
+pub const ROW_HINT_FONT_SIZE: f32 = 13.0;
+/// Vertical spacing between the label/hint line and the control beneath it.
+/// Matches Mac `VStack(alignment: .leading, spacing: 6)` in `SettingRow`.
+pub const ROW_SPACING: f32 = 6.0;
+/// Horizontal spacing between the row label and its inline hint. Matches Mac
+/// `HStack(alignment: .firstTextBaseline, spacing: 6)` in `SettingRow`.
+pub const ROW_LABEL_HINT_SPACING: f32 = 6.0;
 /// Minimum height of a setting row. Guarantees that a bare `text` control
 /// aligns with a tall field (picker, text input) without jitter.
 pub const ROW_MIN_HEIGHT: f32 = 28.0;
 
-/// Builds a settings card shell — a rounded container carrying an optional
-/// description and an arbitrary body element.
+/// Builds a settings card shell — a rounded container carrying a bold title
+/// and an arbitrary body element.
 ///
 /// The factory is generic over the message type so cards can freely wire into
 /// whichever message enum the caller uses. Typical usage from within
@@ -71,39 +78,24 @@ pub const ROW_MIN_HEIGHT: f32 = 28.0;
 ///
 /// ```ignore
 /// let body = column![row1, row2].spacing(CARD_VERTICAL_SPACING);
-/// let card = section_card(
-///     palette,
-///     "Language",
-///     Some("Pick how Trace labels its UI."),
-///     body.into(),
-/// );
+/// let card = section_card(palette, "Language", body.into());
 /// ```
 ///
-/// Passing `None` for the description omits the caption line entirely — the
-/// title butts up against the body.
+/// The shell only carries a title plus the caller-provided body — no caption
+/// line. Cards that want an introductory description add a `text()` widget
+/// at the top of their own body; the shell intentionally stays symmetric
+/// with the Mac `SectionCard` view so the two ports can share layout
+/// reasoning.
 pub fn section_card<'a, Message: 'a>(
     palette: SettingsPalette,
     title: &'a str,
-    description: Option<&'a str>,
     body: Element<'a, Message>,
 ) -> Element<'a, Message> {
     let title_widget = text(title)
         .size(Pixels(CARD_TITLE_FONT_SIZE))
         .color(crate::theme::trace_color_to_iced(palette.section_title));
 
-    let mut inner_items: Vec<Element<'a, Message>> = Vec::with_capacity(3);
-    inner_items.push(title_widget.into());
-    if let Some(description) = description {
-        let description_widget = text(description)
-            .size(Pixels(CARD_DESCRIPTION_FONT_SIZE))
-            .color(crate::theme::trace_color_to_iced(
-                palette.section_description,
-            ));
-        inner_items.push(description_widget.into());
-    }
-    inner_items.push(body);
-
-    let inner = column(inner_items)
+    let inner = column![title_widget, body]
         .spacing(CARD_VERTICAL_SPACING)
         .width(Length::Fill);
 
@@ -114,64 +106,70 @@ pub fn section_card<'a, Message: 'a>(
         .into()
 }
 
-/// Builds a label + trailing-control row inside a card body.
+/// Builds a labeled row with an optional inline hint and a control stacked
+/// underneath.
 ///
-/// The label hugs the leading edge and the control hugs the trailing edge; a
-/// flexible [`Space`] between them absorbs the remaining width. `Length::Fill`
-/// is applied to the row, so callers don't need to size it themselves — they
-/// just drop the row into the card's body column.
+/// Layout mirrors Mac `SettingRow` in `SettingsView.swift`:
+///
+/// ```text
+/// LABEL  hint text (optional)
+/// <control>
+/// ```
+///
+/// When `hint` is `None` the label line is rendered on its own — no empty
+/// spacer, no reserved vertical space. The control sits on the next line
+/// regardless, which keeps vertical rhythm consistent across rows that mix
+/// labeled-only and labeled-with-hint fields.
 ///
 /// `control` is an arbitrary [`Element`] so the caller can pass whatever
 /// control fits (a text input, a button, a picker, a plain text caption).
-/// The row does not impose a specific alignment on the control itself — if
-/// the control has intrinsic sizing it will appear flush-right; if it uses
-/// `Length::Fill` it will absorb the remaining space after the label.
 pub fn setting_row<'a, Message: 'a>(
     palette: SettingsPalette,
     label: &'a str,
+    hint: Option<&'a str>,
     control: Element<'a, Message>,
 ) -> Element<'a, Message> {
     let label_widget = text(label)
         .size(Pixels(ROW_LABEL_FONT_SIZE))
         .color(crate::theme::trace_color_to_iced(palette.row_label));
 
-    row![
-        label_widget,
-        Space::new().width(Length::Fill).height(Length::Shrink),
-        control,
-    ]
-    .spacing(ROW_LABEL_CONTROL_SPACING)
-    .align_y(Vertical::Center)
-    .width(Length::Fill)
-    .height(Length::Shrink)
-    .into()
+    let label_line: Element<'a, Message> = if let Some(hint) = hint {
+        let hint_widget = text(hint)
+            .size(Pixels(ROW_HINT_FONT_SIZE))
+            .color(crate::theme::trace_color_to_iced(palette.muted_text));
+        row![label_widget, hint_widget]
+            .spacing(ROW_LABEL_HINT_SPACING)
+            .align_y(Vertical::Center)
+            .width(Length::Fill)
+            .into()
+    } else {
+        label_widget.into()
+    };
+
+    column![label_line, control]
+        .spacing(ROW_SPACING)
+        .width(Length::Fill)
+        .into()
 }
 
 /// Convenience helper that builds a card whose body is a column of
 /// `setting_row` elements.
 ///
-/// The Mac reference always stacks rows with a fixed vertical rhythm of
-/// 12 pt, so every card that is really just "label + control, label + control"
-/// benefits from letting callers hand in a pre-built `Vec` of rows. The card
-/// shell itself already allows arbitrary bodies via [`section_card`]; this
-/// helper exists to keep the common case terse.
+/// The Mac reference stacks rows with a fixed vertical rhythm, so every card
+/// that is really just "label + control, label + control" benefits from
+/// letting callers hand in a pre-built `Vec` of rows. The card shell itself
+/// already allows arbitrary bodies via [`section_card`]; this helper exists
+/// to keep the common case terse.
 pub fn section_card_with_rows<'a, Message: 'a>(
     palette: SettingsPalette,
     title: &'a str,
-    description: Option<&'a str>,
     rows: Vec<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     let body = column(rows)
         .spacing(CARD_VERTICAL_SPACING)
         .width(Length::Fill);
 
-    // Preserve consistent horizontal alignment even when a row returns
-    // `Length::Shrink` so cards don't collapse to min-width.
-    let bordered = container(body)
-        .width(Length::Fill)
-        .align_x(Horizontal::Left);
-
-    section_card(palette, title, description, bordered.into())
+    section_card(palette, title, body.into())
 }
 
 #[cfg(test)]
@@ -192,20 +190,10 @@ mod tests {
     }
 
     #[test]
-    fn section_card_builds_with_description() {
+    fn section_card_builds_with_simple_body() {
         let palette = sample_palette();
         let body: Element<'_, TestMsg> = text("body").into();
-        let _card = section_card(palette, "Title", Some("A short caption."), body);
-    }
-
-    #[test]
-    fn section_card_builds_without_description() {
-        // `None` description is a supported shape — some cards (e.g.
-        // "Shortcuts") render their own layout inside the body and don't need
-        // a caption line.
-        let palette = sample_palette();
-        let body: Element<'_, TestMsg> = text("body").into();
-        let _card = section_card(palette, "Title", None, body);
+        let _card = section_card(palette, "Title", body);
     }
 
     #[test]
@@ -218,15 +206,25 @@ mod tests {
         ] {
             let palette = TraceTheme::for_preset(preset).settings;
             let body: Element<'_, TestMsg> = text("body").into();
-            let _card = section_card(palette, "Title", Some("Caption"), body);
+            let _card = section_card(palette, "Title", body);
         }
     }
 
     #[test]
-    fn setting_row_builds_with_text_control() {
+    fn setting_row_builds_without_hint() {
         let palette = sample_palette();
         let control: Element<'_, TestMsg> = text("Active").into();
-        let _row = setting_row(palette, "Status", control);
+        let _row = setting_row(palette, "Status", None, control);
+    }
+
+    #[test]
+    fn setting_row_builds_with_hint() {
+        // Mac `SettingRow` accepts an optional trailing hint next to the
+        // label; the Windows port must render the same shape when the hint
+        // is present.
+        let palette = sample_palette();
+        let control: Element<'_, TestMsg> = text("Active").into();
+        let _row = setting_row(palette, "Status", Some("advanced"), control);
     }
 
     #[test]
@@ -235,7 +233,7 @@ mod tests {
         // the caller's message type.
         let palette = sample_palette();
         let control: Element<'_, TestMsg> = button(text("Click")).on_press(TestMsg::Ping).into();
-        let _row = setting_row(palette, "Action", control);
+        let _row = setting_row(palette, "Action", None, control);
     }
 
     #[test]
@@ -245,18 +243,18 @@ mod tests {
         let palette = sample_palette();
         let value = String::new();
         let control: Element<'_, TestMsg> = text_input("Path", &value).into();
-        let _row = setting_row(palette, "Notes folder", control);
+        let _row = setting_row(palette, "Notes folder", Some("Pick a folder"), control);
     }
 
     #[test]
     fn section_card_with_rows_stacks_multiple_rows() {
         let palette = sample_palette();
         let rows: Vec<Element<'_, TestMsg>> = vec![
-            setting_row(palette, "Row 1", text("A").into()),
-            setting_row(palette, "Row 2", text("B").into()),
-            setting_row(palette, "Row 3", text("C").into()),
+            setting_row(palette, "Row 1", None, text("A").into()),
+            setting_row(palette, "Row 2", Some("hint"), text("B").into()),
+            setting_row(palette, "Row 3", None, text("C").into()),
         ];
-        let _card = section_card_with_rows(palette, "Stacked", None, rows);
+        let _card = section_card_with_rows(palette, "Stacked", rows);
     }
 
     #[test]
@@ -264,23 +262,29 @@ mod tests {
         // A card with zero rows is degenerate but must still build — the
         // placeholder state when a user clears every row in a card.
         let palette = sample_palette();
-        let _card: Element<'_, TestMsg> =
-            section_card_with_rows(palette, "Empty", Some("caption"), Vec::new());
+        let _card: Element<'_, TestMsg> = section_card_with_rows(palette, "Empty", Vec::new());
     }
 
     #[test]
     fn card_metric_constants_match_mac_reference() {
-        assert_eq!(CARD_CORNER_RADIUS, 16.0);
-        assert_eq!(CARD_INNER_PADDING, 20);
-        assert_eq!(CARD_VERTICAL_SPACING, 12.0);
-        assert_eq!(CARD_TITLE_FONT_SIZE, 18.0);
-        assert_eq!(CARD_DESCRIPTION_FONT_SIZE, 13.0);
+        // Locked to Mac `SettingsView.swift` / `SectionCard`:
+        //   - RoundedRectangle(cornerRadius: 14)
+        //   - .padding(18)
+        //   - Text(title).font(.system(size: 15, weight: .bold))
+        //   - VStack(alignment: .leading, spacing: 14)
+        assert_eq!(CARD_CORNER_RADIUS, 14.0);
+        assert_eq!(CARD_INNER_PADDING, 18);
+        assert_eq!(CARD_VERTICAL_SPACING, 14.0);
+        assert_eq!(CARD_TITLE_FONT_SIZE, 15.0);
     }
 
     #[test]
     fn row_metric_constants_are_stable() {
+        // Mac `SettingRow`: VStack(spacing: 6) { HStack(spacing: 6), control }
         assert_eq!(ROW_LABEL_FONT_SIZE, 14.0);
-        assert_eq!(ROW_LABEL_CONTROL_SPACING, 12.0);
+        assert_eq!(ROW_HINT_FONT_SIZE, 13.0);
+        assert_eq!(ROW_SPACING, 6.0);
+        assert_eq!(ROW_LABEL_HINT_SPACING, 6.0);
         assert_eq!(ROW_MIN_HEIGHT, 28.0);
     }
 }

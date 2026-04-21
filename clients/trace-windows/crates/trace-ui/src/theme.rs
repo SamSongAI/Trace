@@ -234,7 +234,8 @@ pub fn settings_shell_style(palette: SettingsPalette) -> impl Fn(&Theme) -> cont
 /// Container style for a settings card (the rounded rectangle that wraps a
 /// related group of rows). Background is [`SettingsPalette::card_background`],
 /// with a hairline border tuned by preset (`card_border`) and the Mac
-/// reference's 16-pt corner radius.
+/// reference's 14-pt corner radius (`SectionCard.RoundedRectangle(cornerRadius: 14)`
+/// in `SettingsView.swift`).
 pub fn card_container_style(palette: SettingsPalette) -> impl Fn(&Theme) -> container::Style {
     move |_theme: &Theme| {
         container::Style::default()
@@ -243,7 +244,7 @@ pub fn card_container_style(palette: SettingsPalette) -> impl Fn(&Theme) -> cont
             )))
             .color(trace_color_to_iced(palette.section_title))
             .border(Border {
-                radius: 16.0.into(),
+                radius: 14.0.into(),
                 width: 1.0,
                 color: trace_color_to_iced(palette.card_border),
             })
@@ -577,14 +578,15 @@ mod tests {
     }
 
     #[test]
-    fn card_container_style_uses_sixteen_point_radius() {
-        // Phase 12 locks the 16-pt corner radius to match Mac
-        // `SettingsView.swift`. A drift here would make cards look sharper
-        // or softer than the reference.
+    fn card_container_style_uses_fourteen_point_radius() {
+        // Phase 12 locks the 14-pt corner radius to match Mac
+        // `SettingsView.swift`'s private `SectionCard` view
+        // (`RoundedRectangle(cornerRadius: 14, …)`). A drift here would make
+        // cards look sharper or softer than the reference.
         let palette = TraceTheme::for_preset(ThemePreset::Light).settings;
         let style_fn = card_container_style(palette);
         let style = style_fn(&Theme::Light);
-        assert_eq!(style.border.radius.top_left, 16.0);
+        assert_eq!(style.border.radius.top_left, 14.0);
         assert_eq!(style.border.width, 1.0);
     }
 
