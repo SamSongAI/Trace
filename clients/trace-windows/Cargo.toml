@@ -27,11 +27,13 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # `tokio` enables `iced::time::every` for the toast auto-dismiss subscription.
 iced = { version = "~0.14", features = ["tokio"] }
 # `rfd` provides native folder/file dialogs used by the settings window's
-# vault / inbox Browse buttons. `xdg-portal` is the Linux backend; Windows
-# and macOS fall back to their native implementations automatically. The
-# `tokio` feature pairs with iced's async runtime so `pick_folder().await`
-# can be awaited from inside an `iced::Task::perform`.
-rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
+# vault / inbox Browse buttons. The `tokio` feature pairs with iced's async
+# runtime so `pick_folder().await` can be awaited from inside an
+# `iced::Task::perform`.
+#
+# Linux 不是支持目标;只保留 tokio feature 让 macOS (AppKit) 和 Windows (COM)
+# 开箱即用,避免 xdg-portal 拖入 D-Bus/ashpd 依赖膨胀 Windows 二进制。
+rfd = { version = "0.15", default-features = false, features = ["tokio"] }
 
 # Windows platform dependencies
 windows = "0.58"
