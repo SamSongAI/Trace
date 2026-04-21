@@ -24,6 +24,7 @@
 //! windows.
 
 mod quick_sections;
+mod shortcuts;
 pub mod storage;
 mod threads;
 pub mod tiles;
@@ -1022,6 +1023,11 @@ fn build_cards(state: &SettingsApp) -> Element<'_, SettingsMessage> {
             &state.vault_path,
         ));
     }
+
+    // Shortcuts card: renders unconditionally under every write mode. The
+    // keyboard configuration is not scoped to a specific Storage layout, so
+    // it sits after the write-mode–specific cards in the scroll.
+    cards.push(shortcuts::shortcuts_card(state, palette));
 
     column(cards)
         .spacing(SETTINGS_CARD_STACK_SPACING)
@@ -2793,5 +2799,66 @@ mod tests {
         // Excluding Send should surface Append next.
         let found = conflicting_target(&app, spec, ShortcutTarget::Send);
         assert_eq!(found, Some(ShortcutTarget::Append));
+    }
+
+    // --- Sub-task 7 Commit 3: Shortcuts card in build_cards dispatch ------
+
+    #[test]
+    fn build_cards_renders_shortcuts_card_under_dimension_mode() {
+        let settings = AppSettings {
+            note_write_mode: WriteMode::Dimension,
+            ..AppSettings::default()
+        };
+        let app = SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(settings),
+        );
+        let _element: Element<'_, SettingsMessage> = build_cards(&app);
+    }
+
+    #[test]
+    fn build_cards_renders_shortcuts_card_under_thread_mode() {
+        let settings = AppSettings {
+            note_write_mode: WriteMode::Thread,
+            ..AppSettings::default()
+        };
+        let app = SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(settings),
+        );
+        let _element: Element<'_, SettingsMessage> = build_cards(&app);
+    }
+
+    #[test]
+    fn build_cards_renders_shortcuts_card_under_file_mode() {
+        let settings = AppSettings {
+            note_write_mode: WriteMode::File,
+            ..AppSettings::default()
+        };
+        let app = SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(settings),
+        );
+        let _element: Element<'_, SettingsMessage> = build_cards(&app);
+    }
+
+    #[test]
+    fn build_cards_renders_shortcuts_card_while_recording() {
+        // Exercise the recording-chip branch through `build_cards` so a
+        // dropped match arm in the card renderer would surface here rather
+        // than at first paint.
+        let mut app = fresh_app();
+        app.recording_target = Some(ShortcutTarget::Create);
+        let _element: Element<'_, SettingsMessage> = build_cards(&app);
+    }
+
+    #[test]
+    fn build_cards_renders_shortcuts_card_with_validation_error_footer() {
+        // The validation-error footer only surfaces when the shadow carries
+        // a message. A separate app keeps the scope clean from the recording
+        // variant above.
+        let mut app = fresh_app();
+        app.shortcut_recorder_message = Some("conflict".to_string());
+        let _element: Element<'_, SettingsMessage> = build_cards(&app);
     }
 }
