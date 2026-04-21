@@ -23,9 +23,18 @@
 //!   ([`window::ScreenRect`], [`window::place_on_best_monitor`]) is
 //!   cross-platform and testable on any host; the HWND-taking functions
 //!   are Windows-only.
+//! - [`app_paths`] — Resolves the Windows known folders
+//!   `FOLDERID_RoamingAppData` and `FOLDERID_LocalAppData` to
+//!   `%APPDATA%\Trace` and `%LOCALAPPDATA%\Trace` respectively, creating
+//!   the sub-directory when absent. Convenience helpers
+//!   [`app_paths::settings_file_path`] and [`app_paths::log_dir`] cover
+//!   the two most common lookups. The error type
+//!   [`app_paths::AppPathsError`] is cross-platform; the path functions
+//!   themselves are Windows-only.
 
 #![cfg_attr(not(windows), allow(dead_code))]
 
+pub mod app_paths;
 pub mod global_hotkey;
 pub mod system_tray;
 pub mod window;
