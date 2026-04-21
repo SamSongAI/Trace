@@ -9,6 +9,10 @@
 //!   functions driving the iced application.
 //! * [`widgets`] — pure factories for header, editor, footer, and the toast
 //!   overlay.
+//! * [`settings`] — `SettingsApp` state, `SettingsMessage`, and the
+//!   `update/view/theme/subscription` functions that drive the second iced
+//!   window (settings). Opened by [`app::CaptureApp`] and routed through
+//!   `iced::daemon` in `trace-app`.
 //! * [`platform`] — side-effect hooks (topmost bit, foreground restore) that
 //!   `trace-app` wires up to `trace-platform`. Keeps `trace-ui` free of
 //!   platform dependencies.
@@ -16,5 +20,6 @@
 pub mod app;
 pub mod fonts;
 pub mod platform;
+pub mod settings;
 pub mod theme;
 pub mod widgets;

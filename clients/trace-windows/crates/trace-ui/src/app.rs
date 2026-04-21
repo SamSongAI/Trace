@@ -104,9 +104,17 @@ pub enum Message {
     /// Pin button tap — toggles [`CaptureApp::pinned`] and notifies the
     /// platform handler so the window's topmost bit stays in sync.
     PinToggled,
-    /// Settings button tap. Recorded for assertions; opening the settings
-    /// window is a Phase 12 task.
+    /// Settings button tap. Opens the settings window via
+    /// [`iced::window::open`] if one isn't already visible, otherwise focuses
+    /// the existing window via [`iced::window::gain_focus`]. The window id is
+    /// captured through the [`Self::SettingsWindowOpened`] variant below.
     SettingsRequested,
+    /// Emitted by the Task returned from [`iced::window::open`] once the
+    /// settings window has been created and its runtime id is known.
+    /// Stores the id into [`CaptureApp::settings_window_id`] so future
+    /// [`Self::SettingsRequested`] clicks can re-focus an already-open window
+    /// instead of spawning a second instance.
+    SettingsWindowOpened(window::Id),
     /// Ctrl+Enter / Send: write the current editor content as a **new** entry
     /// via the writer appropriate for the active [`WriteMode`], then clear
     /// the editor and close the panel if not pinned.
@@ -192,9 +200,11 @@ pub struct CaptureApp {
     /// Whether the panel wants to stay on top. The actual z-order effect is
     /// routed through [`CaptureApp::platform_handler`] in Phase 11.
     pub pinned: bool,
-    /// Whether a settings-open request was observed. Exposed mainly for
-    /// testability — Phase 12 will upgrade this to an outbound action.
-    pub settings_requested: bool,
+    /// Runtime id of the settings window once it has been opened, or [`None`]
+    /// while the window is closed. The [`Message::SettingsRequested`] handler
+    /// uses this as a guard: `None` spawns a new window, `Some(id)` re-focuses
+    /// the existing one. Captured on the first [`Message::SettingsWindowOpened`].
+    pub settings_window_id: Option<window::Id>,
     /// Sections as configured by the user. Phase 10 carries an owned copy so
     /// the view layer doesn't need to reach into `AppSettings`.
     pub sections: Vec<NoteSection>,
@@ -269,7 +279,7 @@ impl CaptureApp {
             selected_thread: None,
             document_title: String::new(),
             pinned: false,
-            settings_requested: false,
+            settings_window_id: None,
             sections,
             threads,
             settings,
@@ -349,9 +359,31 @@ pub fn update(state: &mut CaptureApp, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::SettingsRequested => {
-            // Recorded for test visibility. Phase 12 upgrades this to an
-            // outbound task that opens the settings window.
-            state.settings_requested = true;
+            // If a settings window is already open, focus it instead of
+            // spawning a second instance. `gain_focus` matches Mac's
+            // "click gear → bring existing window to front" UX.
+            if let Some(id) = state.settings_window_id {
+                window::gain_focus(id)
+            } else {
+                // No settings window yet — open one. `window::open` returns
+                // `(Id, Task<Id>)`; we immediately assign the allocated id to
+                // the app state so rapid double-clicks on the gear button
+                // don't spawn two windows while the `open` effect is still
+                // in-flight. The returned Task resolves to the same id, at
+                // which point we also emit `SettingsWindowOpened` as a
+                // belt-and-braces sync.
+                let settings = crate::settings::window_settings();
+                let (id, task) = window::open(settings);
+                state.settings_window_id = Some(id);
+                task.map(Message::SettingsWindowOpened)
+            }
+        }
+        Message::SettingsWindowOpened(id) => {
+            // Idempotent: `SettingsRequested` already assigned the id when
+            // it issued `window::open`. This variant lets the subscription
+            // layer re-sync in scenarios where the window is opened by a
+            // different path (e.g. a tray menu action in a later phase).
+            state.settings_window_id = Some(id);
             Task::none()
         }
         Message::SendNote => {
@@ -868,7 +900,7 @@ mod tests {
     fn new_is_not_pinned() {
         let app = fresh_app();
         assert!(!app.pinned);
-        assert!(!app.settings_requested);
+        assert!(app.settings_window_id.is_none());
     }
 
     #[test]
@@ -942,14 +974,56 @@ mod tests {
     }
 
     #[test]
-    fn settings_requested_is_recorded_without_side_effects() {
+    fn settings_requested_assigns_a_window_id_optimistically() {
+        // Phase 12 sub-task 1: clicking the gear button emits
+        // `window::open` and eagerly stores the allocated id so a second
+        // click made before the runtime fires `SettingsWindowOpened`
+        // re-focuses the in-flight window instead of spawning a second
+        // one. We can't observe the Task directly, but we can assert the
+        // state mutation.
         let mut app = fresh_app();
-        assert!(!app.settings_requested);
-        apply(&mut app, Message::SettingsRequested);
-        assert!(app.settings_requested);
-        // Phase 10 guarantees no other state changes.
+        assert!(app.settings_window_id.is_none());
+        let _ = update(&mut app, Message::SettingsRequested);
+        assert!(
+            app.settings_window_id.is_some(),
+            "first SettingsRequested allocates and stores a window id"
+        );
+        // Unrelated state must not have drifted.
         assert_eq!(app.write_mode, WriteMode::Dimension);
         assert!(app.selected_section.is_none());
+    }
+
+    #[test]
+    fn settings_requested_twice_keeps_the_same_window_id() {
+        // Once the window is open, a second click must focus the existing
+        // window (via `window::gain_focus`) rather than spawn a new one.
+        // The stored id must remain stable across the two messages so the
+        // focus-path finds the same window.
+        let mut app = fresh_app();
+        let _ = update(&mut app, Message::SettingsRequested);
+        let first = app
+            .settings_window_id
+            .expect("first SettingsRequested stored an id");
+        let _ = update(&mut app, Message::SettingsRequested);
+        assert_eq!(
+            app.settings_window_id,
+            Some(first),
+            "second SettingsRequested must reuse the existing window id"
+        );
+    }
+
+    #[test]
+    fn settings_window_opened_records_the_runtime_id() {
+        // The `Task<Id>` returned by `window::open` eventually delivers
+        // `SettingsWindowOpened(id)` into `update`. The handler must store
+        // the id so the subsequent re-focus path works even when the
+        // window was opened outside the `SettingsRequested` flow (e.g. a
+        // tray-menu action in a later phase).
+        let mut app = fresh_app();
+        assert!(app.settings_window_id.is_none());
+        let id = window::Id::unique();
+        apply(&mut app, Message::SettingsWindowOpened(id));
+        assert_eq!(app.settings_window_id, Some(id));
     }
 
     #[test]

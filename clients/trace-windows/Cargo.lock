@@ -3008,6 +3008,7 @@ dependencies = [
 name = "trace-app"
 version = "0.1.0"
 dependencies = [
+ "iced",
  "trace-core",
  "trace-platform",
  "trace-ui",

@@ -529,6 +529,13 @@ impl L10n {
         pick(lang, "设置", "設定", "Settings")
     }
 
+    /// Title of the settings window itself (as opposed to the gear button's
+    /// tooltip in the capture panel header). Mac renders the same literal in
+    /// both spots, so the Windows port shares the translation table.
+    pub fn settings(lang: Language) -> &'static str {
+        pick(lang, "设置", "設定", "Settings")
+    }
+
     // --- Toast & Alerts
 
     pub fn empty_not_saved(lang: Language) -> &'static str {
@@ -1486,6 +1493,13 @@ mod tests {
         assert_eq!(L10n::settings_tooltip(Language::Zh), "设置");
         assert_eq!(L10n::settings_tooltip(Language::Ja), "設定");
         assert_eq!(L10n::settings_tooltip(Language::En), "Settings");
+    }
+
+    #[test]
+    fn settings_window_title() {
+        assert_eq!(L10n::settings(Language::Zh), "设置");
+        assert_eq!(L10n::settings(Language::Ja), "設定");
+        assert_eq!(L10n::settings(Language::En), "Settings");
     }
 
     // --- Toast & Alerts

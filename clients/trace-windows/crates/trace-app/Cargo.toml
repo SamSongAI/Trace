@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 trace-core = { path = "../trace-core" }
 trace-ui = { path = "../trace-ui" }
+iced = { workspace = true }
 
 # `trace-platform` only pulls in real Windows APIs on Windows targets, so we
 # only link it on Windows too. On macOS/Linux the binary compiles as a no-op.
