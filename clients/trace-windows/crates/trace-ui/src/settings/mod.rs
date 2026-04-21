@@ -25,6 +25,7 @@
 
 mod quick_sections;
 pub mod storage;
+mod threads;
 pub mod tiles;
 pub mod widgets;
 
@@ -736,6 +737,19 @@ fn build_cards(state: &SettingsApp) -> Element<'_, SettingsMessage> {
             palette,
             state.language,
             &state.section_titles,
+        ));
+    }
+
+    // Mirrors Mac `SettingsView.swift`'s `if writeMode == .thread` gate:
+    // the Threads management card surfaces only under Thread mode, directly
+    // after the Storage card. Dimension / File modes keep their existing
+    // card ordering.
+    if state.write_mode == WriteMode::Thread {
+        cards.push(threads::threads_card(
+            palette,
+            state.language,
+            &state.thread_configs,
+            &state.vault_path,
         ));
     }
 
@@ -2086,5 +2100,81 @@ mod tests {
         let (name, target) = unique_new_thread_name(&existing, "New Thread");
         assert_eq!(name, "New Thread 1");
         assert_eq!(target, "New Thread 1.md");
+    }
+
+    // --- Sub-task 6 build_cards dispatch -------------------------------
+    //
+    // The Threads card must only surface under Thread mode so the Dimension
+    // / File modes keep their Mac-parity card ordering. These tests smoke
+    // the `build_cards` dispatch for each mode; a missing arm would either
+    // panic at construction or compile away silently.
+
+    #[test]
+    fn build_cards_in_thread_mode_shows_threads_card() {
+        let settings = AppSettings {
+            note_write_mode: WriteMode::Thread,
+            ..AppSettings::default()
+        };
+        let app = SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(settings),
+        );
+        assert_eq!(app.write_mode, WriteMode::Thread);
+        let _element: Element<'_, SettingsMessage> = build_cards(&app);
+    }
+
+    #[test]
+    fn build_cards_in_dimension_mode_hides_threads_card() {
+        // Dimension mode ships the Quick Sections card instead; the Threads
+        // card must stay out so the Dimension card stack matches Mac.
+        let settings = AppSettings {
+            note_write_mode: WriteMode::Dimension,
+            ..AppSettings::default()
+        };
+        let app = SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(settings),
+        );
+        let _element: Element<'_, SettingsMessage> = build_cards(&app);
+    }
+
+    #[test]
+    fn build_cards_in_file_mode_hides_threads_card() {
+        // File mode has its own inbox row inside the Storage card; the
+        // Threads card must stay out of File mode so neither card surface
+        // duplicates.
+        let settings = AppSettings {
+            note_write_mode: WriteMode::File,
+            ..AppSettings::default()
+        };
+        let app = SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(settings),
+        );
+        let _element: Element<'_, SettingsMessage> = build_cards(&app);
+    }
+
+    #[test]
+    fn build_cards_in_thread_mode_builds_across_all_languages() {
+        // Each language must paint the threads card without panicking; a
+        // stale L10n key would show up here at test time rather than at
+        // first paint.
+        for lang in [
+            Language::SystemDefault,
+            Language::Zh,
+            Language::En,
+            Language::Ja,
+        ] {
+            let settings = AppSettings {
+                language: lang,
+                note_write_mode: WriteMode::Thread,
+                ..AppSettings::default()
+            };
+            let app = SettingsApp::new(
+                TraceTheme::for_preset(ThemePreset::Dark),
+                Arc::new(settings),
+            );
+            let _element: Element<'_, SettingsMessage> = build_cards(&app);
+        }
     }
 }
