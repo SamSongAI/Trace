@@ -91,7 +91,7 @@ fn app_with_vault(tempdir: &TempDir) -> CaptureApp {
         TraceTheme::for_preset(ThemePreset::Dark),
         sample_sections(),
         sample_threads(),
-        settings,
+        Arc::new(settings),
     )
 }
 
@@ -107,7 +107,7 @@ fn empty_send_raises_toast_and_leaves_editor_untouched() {
         TraceTheme::for_preset(ThemePreset::Dark),
         sample_sections(),
         sample_threads(),
-        AppSettings::default(),
+        Arc::new(AppSettings::default()),
     );
     assert!(app.toast.is_none());
     apply(&mut app, Message::SendNote);
@@ -165,7 +165,7 @@ fn mode_cycle_rotates_dimension_thread_file_dimension() {
         TraceTheme::for_preset(ThemePreset::Dark),
         sample_sections(),
         sample_threads(),
-        AppSettings::default(),
+        Arc::new(AppSettings::default()),
     );
     assert_eq!(app.write_mode, WriteMode::Dimension);
     apply(&mut app, Message::CycleModeForward);
@@ -183,7 +183,7 @@ fn close_panel_invokes_platform_restore_foreground() {
         TraceTheme::for_preset(ThemePreset::Dark),
         sample_sections(),
         sample_threads(),
-        AppSettings::default(),
+        Arc::new(AppSettings::default()),
     )
     .with_platform_handler(spy.clone());
 
@@ -202,7 +202,7 @@ fn close_panel_preserves_editor_draft() {
         TraceTheme::for_preset(ThemePreset::Dark),
         sample_sections(),
         sample_threads(),
-        AppSettings::default(),
+        Arc::new(AppSettings::default()),
     );
     app.editor_content = text_editor::Content::with_text("draft in progress");
     assert_eq!(app.editor_text(), "draft in progress");
@@ -224,7 +224,7 @@ fn pin_toggled_then_focus_lost_does_not_close() {
         TraceTheme::for_preset(ThemePreset::Dark),
         sample_sections(),
         sample_threads(),
-        AppSettings::default(),
+        Arc::new(AppSettings::default()),
     )
     .with_platform_handler(spy.clone());
 

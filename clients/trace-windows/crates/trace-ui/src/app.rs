@@ -201,12 +201,14 @@ pub struct CaptureApp {
     /// Threads as configured by the user. Already sorted by `order` so
     /// rendering is deterministic.
     pub threads: Vec<ThreadConfig>,
-    /// Settings snapshot used by the writers in [`Message::SendNote`] /
-    /// [`Message::AppendNote`]. We hold an owned [`AppSettings`] so writers
-    /// can be constructed cheaply per-call without borrowing across the
-    /// iced event loop; Phase 12 swaps this to an `Arc` when settings-edit
-    /// flows need live reload.
-    pub settings: AppSettings,
+    /// Settings snapshot shared with the writers in [`Message::SendNote`] /
+    /// [`Message::AppendNote`]. Wrapped in an [`Arc`] so each save can
+    /// construct a writer via a cheap pointer clone rather than deep-cloning
+    /// `AppSettings` (which owns non-trivial `Vec<ThreadConfig>` and
+    /// `Vec<NoteSection>` allocations). The blanket `DailyNoteSettings` /
+    /// `ThreadSettings` / `FileWriterSettings` impls for `Arc<T>` let the
+    /// writers accept the `Arc` directly.
+    pub settings: Arc<AppSettings>,
     /// Message shown in the overlay toast pill. `None` hides the overlay.
     /// Mutated by [`Message::ToastShow`] / [`Message::ToastDismiss`]; rendered
     /// via [`iced::widget::stack`] on top of the main column.
@@ -234,10 +236,13 @@ pub struct CaptureApp {
 
 impl CaptureApp {
     /// Builds a fresh [`CaptureApp`] seeded from a resolved [`TraceTheme`],
-    /// the configured sections, the configured threads, and an
+    /// the configured sections, the configured threads, and a shared
     /// [`AppSettings`] snapshot used by the writers in
     /// [`Message::SendNote`] / [`Message::AppendNote`].
     ///
+    /// `settings` is taken as `Arc<AppSettings>` so every save can clone
+    /// the `Arc` (pointer bump) instead of the inner `AppSettings` (deep
+    /// allocation including `Vec<ThreadConfig>` and `Vec<NoteSection>`).
     /// The editor starts empty, the write mode defaults to
     /// [`WriteMode::default`] (dimension), no chip is highlighted, no toast is
     /// visible, no window id has been captured yet, and
@@ -248,7 +253,7 @@ impl CaptureApp {
         theme: TraceTheme,
         sections: Vec<NoteSection>,
         threads: Vec<ThreadConfig>,
-        settings: AppSettings,
+        settings: Arc<AppSettings>,
     ) -> Self {
         // Sort threads by `order` eagerly so the footer grid renders in a
         // stable order without re-sorting per frame.
@@ -747,7 +752,7 @@ pub(crate) fn dispatch_save(state: &mut CaptureApp, mode: SaveMode) -> SaveOutco
             let Some(section) = section else {
                 return SaveOutcome::NoSectionAvailable;
             };
-            let writer = DailyNoteWriter::new(state.settings.clone());
+            let writer = DailyNoteWriter::new(Arc::clone(&state.settings));
             writer
                 .save(&text, &section, mode, now)
                 .map(|written| written.map(|_| ()))
@@ -762,7 +767,7 @@ pub(crate) fn dispatch_save(state: &mut CaptureApp, mode: SaveMode) -> SaveOutco
                 // re-pick.
                 return SaveOutcome::ThreadNotSelected;
             };
-            let writer = ThreadWriter::new(state.settings.clone());
+            let writer = ThreadWriter::new(Arc::clone(&state.settings));
             writer
                 .save(&text, &thread, mode, now)
                 .map(|written| written.map(|_| ()))
@@ -770,7 +775,7 @@ pub(crate) fn dispatch_save(state: &mut CaptureApp, mode: SaveMode) -> SaveOutco
         WriteMode::File => {
             // `FileWriter::save` has no `SaveMode` parameter — Append
             // degrades to a fresh-file Send, matching Mac.
-            let writer = FileWriter::new(state.settings.clone());
+            let writer = FileWriter::new(Arc::clone(&state.settings));
             let title_opt = if state.document_title.trim().is_empty() {
                 None
             } else {
@@ -818,7 +823,7 @@ mod tests {
             TraceTheme::for_preset(ThemePreset::Dark),
             sample_sections(),
             sample_threads(),
-            AppSettings::default(),
+            Arc::new(AppSettings::default()),
         )
     }
 
@@ -870,7 +875,7 @@ mod tests {
             TraceTheme::for_preset(ThemePreset::Dark),
             sample_sections(),
             threads,
-            AppSettings::default(),
+            Arc::new(AppSettings::default()),
         );
         let names: Vec<_> = app.threads.iter().map(|t| t.name.clone()).collect();
         assert_eq!(names, vec!["a", "c", "b"]);
@@ -1088,7 +1093,7 @@ mod tests {
             TraceTheme::for_preset(ThemePreset::Dark),
             sample_sections(),
             sample_threads(),
-            settings,
+            Arc::new(settings),
         );
         assert_eq!(app.settings.vault_path, "/tmp/trace-phase11");
     }
@@ -1187,7 +1192,7 @@ mod tests {
             TraceTheme::for_preset(ThemePreset::Dark),
             sample_sections(),
             threads,
-            settings,
+            Arc::new(settings),
         )
     }
 
@@ -1311,7 +1316,7 @@ mod tests {
             TraceTheme::for_preset(ThemePreset::Dark),
             sample_sections(),
             sample_threads(),
-            settings,
+            Arc::new(settings),
         );
         write_text(&mut app, "body");
         let outcome = dispatch_save(&mut app, SaveMode::CreateNewEntry);
