@@ -92,12 +92,15 @@ impl ScreenRect {
     /// 4K monitors (~8M pixels) can never overflow. Returns 0 if the rects
     /// don't intersect.
     pub fn intersection_area(&self, other: &ScreenRect) -> i64 {
-        let left = self.left.max(other.left);
-        let top = self.top.max(other.top);
-        let right = self.right.min(other.right);
-        let bottom = self.bottom.min(other.bottom);
-        let w = (right - left).max(0) as i64;
-        let h = (bottom - top).max(0) as i64;
+        // Cast to i64 *before* subtracting: inverted rects with extreme
+        // coords (see the rect docs — `right < left` is legal input) can
+        // otherwise overflow the i32 subtraction and panic in debug builds.
+        let left = self.left.max(other.left) as i64;
+        let top = self.top.max(other.top) as i64;
+        let right = self.right.min(other.right) as i64;
+        let bottom = self.bottom.min(other.bottom) as i64;
+        let w = (right - left).max(0);
+        let h = (bottom - top).max(0);
         w * h
     }
 
@@ -245,6 +248,7 @@ mod imp {
     use super::{ScreenRect, WindowError};
 
     use std::mem::size_of;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
 
     use windows::Win32::Foundation::{
         GetLastError, SetLastError, BOOL, HWND, LPARAM, RECT, TRUE, WIN32_ERROR,
@@ -499,6 +503,16 @@ mod imp {
     /// [`WindowError::InvalidWindow`] without attempting the call — the
     /// caller is expected to treat this as a silent no-op (the user
     /// closed the previous window while our panel was open).
+    ///
+    /// Unlike [`bring_to_foreground`], this function intentionally does
+    /// **not** fall back to `AttachThreadInput` when `SetForegroundWindow`
+    /// returns FALSE. Restoring focus to the previous app is a courtesy,
+    /// not a contract: if Windows has already granted foreground rights
+    /// to another process (e.g. the user Alt-Tabbed while our panel was
+    /// closing), forcing focus back would be user-hostile. Callers should
+    /// treat a returned [`WindowError::SetForegroundFailed`] as a benign
+    /// signal ("the user has moved on; best-effort is satisfied") rather
+    /// than a real error worth surfacing.
     pub fn restore_foreground(previous_hwnd_raw: isize) -> Result<(), WindowError> {
         let hwnd = HWND(previous_hwnd_raw as *mut _);
         if !unsafe { IsWindow(hwnd) }.as_bool() {
@@ -530,25 +544,40 @@ mod imp {
         _rect: *mut RECT,
         lparam: LPARAM,
     ) -> BOOL {
-        if lparam.0 == 0 {
-            return BOOL(0); // defensive — shouldn't happen
-        }
-        let acc = &mut *(lparam.0 as *mut Vec<(ScreenRect, bool)>);
+        // SAFETY: a panic that escapes this callback would unwind across
+        // the `EnumDisplayMonitors` FFI boundary, which is abort-inducing
+        // since Rust 1.71. Even "can't happen" panics (e.g. allocator OOM
+        // inside `Vec::push`) must not escape, so we defensively
+        // `catch_unwind` the whole body. On panic we return `BOOL(1)` to
+        // skip this monitor and continue enumeration — the fallback in
+        // `primary_monitor_work_area` degrades gracefully for a missing
+        // entry, which is strictly better than aborting the process.
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            if lparam.0 == 0 {
+                return BOOL(0); // defensive — shouldn't happen
+            }
+            let acc = &mut *(lparam.0 as *mut Vec<(ScreenRect, bool)>);
 
-        let mut info = MONITORINFO {
-            cbSize: size_of::<MONITORINFO>() as u32,
-            ..Default::default()
-        };
-        if !GetMonitorInfoW(hmonitor, &mut info).as_bool() {
-            // Skip this monitor and continue enumeration — returning
-            // BOOL(0) would abort the whole enumeration, which is too
-            // aggressive for a per-monitor failure.
-            return BOOL(1);
-        }
+            let mut info = MONITORINFO {
+                cbSize: size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
+            if !GetMonitorInfoW(hmonitor, &mut info).as_bool() {
+                // Skip this monitor and continue enumeration — returning
+                // BOOL(0) would abort the whole enumeration, which is too
+                // aggressive for a per-monitor failure.
+                return BOOL(1);
+            }
 
-        let is_primary = info.dwFlags & MONITORINFOF_PRIMARY != 0;
-        acc.push((rect_to_screen(&info.rcWork), is_primary));
-        BOOL(1)
+            let is_primary = info.dwFlags & MONITORINFOF_PRIMARY != 0;
+            acc.push((rect_to_screen(&info.rcWork), is_primary));
+            BOOL(1)
+        }));
+
+        match result {
+            Ok(bool_val) => bool_val,
+            Err(_) => BOOL(1),
+        }
     }
 
     fn rect_to_screen(r: &RECT) -> ScreenRect {
@@ -630,6 +659,20 @@ mod tests {
         assert_eq!(overlap, 8_294_400);
         // Sanity: the return type is i64 so we can assign without cast.
         let _: i64 = overlap;
+    }
+
+    #[test]
+    fn screen_rect_intersection_area_extreme_inverted_does_not_panic() {
+        // `ScreenRect` declares inverted rects (`right < left`, etc.)
+        // as legal input. A naïve implementation that does the subtract
+        // in i32 before widening will panic in debug builds when the
+        // coords approach i32 extremes. Two such inverted rects should
+        // compute a zero-area intersection without panicking.
+        let a = ScreenRect::new(i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+        let b = ScreenRect::new(0, 0, 100, 100);
+        assert_eq!(a.intersection_area(&b), 0);
+        assert_eq!(b.intersection_area(&a), 0);
+        assert_eq!(a.intersection_area(&a), 0);
     }
 
     #[test]
