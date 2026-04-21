@@ -33,15 +33,26 @@
 
 use std::sync::Arc;
 
+use chrono::Utc;
 use iced::widget::{column, container, text_editor, Space};
 use iced::{window, Task};
 use iced::{Element, Length, Size, Theme};
-use trace_core::{AppSettings, NoteSection, ThreadConfig, TraceTheme, WriteMode};
+use trace_core::{
+    AppSettings, DailyNoteWriter, FileWriter, NoteSection, SaveMode, ThreadConfig, ThreadWriter,
+    TraceTheme, WriteMode,
+};
 use uuid::Uuid;
 
 use crate::platform::PlatformHandler;
 use crate::theme::{panel_container_style, separator_container_style, to_iced_theme};
 use crate::widgets;
+
+/// User-facing toast message shown when the editor is empty on Send/Append.
+/// Chinese literal per Phase 11 plan; L10n wiring lands in Phase 12.
+pub const TOAST_EMPTY_NOT_SAVED: &str = "空内容未保存";
+/// User-facing toast message shown when Thread mode is active but no thread
+/// chip has been selected yet.
+pub const TOAST_THREAD_NOT_SELECTED: &str = "请先选择一个线程";
 
 /// Initial logical width of the capture panel.
 pub const DEFAULT_PANEL_WIDTH: f32 = 440.0;
@@ -304,14 +315,8 @@ pub fn update(state: &mut CaptureApp, message: Message) -> Task<Message> {
             state.settings_requested = true;
             Task::none()
         }
-        Message::SendNote => {
-            // Writer dispatch lands in sub-task 3.
-            Task::none()
-        }
-        Message::AppendNote => {
-            // Writer dispatch lands in sub-task 3.
-            Task::none()
-        }
+        Message::SendNote => dispatch_save(state, SaveMode::CreateNewEntry).into_task(),
+        Message::AppendNote => dispatch_save(state, SaveMode::AppendToLatestEntry).into_task(),
         Message::CycleModeForward => {
             state.write_mode = state.write_mode.next();
             Task::none()
@@ -405,6 +410,139 @@ pub fn window_settings() -> window::Settings {
         decorations: false,
         transparent: false,
         ..window::Settings::default()
+    }
+}
+
+/// Inspectable outcome of [`dispatch_save`]. Kept separate from the
+/// [`Task<Message>`] return so unit tests can reason about the decision
+/// without dismantling iced's task machinery, which exposes no public API
+/// for peeking at queued messages.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SaveOutcome {
+    /// Guard failure — editor text was empty or whitespace-only.
+    EmptyGuard,
+    /// Guard failure — Thread mode is active but no thread is selected, or
+    /// the previously selected thread id is no longer configured.
+    ThreadNotSelected,
+    /// Guard failure — Dimension mode is active but the configured section
+    /// list is empty. A pathological settings shape.
+    NoSectionAvailable,
+    /// Writer returned `Ok(None)` — the trimmed text was empty after the
+    /// writer re-trimmed. Unreachable if `EmptyGuard` fired first, but we
+    /// still translate it to a toast (the writer is the source of truth).
+    WriterSilentNoop,
+    /// Writer succeeded. Callers must clear the editor and close the
+    /// panel.
+    Written,
+    /// Writer returned an error. The payload is the error's `to_string()`
+    /// so tests can inspect the user-visible toast text.
+    WriterError(String),
+}
+
+impl SaveOutcome {
+    /// Translates the outcome into the iced task that feeds the next
+    /// [`update`] pass.
+    fn into_task(self) -> Task<Message> {
+        match self {
+            SaveOutcome::EmptyGuard => {
+                Task::done(Message::ToastShow(TOAST_EMPTY_NOT_SAVED.to_string()))
+            }
+            SaveOutcome::ThreadNotSelected => {
+                Task::done(Message::ToastShow(TOAST_THREAD_NOT_SELECTED.to_string()))
+            }
+            SaveOutcome::NoSectionAvailable => {
+                Task::done(Message::ToastShow("未找到可用的章节".to_string()))
+            }
+            SaveOutcome::WriterSilentNoop => {
+                Task::done(Message::ToastShow(TOAST_EMPTY_NOT_SAVED.to_string()))
+            }
+            SaveOutcome::Written => Task::done(Message::ClosePanel),
+            SaveOutcome::WriterError(msg) => Task::done(Message::ToastShow(msg)),
+        }
+    }
+}
+
+/// Drives the `SendNote` / `AppendNote` handlers.
+///
+/// Guards are applied in the UI layer (empty text, thread-mode-requires-
+/// selection) so the user sees a toast immediately — the writers also guard
+/// internally but toast dispatch lives here. On success the editor is
+/// cleared to match Mac's `CaptureViewModel.save`.
+///
+/// The function is synchronous: trace-core writers are cheap to construct
+/// and I/O is small (single markdown file), so blocking the UI thread for a
+/// few milliseconds is simpler than threading an async boundary through
+/// iced's task machinery. Phase 13 can lift this into `Task::perform` when
+/// vault paths live on remote drives.
+///
+/// Returns a [`SaveOutcome`] describing what happened; the caller converts
+/// it to an [`iced::Task`] via [`SaveOutcome::into_task`] on the way back
+/// into `update()`.
+pub(crate) fn dispatch_save(state: &mut CaptureApp, mode: SaveMode) -> SaveOutcome {
+    let text = state.editor_content.text();
+    if text.trim().is_empty() {
+        return SaveOutcome::EmptyGuard;
+    }
+
+    let now = Utc::now();
+    let write_result: Result<Option<()>, trace_core::TraceError> = match state.write_mode {
+        WriteMode::Dimension => {
+            // Default to the first configured section when the user hasn't
+            // tapped a chip yet, matching Mac's `selectedSection = .note`.
+            let section_index = state.selected_section.unwrap_or(0);
+            let section = state
+                .sections
+                .get(section_index)
+                .cloned()
+                .or_else(|| state.sections.first().cloned());
+            let Some(section) = section else {
+                return SaveOutcome::NoSectionAvailable;
+            };
+            let writer = DailyNoteWriter::new(state.settings.clone());
+            writer
+                .save(&text, &section, mode, now)
+                .map(|written| written.map(|_| ()))
+        }
+        WriteMode::Thread => {
+            let Some(thread_id) = state.selected_thread else {
+                return SaveOutcome::ThreadNotSelected;
+            };
+            let Some(thread) = state.threads.iter().find(|t| t.id == thread_id).cloned() else {
+                // Selected id no longer matches any configured thread; treat
+                // the same as the not-selected case so the user knows to
+                // re-pick.
+                return SaveOutcome::ThreadNotSelected;
+            };
+            let writer = ThreadWriter::new(state.settings.clone());
+            writer
+                .save(&text, &thread, mode, now)
+                .map(|written| written.map(|_| ()))
+        }
+        WriteMode::File => {
+            // `FileWriter::save` has no `SaveMode` parameter — Append
+            // degrades to a fresh-file Send, matching Mac.
+            let writer = FileWriter::new(state.settings.clone());
+            let title_opt = if state.document_title.trim().is_empty() {
+                None
+            } else {
+                Some(state.document_title.as_str())
+            };
+            writer
+                .save(&text, title_opt, None, now)
+                .map(|written| written.map(|_| ()))
+        }
+    };
+
+    match write_result {
+        Ok(Some(())) => {
+            // Clear the editor by replacing its contents. iced's
+            // `text_editor::Content` has no `clear()` shortcut, so swap in a
+            // fresh instance.
+            state.editor_content = text_editor::Content::new();
+            SaveOutcome::Written
+        }
+        Ok(None) => SaveOutcome::WriterSilentNoop,
+        Err(err) => SaveOutcome::WriterError(err.to_string()),
     }
 }
 
@@ -706,25 +844,11 @@ mod tests {
         assert_eq!(app.settings.vault_path, "/tmp/trace-phase11");
     }
 
-    #[test]
-    fn send_note_is_a_state_noop_in_skeleton() {
-        // Sub-task 3 swaps this for writer dispatch; sub-task 1 only
-        // guarantees the variant is exhaustive and leaves state untouched.
-        let mut app = fresh_app();
-        let before = app.editor_text();
-        apply(&mut app, Message::SendNote);
-        assert_eq!(app.editor_text(), before);
-        assert!(app.toast.is_none());
-    }
-
-    #[test]
-    fn append_note_is_a_state_noop_in_skeleton() {
-        let mut app = fresh_app();
-        let before = app.editor_text();
-        apply(&mut app, Message::AppendNote);
-        assert_eq!(app.editor_text(), before);
-        assert!(app.toast.is_none());
-    }
+    // The direct-behaviour `SendNote` / `AppendNote` tests live further down
+    // (see `send_note_*` / `append_note_*` blocks). Coverage includes the
+    // empty-text toast, thread-not-selected toast, dimension success with a
+    // real temp vault, thread success/failure paths, file-mode title
+    // forwarding, and the editor-clears-on-success contract.
 
     #[test]
     fn cycle_mode_forward_walks_dimension_thread_file_dimension() {
@@ -792,5 +916,202 @@ mod tests {
         let id = window::Id::unique();
         apply(&mut app, Message::WindowOpened(id));
         assert_eq!(app.capture_window_id, Some(id));
+    }
+
+    // ---------------------------------------------------------------------
+    // Phase 11 — `SendNote` / `AppendNote` writer dispatch.
+    //
+    // The helper below builds an app pointed at a tempdir vault so tests can
+    // assert on the file system after a Send. We exercise:
+    //   * Empty guard → `EmptyGuard`.
+    //   * Dimension success → file on disk, editor cleared, `Written`.
+    //   * Thread mode with no selection → `ThreadNotSelected`.
+    //   * Thread mode with a selection → `Written` + editor cleared.
+    //   * Stale thread id → `ThreadNotSelected`.
+    //   * File mode title fallback → `Written` with title forwarded.
+    //   * Writer error (invalid vault) → `WriterError` carrying the message.
+    //   * Zero sections → `NoSectionAvailable`.
+    // ---------------------------------------------------------------------
+
+    fn app_with_vault(tempdir: &tempfile::TempDir, threads: Vec<ThreadConfig>) -> CaptureApp {
+        let mut settings = AppSettings {
+            vault_path: tempdir.path().to_string_lossy().to_string(),
+            inbox_vault_path: tempdir.path().to_string_lossy().to_string(),
+            ..AppSettings::default()
+        };
+        // Thread configs live on AppSettings so ThreadWriter can reach them
+        // through the `ThreadSettings` impl.
+        settings.thread_configs = threads.clone();
+        CaptureApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            sample_sections(),
+            threads,
+            settings,
+        )
+    }
+
+    fn write_text(app: &mut CaptureApp, text: &str) {
+        app.editor_content = text_editor::Content::with_text(text);
+    }
+
+    #[test]
+    fn dispatch_save_empty_text_returns_empty_guard() {
+        let mut app = fresh_app();
+        assert_eq!(
+            dispatch_save(&mut app, SaveMode::CreateNewEntry),
+            SaveOutcome::EmptyGuard
+        );
+        // Editor untouched.
+        assert_eq!(app.editor_text(), "");
+    }
+
+    #[test]
+    fn dispatch_save_whitespace_only_returns_empty_guard() {
+        let mut app = fresh_app();
+        write_text(&mut app, "   \n\t  ");
+        assert_eq!(
+            dispatch_save(&mut app, SaveMode::CreateNewEntry),
+            SaveOutcome::EmptyGuard
+        );
+        // Editor retains the user's in-flight (whitespace) text — the guard
+        // does NOT clear it, matching Mac's "show toast, keep typing" UX.
+        assert_eq!(app.editor_text(), "   \n\t  ");
+    }
+
+    #[test]
+    fn dispatch_save_dimension_success_writes_file_and_clears_editor() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let mut app = app_with_vault(&tempdir, sample_threads());
+        write_text(&mut app, "dimension body");
+        let outcome = dispatch_save(&mut app, SaveMode::CreateNewEntry);
+        assert_eq!(outcome, SaveOutcome::Written);
+        assert_eq!(app.editor_text(), "", "successful Send clears the editor");
+        // Writer creates a file under the Daily folder; we don't assert on
+        // the exact name (date-dependent) but the vault root should now have
+        // at least one file.
+        let daily_root = tempdir.path().join(app.settings.daily_folder_name.clone());
+        let entries: Vec<_> = std::fs::read_dir(&daily_root)
+            .expect("daily folder exists")
+            .collect();
+        assert!(
+            !entries.is_empty(),
+            "Dimension write produced at least one daily note file"
+        );
+    }
+
+    #[test]
+    fn dispatch_save_thread_mode_without_selection_returns_thread_not_selected() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let mut app = app_with_vault(&tempdir, sample_threads());
+        app.write_mode = WriteMode::Thread;
+        write_text(&mut app, "note body");
+        assert_eq!(
+            dispatch_save(&mut app, SaveMode::CreateNewEntry),
+            SaveOutcome::ThreadNotSelected
+        );
+        // Editor retained; user can pick a thread and re-send.
+        assert_eq!(app.editor_text(), "note body");
+    }
+
+    #[test]
+    fn dispatch_save_thread_mode_with_selection_writes_and_clears() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let threads = sample_threads();
+        let thread_id = threads[0].id;
+        let mut app = app_with_vault(&tempdir, threads);
+        app.write_mode = WriteMode::Thread;
+        app.selected_thread = Some(thread_id);
+        write_text(&mut app, "thread body");
+        assert_eq!(
+            dispatch_save(&mut app, SaveMode::CreateNewEntry),
+            SaveOutcome::Written
+        );
+        assert_eq!(app.editor_text(), "");
+    }
+
+    #[test]
+    fn dispatch_save_thread_mode_with_stale_id_returns_thread_not_selected() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let mut app = app_with_vault(&tempdir, sample_threads());
+        app.write_mode = WriteMode::Thread;
+        app.selected_thread = Some(Uuid::new_v4()); // not in the list
+        write_text(&mut app, "body");
+        assert_eq!(
+            dispatch_save(&mut app, SaveMode::CreateNewEntry),
+            SaveOutcome::ThreadNotSelected
+        );
+    }
+
+    #[test]
+    fn dispatch_save_file_mode_forwards_document_title() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let mut app = app_with_vault(&tempdir, sample_threads());
+        app.write_mode = WriteMode::File;
+        app.document_title = "my-doc".to_string();
+        write_text(&mut app, "free-form body");
+        assert_eq!(
+            dispatch_save(&mut app, SaveMode::CreateNewEntry),
+            SaveOutcome::Written
+        );
+        assert_eq!(app.editor_text(), "");
+        // Document title is NOT cleared — matches Mac where users batch
+        // multiple notes under one working title.
+        assert_eq!(app.document_title, "my-doc");
+    }
+
+    #[test]
+    fn dispatch_save_writer_error_surfaces_message() {
+        // Blank vault path triggers `InvalidVaultPath` from the writer.
+        let settings = AppSettings {
+            vault_path: "".to_string(),
+            ..AppSettings::default()
+        };
+        let mut app = CaptureApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            sample_sections(),
+            sample_threads(),
+            settings,
+        );
+        write_text(&mut app, "body");
+        let outcome = dispatch_save(&mut app, SaveMode::CreateNewEntry);
+        match outcome {
+            SaveOutcome::WriterError(msg) => {
+                assert!(
+                    msg.contains("vault path") || msg.contains("InvalidVaultPath"),
+                    "error toast should mention the invalid vault path (got: {msg})"
+                );
+            }
+            other => panic!("expected WriterError, got {other:?}"),
+        }
+        // Editor retained on failure.
+        assert_eq!(app.editor_text(), "body");
+    }
+
+    #[test]
+    fn dispatch_save_dimension_with_zero_sections_returns_no_section_available() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let mut app = app_with_vault(&tempdir, sample_threads());
+        app.sections.clear();
+        write_text(&mut app, "body");
+        assert_eq!(
+            dispatch_save(&mut app, SaveMode::CreateNewEntry),
+            SaveOutcome::NoSectionAvailable
+        );
+    }
+
+    #[test]
+    fn dispatch_save_append_reaches_the_writer() {
+        // Smoke test: Append on an empty vault falls back to create-new
+        // inside `DailyNoteWriter::save`; we only need to confirm the
+        // UI-layer plumbing makes it to the writer without tripping any
+        // guards.
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let mut app = app_with_vault(&tempdir, sample_threads());
+        write_text(&mut app, "first entry");
+        assert_eq!(
+            dispatch_save(&mut app, SaveMode::AppendToLatestEntry),
+            SaveOutcome::Written
+        );
+        assert_eq!(app.editor_text(), "");
     }
 }
