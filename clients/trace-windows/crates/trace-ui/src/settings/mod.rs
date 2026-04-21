@@ -23,6 +23,7 @@
 //! top-level `iced::daemon` wiring that routes messages between the two
 //! windows.
 
+pub mod quick_sections;
 pub mod storage;
 pub mod tiles;
 pub mod widgets;
@@ -490,14 +491,30 @@ pub fn settings_view(state: &SettingsApp) -> Element<'_, SettingsMessage> {
 fn build_cards(state: &SettingsApp) -> Element<'_, SettingsMessage> {
     let palette = state.theme.settings;
 
-    column![
+    // Build the base three cards unconditionally; the Quick Sections card
+    // only surfaces under Dimension mode (parity with Mac
+    // `SettingsView.swift`'s `if writeMode == .dimension` gate around
+    // `SectionCard`). We switch from the `column![...]` macro to the dynamic
+    // `column(Vec<Element<_, _>>)` constructor so the card list can grow
+    // conditionally without splitting into mutually exclusive macro arms.
+    let mut cards: Vec<Element<'_, SettingsMessage>> = vec![
         language_card(state, palette),
         theme_card(state, palette),
         storage_card(state, palette),
-    ]
-    .spacing(SETTINGS_CARD_STACK_SPACING)
-    .width(Length::Fill)
-    .into()
+    ];
+
+    if state.write_mode == WriteMode::Dimension {
+        cards.push(quick_sections::quick_sections_card(
+            palette,
+            state.language,
+            &state.section_titles,
+        ));
+    }
+
+    column(cards)
+        .spacing(SETTINGS_CARD_STACK_SPACING)
+        .width(Length::Fill)
+        .into()
 }
 
 /// Builds the Language card: a single row of chips covering
@@ -1378,5 +1395,63 @@ mod tests {
         let _ = settings_update(&mut app, SettingsMessage::SectionAdded);
         let _ = settings_update(&mut app, SettingsMessage::SectionRemoved(0));
         assert_eq!(app.settings.section_titles, original);
+    }
+
+    // --- Sub-task 5 build_cards dispatch -------------------------------
+    //
+    // The Quick Sections card must only surface under Dimension mode so the
+    // Thread / File modes keep their Mac-parity card ordering. These tests
+    // smoke the `build_cards` dispatch for each mode; a missing arm would
+    // either panic at construction or compile away silently.
+
+    #[test]
+    fn build_cards_in_dimension_shows_quick_sections_card() {
+        // Dimension mode is the only mode where the Quick Sections card
+        // renders; `build_cards` must return a viable widget tree here.
+        let settings = AppSettings {
+            note_write_mode: WriteMode::Dimension,
+            ..AppSettings::default()
+        };
+        let app = SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(settings),
+        );
+        assert_eq!(app.write_mode, WriteMode::Dimension);
+        let _element: Element<'_, SettingsMessage> = build_cards(&app);
+    }
+
+    #[test]
+    fn build_cards_in_file_mode_hides_quick_sections_card() {
+        // File mode must skip the Quick Sections card branch without
+        // panicking; a regression that changed the gate from `==` to `!=`
+        // would show up here as a build failure, since the `file` inbox card
+        // would push twice or the section card would leak into File mode.
+        let settings = AppSettings {
+            note_write_mode: WriteMode::File,
+            ..AppSettings::default()
+        };
+        let app = SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(settings),
+        );
+        assert_eq!(app.write_mode, WriteMode::File);
+        let _element: Element<'_, SettingsMessage> = build_cards(&app);
+    }
+
+    #[test]
+    fn build_cards_in_thread_mode_hides_quick_sections_card() {
+        // Thread mode has its own (future) card stack; Quick Sections must
+        // stay out of this mode so the section picker only applies where the
+        // Dimension-mode chip row actually consumes it.
+        let settings = AppSettings {
+            note_write_mode: WriteMode::Thread,
+            ..AppSettings::default()
+        };
+        let app = SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(settings),
+        );
+        assert_eq!(app.write_mode, WriteMode::Thread);
+        let _element: Element<'_, SettingsMessage> = build_cards(&app);
     }
 }
