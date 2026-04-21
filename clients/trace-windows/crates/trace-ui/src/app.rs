@@ -538,8 +538,15 @@ pub(crate) fn decode_shortcut(key: &Key, modifiers: Modifiers) -> Option<Message
         return Some(Message::CycleModeForward);
     }
 
-    // Ctrl+[Shift+]Enter dispatches writer save.
-    if matches!(key, Key::Named(Named::Enter)) && modifiers.control() {
+    // Ctrl+[Shift+]Enter dispatches writer save. `!alt()` guards the
+    // AltGr collision on European keyboards (AltGr = Ctrl+Alt); `!logo()`
+    // keeps Windows-key chords out of the way. The digit branch below
+    // already applies the same guard — keep them symmetric.
+    if matches!(key, Key::Named(Named::Enter))
+        && modifiers.control()
+        && !modifiers.alt()
+        && !modifiers.logo()
+    {
         if modifiers.shift() {
             return Some(Message::AppendNote);
         } else {
@@ -1521,6 +1528,47 @@ mod tests {
         // Alt-chord combinations collide with system layouts (AltGr on
         // European keyboards); leave them alone.
         let msg = decode_shortcut(&ch("1"), Modifiers::CTRL | Modifiers::ALT);
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn decode_shortcut_ctrl_alt_enter_does_not_fire_send() {
+        // AltGr = Ctrl+Alt on European layouts. Ctrl+Alt+Enter must NOT
+        // fire Send/Append — that would trigger spurious writes when the
+        // user is merely typing a dead key.
+        let msg = decode_shortcut(&Key::Named(Named::Enter), Modifiers::CTRL | Modifiers::ALT);
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn decode_shortcut_ctrl_alt_shift_enter_does_not_fire_append() {
+        // Same guard for the Append variant.
+        let msg = decode_shortcut(
+            &Key::Named(Named::Enter),
+            Modifiers::CTRL | Modifiers::ALT | Modifiers::SHIFT,
+        );
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn decode_shortcut_ctrl_logo_enter_does_not_fire_send() {
+        // Windows key + Ctrl + Enter is a system shortcut under some
+        // shell customisations; we must not steal it.
+        let msg = decode_shortcut(&Key::Named(Named::Enter), Modifiers::CTRL | Modifiers::LOGO);
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn decode_shortcut_ctrl_alt_p_does_not_fire_pin() {
+        // Guard parity with the digit branch: AltGr+P must not toggle pin.
+        let msg = decode_shortcut(&ch("p"), Modifiers::CTRL | Modifiers::ALT);
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn decode_shortcut_ctrl_logo_digit_is_not_consumed() {
+        // Super+Ctrl+digit is a common OS shortcut; stay out of its way.
+        let msg = decode_shortcut(&ch("1"), Modifiers::CTRL | Modifiers::LOGO);
         assert!(msg.is_none());
     }
 
