@@ -47,6 +47,11 @@ impl SpyHandler {
     fn restore_foreground_count(&self) -> usize {
         self.restore_foreground_calls.load(Ordering::SeqCst)
     }
+
+    #[allow(dead_code)]
+    fn set_topmost_count(&self) -> usize {
+        self.set_topmost_calls.load(Ordering::SeqCst)
+    }
 }
 
 impl PlatformHandler for SpyHandler {
@@ -231,6 +236,64 @@ fn pin_toggled_then_focus_lost_does_not_close() {
         spy.restore_foreground_count(),
         before,
         "pinned panel does not route FocusLost into ClosePanel"
+    );
+}
+
+#[test]
+fn send_note_when_pinned_does_not_close_panel() {
+    // Mac `CapturePanelController.swift:289-329`: successful Send on a
+    // pinned panel clears the editor and re-focuses it but keeps the
+    // window open. The Windows port must honour the same invariant by
+    // returning `Task::none()` from the `Written + pinned` branch.
+    let tempdir = TempDir::new().expect("tempdir");
+    let spy = SpyHandler::new();
+    let mut app = app_with_vault(&tempdir).with_platform_handler(spy.clone());
+
+    // Seed the editor and pin the panel before sending.
+    app.editor_content = text_editor::Content::with_text("pinned entry");
+    apply(&mut app, Message::PinToggled);
+    assert!(app.pinned);
+
+    let task = update(&mut app, Message::SendNote);
+
+    // Editor cleared on success.
+    assert_eq!(app.editor_text(), "", "successful Send clears the editor");
+    // Task::none() when pinned — no follow-up Message units queued.
+    assert_eq!(
+        task.units(),
+        0,
+        "pinned Send must emit Task::none() — no ClosePanel follow-up"
+    );
+}
+
+#[test]
+fn send_note_when_unpinned_closes_panel() {
+    // Mirror test of the pinned case: unpinned Send still runs the
+    // close flow, so the returned task carries a ClosePanel unit that
+    // iced's runtime will dispatch back into `update`.
+    let tempdir = TempDir::new().expect("tempdir");
+    let spy = SpyHandler::new();
+    let mut app = app_with_vault(&tempdir).with_platform_handler(spy.clone());
+
+    app.editor_content = text_editor::Content::with_text("unpinned entry");
+    assert!(!app.pinned);
+
+    let task = update(&mut app, Message::SendNote);
+
+    assert_eq!(app.editor_text(), "", "successful Send clears the editor");
+    assert!(
+        task.units() > 0,
+        "unpinned Send routes through ClosePanel — task must carry a follow-up unit"
+    );
+
+    // Simulate iced delivering the queued ClosePanel, which calls
+    // `restore_foreground` on the platform handler exactly once.
+    let restore_before = spy.restore_foreground_count();
+    apply(&mut app, Message::ClosePanel);
+    assert_eq!(
+        spy.restore_foreground_count(),
+        restore_before + 1,
+        "unpinned ClosePanel fires restore_foreground once"
     );
 }
 

@@ -324,8 +324,14 @@ pub fn update(state: &mut CaptureApp, message: Message) -> Task<Message> {
             state.settings_requested = true;
             Task::none()
         }
-        Message::SendNote => dispatch_save(state, SaveMode::CreateNewEntry).into_task(),
-        Message::AppendNote => dispatch_save(state, SaveMode::AppendToLatestEntry).into_task(),
+        Message::SendNote => {
+            let outcome = dispatch_save(state, SaveMode::CreateNewEntry);
+            finalize_save_outcome(state, outcome)
+        }
+        Message::AppendNote => {
+            let outcome = dispatch_save(state, SaveMode::AppendToLatestEntry);
+            finalize_save_outcome(state, outcome)
+        }
         Message::CycleModeForward => {
             state.write_mode = state.write_mode.next();
             Task::none()
@@ -614,26 +620,35 @@ pub(crate) enum SaveOutcome {
     WriterError(String),
 }
 
-impl SaveOutcome {
-    /// Translates the outcome into the iced task that feeds the next
-    /// [`update`] pass.
-    fn into_task(self) -> Task<Message> {
-        match self {
-            SaveOutcome::EmptyGuard => {
-                Task::done(Message::ToastShow(TOAST_EMPTY_NOT_SAVED.to_string()))
-            }
-            SaveOutcome::ThreadNotSelected => {
-                Task::done(Message::ToastShow(TOAST_THREAD_NOT_SELECTED.to_string()))
-            }
-            SaveOutcome::NoSectionAvailable => {
-                Task::done(Message::ToastShow("未找到可用的章节".to_string()))
-            }
-            SaveOutcome::WriterSilentNoop => {
-                Task::done(Message::ToastShow(TOAST_EMPTY_NOT_SAVED.to_string()))
-            }
-            SaveOutcome::Written => Task::done(Message::ClosePanel),
-            SaveOutcome::WriterError(msg) => Task::done(Message::ToastShow(msg)),
+/// Translates a [`SaveOutcome`] into the iced task that feeds the next
+/// [`update`] pass, consulting the pinned flag so the success branch
+/// honours Mac's `CapturePanelController.swift:289-329` contract: when
+/// pinned, a successful Send/Append clears the editor but keeps the
+/// panel open (no ClosePanel emission).
+pub(crate) fn finalize_save_outcome(state: &CaptureApp, outcome: SaveOutcome) -> Task<Message> {
+    match outcome {
+        SaveOutcome::EmptyGuard => {
+            Task::done(Message::ToastShow(TOAST_EMPTY_NOT_SAVED.to_string()))
         }
+        SaveOutcome::ThreadNotSelected => {
+            Task::done(Message::ToastShow(TOAST_THREAD_NOT_SELECTED.to_string()))
+        }
+        SaveOutcome::NoSectionAvailable => {
+            Task::done(Message::ToastShow("未找到可用的章节".to_string()))
+        }
+        SaveOutcome::WriterSilentNoop => {
+            Task::done(Message::ToastShow(TOAST_EMPTY_NOT_SAVED.to_string()))
+        }
+        SaveOutcome::Written => {
+            if state.pinned {
+                // Pinned: editor was already cleared inside `dispatch_save`;
+                // the panel stays open so the user can keep dumping notes.
+                Task::none()
+            } else {
+                Task::done(Message::ClosePanel)
+            }
+        }
+        SaveOutcome::WriterError(msg) => Task::done(Message::ToastShow(msg)),
     }
 }
 
