@@ -33,7 +33,7 @@ use iced::widget::{column, container, row, scrollable, text};
 use iced::{window, Element, Length, Pixels, Size, Subscription, Task, Theme};
 use trace_core::{
     AppSettings, DailyFileDateFormat, EntryTheme, L10n, Language, ThemePreset, TraceTheme,
-    WriteMode,
+    VaultPathValidationIssue, WriteMode,
 };
 
 use crate::theme::to_iced_theme;
@@ -213,6 +213,16 @@ pub struct SettingsApp {
     /// Active Daily entry theme preset. Seeded from
     /// `settings.daily_entry_theme_preset`.
     pub daily_entry_theme_preset: EntryTheme,
+    /// Cached classification of [`Self::vault_path`] against
+    /// [`trace_platform::validate_vault_path`]. Recomputed in
+    /// [`settings_update`] whenever the path changes; the view layer reads
+    /// this field directly because `validate_vault_path` writes a probe file
+    /// to disk and must never be called from the per-frame view pass.
+    pub vault_path_issue: Option<VaultPathValidationIssue>,
+    /// Cached classification of [`Self::inbox_vault_path`]. Mirrors the same
+    /// contract as [`Self::vault_path_issue`]: refreshed in `settings_update`,
+    /// never on the per-frame render hot path.
+    pub inbox_vault_path_issue: Option<VaultPathValidationIssue>,
 }
 
 impl SettingsApp {
@@ -237,6 +247,11 @@ impl SettingsApp {
         let daily_file_date_format =
             DailyFileDateFormat::resolved_from_raw(&settings.daily_file_date_format);
         let daily_entry_theme_preset = settings.daily_entry_theme_preset;
+        // Seed the cached validation results once at construction so the
+        // Storage card has something to render on the first view pass without
+        // touching the filesystem on every frame.
+        let vault_path_issue = trace_platform::validate_vault_path(&vault_path);
+        let inbox_vault_path_issue = trace_platform::validate_vault_path(&inbox_vault_path);
         Self {
             theme,
             iced_theme,
@@ -249,6 +264,8 @@ impl SettingsApp {
             daily_folder_name,
             daily_file_date_format,
             daily_entry_theme_preset,
+            vault_path_issue,
+            inbox_vault_path_issue,
         }
     }
 
@@ -294,17 +311,22 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
         }
         SettingsMessage::VaultPathChanged(path) => {
             state.vault_path = path;
+            state.vault_path_issue = trace_platform::validate_vault_path(&state.vault_path);
             Task::none()
         }
         SettingsMessage::BrowseVaultRequested => pick_folder_task(SettingsMessage::VaultBrowseChose),
         SettingsMessage::VaultBrowseChose(Some(path)) => {
             state.vault_path = path;
+            state.vault_path_issue = trace_platform::validate_vault_path(&state.vault_path);
             Task::none()
         }
-        // User cancelled the picker — leave the current path untouched.
+        // User cancelled the picker — leave the current path and cached issue
+        // untouched; nothing on disk changed so a re-probe would be wasted I/O.
         SettingsMessage::VaultBrowseChose(None) => Task::none(),
         SettingsMessage::InboxVaultPathChanged(path) => {
             state.inbox_vault_path = path;
+            state.inbox_vault_path_issue =
+                trace_platform::validate_vault_path(&state.inbox_vault_path);
             Task::none()
         }
         SettingsMessage::BrowseInboxVaultRequested => {
@@ -312,6 +334,8 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
         }
         SettingsMessage::InboxVaultBrowseChose(Some(path)) => {
             state.inbox_vault_path = path;
+            state.inbox_vault_path_issue =
+                trace_platform::validate_vault_path(&state.inbox_vault_path);
             Task::none()
         }
         SettingsMessage::InboxVaultBrowseChose(None) => Task::none(),
@@ -532,12 +556,14 @@ fn storage_card<'a>(
 
     match state.write_mode {
         WriteMode::Dimension => {
-            let vault_issue = trace_platform::validate_vault_path(&state.vault_path);
+            // Read the cached validation result instead of re-probing the
+            // filesystem on every view pass (iced re-renders at ~60 fps under
+            // the Dimension WriteMode). See `SettingsApp::vault_path_issue`.
             body_rows.push(storage::vault_path_row(
                 palette,
                 lang,
                 &state.vault_path,
-                vault_issue,
+                state.vault_path_issue,
                 SettingsMessage::VaultPathChanged,
                 SettingsMessage::BrowseVaultRequested,
             ));
@@ -561,12 +587,12 @@ fn storage_card<'a>(
             ));
         }
         WriteMode::File => {
-            let inbox_issue = trace_platform::validate_vault_path(&state.inbox_vault_path);
+            // Same caching contract as the Dimension vault row above.
             body_rows.push(storage::inbox_vault_path_row(
                 palette,
                 lang,
                 &state.inbox_vault_path,
-                inbox_issue,
+                state.inbox_vault_path_issue,
                 SettingsMessage::InboxVaultPathChanged,
                 SettingsMessage::BrowseInboxVaultRequested,
             ));
@@ -1068,5 +1094,106 @@ mod tests {
             );
             let _element: Element<'_, SettingsMessage> = settings_view(&app);
         }
+    }
+
+    // --- Sub-task 4 cache ---------------------------------------------------
+    //
+    // These tests guard the contract that `validate_vault_path` is called
+    // from `settings_update` (not the view hot path). The view layer reads
+    // the cached `vault_path_issue` / `inbox_vault_path_issue` fields
+    // directly, so any change to the stored path must refresh the cache.
+
+    #[test]
+    fn settings_app_new_seeds_vault_path_issue_for_empty_path() {
+        // Default `AppSettings` has an empty vault_path, so the cached issue
+        // must classify as `Empty` on first construction — matches the
+        // `vault_path_issue` doc comment contract that the view pass never
+        // has to call `validate_vault_path`.
+        let app = fresh_app();
+        assert_eq!(
+            app.vault_path_issue,
+            Some(VaultPathValidationIssue::Empty)
+        );
+        assert_eq!(
+            app.inbox_vault_path_issue,
+            Some(VaultPathValidationIssue::Empty)
+        );
+    }
+
+    #[test]
+    fn vault_path_changed_updates_cached_issue() {
+        // Mutating the path must refresh the cached classification; without
+        // this the Storage card would render a stale warning after the user
+        // types a new value.
+        let mut app = fresh_app();
+        assert_eq!(
+            app.vault_path_issue,
+            Some(VaultPathValidationIssue::Empty)
+        );
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::VaultPathChanged("/nonexistent/path/for/trace-cache-test".into()),
+        );
+        // A non-blank, non-existent path must reclassify — the exact variant
+        // depends on the host filesystem, but it can no longer be `Empty`.
+        assert_ne!(
+            app.vault_path_issue,
+            Some(VaultPathValidationIssue::Empty)
+        );
+    }
+
+    #[test]
+    fn vault_browse_chose_some_updates_cached_issue() {
+        // Browse picker confirmations must refresh the cached issue the same
+        // way free-text edits do. Shares the helper path under the hood —
+        // testing this branch explicitly guards against a future refactor
+        // that special-cases the browse flow.
+        let mut app = fresh_app();
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::VaultBrowseChose(Some(
+                "/nonexistent/browse-cache-test".into(),
+            )),
+        );
+        assert_ne!(
+            app.vault_path_issue,
+            Some(VaultPathValidationIssue::Empty)
+        );
+    }
+
+    #[test]
+    fn vault_browse_chose_none_preserves_cached_issue() {
+        // A cancelled picker must leave the cache alone — nothing on disk
+        // changed, so a re-probe would be wasted I/O and would mask a
+        // regression that forgot to refresh the cache on real edits.
+        let mut app = fresh_app();
+        // Prime the cache with a deliberately non-Empty state so we can
+        // observe that the Noop branch really is idempotent.
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::VaultPathChanged("/nonexistent/browse-cancel-test".into()),
+        );
+        let before = app.vault_path_issue;
+        let _ = settings_update(&mut app, SettingsMessage::VaultBrowseChose(None));
+        assert_eq!(app.vault_path_issue, before);
+        assert_eq!(app.vault_path, "/nonexistent/browse-cancel-test");
+    }
+
+    #[test]
+    fn inbox_vault_path_changed_updates_cached_issue() {
+        // Inbox row mirrors the Dimension vault row; re-test here so the
+        // symmetry is explicit and a future refactor that splits the two
+        // helpers can't silently break one side.
+        let mut app = fresh_app();
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::InboxVaultPathChanged(
+                "/nonexistent/inbox-cache-test".into(),
+            ),
+        );
+        assert_ne!(
+            app.inbox_vault_path_issue,
+            Some(VaultPathValidationIssue::Empty)
+        );
     }
 }
