@@ -15,8 +15,8 @@ pub mod writer;
 pub use error::TraceError;
 pub use l10n::L10n;
 pub use models::{
-    Entry, EntryTheme, Language, NoteSection, PanelFrame, SeparatorStyle, ThemePreset,
-    ThreadConfig, WriteMode,
+    DailyFileDateFormat, Entry, EntryTheme, Language, NoteSection, PanelFrame, SeparatorStyle,
+    ThemePreset, ThreadConfig, WriteMode,
 };
 pub use paths::{
     format_date, resolve_within_vault, sanitize_filename, sanitize_filename_preserve_extension,

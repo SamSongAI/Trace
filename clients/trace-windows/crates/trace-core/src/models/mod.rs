@@ -1,3 +1,4 @@
+mod daily_file_date_format;
 mod entry;
 mod entry_theme;
 mod language;
@@ -8,6 +9,7 @@ mod theme_preset;
 mod thread_config;
 mod write_mode;
 
+pub use daily_file_date_format::DailyFileDateFormat;
 pub use entry::Entry;
 pub use entry_theme::EntryTheme;
 pub use language::Language;
