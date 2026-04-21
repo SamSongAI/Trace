@@ -17,5 +17,5 @@ pub use panel_frame::PanelFrame;
 pub use section::NoteSection;
 pub use separator::SeparatorStyle;
 pub use theme_preset::ThemePreset;
-pub use thread_config::ThreadConfig;
+pub use thread_config::{join_folder_and_filename, split_target_file, ThreadConfig};
 pub use write_mode::WriteMode;

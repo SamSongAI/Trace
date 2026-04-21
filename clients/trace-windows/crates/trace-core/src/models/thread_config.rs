@@ -13,6 +13,16 @@ pub struct ThreadConfig {
 }
 
 impl ThreadConfig {
+    /// Minimum number of thread configs that can exist at once. Matches Mac
+    /// `AppSettings.canRemoveThread`'s `threadConfigs.count > 1` gate: users
+    /// cannot delete the last remaining thread because thread mode requires at
+    /// least one destination.
+    pub const MINIMUM_COUNT: usize = 1;
+    /// Maximum number of thread configs that can exist at once. Matches Mac
+    /// `AppSettings.canAddThread`'s `threadConfigs.count < 9` gate: the thread
+    /// chip row would overflow past this cap on both ports.
+    pub const MAXIMUM_COUNT: usize = 9;
+
     pub fn new(
         name: impl Into<String>,
         target_file: impl Into<String>,
@@ -37,6 +47,69 @@ impl ThreadConfig {
             order,
         }
     }
+}
+
+/// Splits a `target_file` string into its `(folder, filename)` components.
+///
+/// Mirrors Mac `ThreadConfigRow.parseTargetFile` in
+/// `Sources/Trace/UI/Settings/ThreadConfigRow.swift`:
+///
+/// * Backslashes are normalized to forward slashes before splitting so paths
+///   copy-pasted from a Windows file manager still yield a sensible
+///   `(folder, filename)` tuple.
+/// * Absolute paths (leading `/`) keep their leading slash in the folder
+///   component, matching the Mac reference's handling.
+/// * Inputs without a slash return `("", input)` — the whole string is treated
+///   as the filename.
+///
+/// Kept as a free function (not a `ThreadConfig` method) because both the UI
+/// layer's per-keystroke recompute and future persistence normalizers need a
+/// pure entry point that does not require an existing `ThreadConfig` instance.
+pub fn split_target_file(target_file: &str) -> (String, String) {
+    // Normalize backslashes up front so the `rfind` below applies the same
+    // contract across separator styles.
+    let normalized = target_file.replace('\\', "/");
+    match normalized.rfind('/') {
+        Some(idx) => {
+            // `idx` is a byte index on a string that only contains ASCII `/`
+            // as the splitter; slicing on either side is safe for every
+            // Unicode input.
+            let folder = normalized[..idx].to_string();
+            let filename = normalized[idx + 1..].to_string();
+            (folder, filename)
+        }
+        None => (String::new(), normalized),
+    }
+}
+
+/// Joins a `(folder, filename)` pair back into a `target_file` string.
+///
+/// Mirrors Mac `ThreadConfigRow.buildTargetFile`:
+///
+/// * Backslashes in both inputs are normalized to forward slashes so the
+///   joined output uses a single separator convention.
+/// * An empty folder (or a folder that is empty after normalization) returns
+///   just the filename, which preserves the Mac reference's "relative paths
+///   with no folder render as bare filenames" shape.
+/// * A filename that is empty after normalization returns just the folder,
+///   which gives the UI a sensible intermediate state while the user is
+///   retyping the filename without dropping the folder component.
+///
+/// Unlike the Mac reference this helper does **not** trim whitespace on
+/// either input — the shadow fields in `SettingsApp` intentionally carry
+/// the raw keystroke state (sub-task 8 will trim on write-back), so trimming
+/// here would throw away in-progress edits.
+pub fn join_folder_and_filename(folder: &str, filename: &str) -> String {
+    let folder_norm = folder.replace('\\', "/");
+    let filename_norm = filename.replace('\\', "/");
+
+    if folder_norm.is_empty() {
+        return filename_norm;
+    }
+    if filename_norm.is_empty() {
+        return folder_norm;
+    }
+    format!("{folder_norm}/{filename_norm}")
 }
 
 #[cfg(test)]
@@ -88,5 +161,130 @@ mod tests {
         assert!(!json.contains("\"icon\""));
         let decoded: ThreadConfig = serde_json::from_str(&json).unwrap();
         assert!(decoded.icon.is_none());
+    }
+
+    #[test]
+    fn count_bounds_match_mac_reference() {
+        // Mac `AppSettings.canAddThread` / `canRemoveThread` bracket the
+        // thread-config list at [1, 9]. Lock the constants here so a drift
+        // against the Mac reference is caught at test time.
+        assert_eq!(ThreadConfig::MINIMUM_COUNT, 1);
+        assert_eq!(ThreadConfig::MAXIMUM_COUNT, 9);
+    }
+
+    // --- split_target_file ----------------------------------------------
+
+    #[test]
+    fn split_target_file_handles_nested_relative_path() {
+        let (folder, filename) = split_target_file("foo/bar/notes.md");
+        assert_eq!(folder, "foo/bar");
+        assert_eq!(filename, "notes.md");
+    }
+
+    #[test]
+    fn split_target_file_handles_bare_filename() {
+        let (folder, filename) = split_target_file("notes.md");
+        assert_eq!(folder, "");
+        assert_eq!(filename, "notes.md");
+    }
+
+    #[test]
+    fn split_target_file_preserves_absolute_path_prefix() {
+        let (folder, filename) = split_target_file("/Users/x/notes.md");
+        assert_eq!(folder, "/Users/x");
+        assert_eq!(filename, "notes.md");
+    }
+
+    #[test]
+    fn split_target_file_handles_empty_string() {
+        let (folder, filename) = split_target_file("");
+        assert_eq!(folder, "");
+        assert_eq!(filename, "");
+    }
+
+    #[test]
+    fn split_target_file_normalizes_backslashes() {
+        // Windows-style path pasted from Explorer: every `\` becomes `/`
+        // before the split so downstream callers only ever see one separator
+        // convention.
+        let (folder, filename) = split_target_file("foo\\bar\\notes.md");
+        assert_eq!(folder, "foo/bar");
+        assert_eq!(filename, "notes.md");
+    }
+
+    #[test]
+    fn split_target_file_handles_trailing_slash_as_empty_filename() {
+        // A path that ends at a folder separator has no filename component.
+        // Callers treat this as "folder with no filename yet" and supply a
+        // default on write-back.
+        let (folder, filename) = split_target_file("foo/bar/");
+        assert_eq!(folder, "foo/bar");
+        assert_eq!(filename, "");
+    }
+
+    // --- join_folder_and_filename --------------------------------------
+
+    #[test]
+    fn join_folder_and_filename_builds_relative_path() {
+        assert_eq!(
+            join_folder_and_filename("foo/bar", "notes.md"),
+            "foo/bar/notes.md"
+        );
+    }
+
+    #[test]
+    fn join_folder_and_filename_returns_filename_only_for_empty_folder() {
+        assert_eq!(join_folder_and_filename("", "notes.md"), "notes.md");
+    }
+
+    #[test]
+    fn join_folder_and_filename_preserves_absolute_folder() {
+        assert_eq!(
+            join_folder_and_filename("/Users/x", "notes.md"),
+            "/Users/x/notes.md"
+        );
+    }
+
+    #[test]
+    fn join_folder_and_filename_returns_folder_only_for_empty_filename() {
+        // The UI renders the in-progress folder when the user has cleared
+        // the filename. Mac's `buildTargetFile` would emit `"foo/"` after
+        // trimming; the Windows port avoids the trailing slash so a later
+        // `split` round-trip stays idempotent.
+        assert_eq!(join_folder_and_filename("foo", ""), "foo");
+    }
+
+    #[test]
+    fn join_folder_and_filename_returns_empty_for_both_empty() {
+        assert_eq!(join_folder_and_filename("", ""), "");
+    }
+
+    #[test]
+    fn join_folder_and_filename_normalizes_backslashes() {
+        assert_eq!(
+            join_folder_and_filename("foo\\bar", "notes.md"),
+            "foo/bar/notes.md"
+        );
+        assert_eq!(
+            join_folder_and_filename("foo", "sub\\notes.md"),
+            "foo/sub/notes.md"
+        );
+    }
+
+    #[test]
+    fn join_then_split_is_idempotent_for_typical_inputs() {
+        // Round-trip property: for inputs with no backslashes and non-empty
+        // components, split(join(folder, filename)) == (folder, filename).
+        let cases = [
+            ("foo/bar", "notes.md"),
+            ("/Users/x", "notes.md"),
+            ("", "notes.md"),
+        ];
+        for (folder, filename) in cases {
+            let joined = join_folder_and_filename(folder, filename);
+            let (rebuilt_folder, rebuilt_filename) = split_target_file(&joined);
+            assert_eq!(rebuilt_folder, folder);
+            assert_eq!(rebuilt_filename, filename);
+        }
     }
 }
