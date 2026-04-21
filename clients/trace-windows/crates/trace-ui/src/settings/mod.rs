@@ -334,12 +334,14 @@ fn theme_card<'a>(
     ];
 
     let tiles = presets.iter().map(|preset| {
-        let theme = TraceTheme::for_preset(*preset);
+        // 直接使用 `ThemePreset::preview_swatches` helper,避免为了拿色板
+        // 而构造整个 `TraceTheme` palette bundle。语义上这是 preset 自身
+        // 的属性,与 `title()` / `icon_glyph()` 的访问方式对齐。
         tiles::theme_preset_tile(
             palette,
             preset.title(),
             preset.icon_glyph(),
-            theme.preview_swatches,
+            preset.preview_swatches(),
             state.theme_preset == *preset,
             SettingsMessage::ThemePresetChanged(*preset),
         )

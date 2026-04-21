@@ -91,6 +91,17 @@ mod tests {
     }
 
     #[test]
+    fn theme_preset_icon_glyph_values_are_locked() {
+        // 锁死每个 preset 当前使用的 unicode 码位。`Paper` 保留 U+25A4(▤)
+        // 作为纸张书页语义——与 `WriteMode::File` 的 U+1F4C4(📄)拉开视
+        // 觉差异,详见模块文档。
+        assert_eq!(ThemePreset::Light.icon_glyph(), "\u{2600}");
+        assert_eq!(ThemePreset::Dark.icon_glyph(), "\u{263E}");
+        assert_eq!(ThemePreset::Paper.icon_glyph(), "\u{25A4}");
+        assert_eq!(ThemePreset::Dune.icon_glyph(), "\u{25D0}");
+    }
+
+    #[test]
     fn serializes_as_camel_case_raw_values() {
         assert_eq!(
             serde_json::to_string(&ThemePreset::Light).unwrap(),

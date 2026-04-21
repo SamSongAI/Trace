@@ -412,6 +412,20 @@ impl TraceTheme {
     }
 }
 
+impl ThemePreset {
+    /// 返回该 preset 对应的 4 色预览色板。
+    ///
+    /// 调用者等价于 `TraceTheme::for_preset(self).preview_swatches`,但这
+    /// 个 helper 与 [`Self::title`] / [`Self::icon_glyph`] 的访问模式对齐,让
+    /// `theme_card` 等 UI 层只在需要色板时拿色板,不必构造完整的
+    /// [`TraceTheme`]。语义上这是 `ThemePreset` 的派生属性,尽管实现上仍然
+    /// 通过 `TraceTheme::for_preset` 读出(因为 palette 数据源只在 theme 模
+    /// 块中)。
+    pub const fn preview_swatches(self) -> [TraceColor; 4] {
+        TraceTheme::for_preset(self).preview_swatches
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -736,5 +750,34 @@ mod tests {
     fn for_preset_is_usable_in_const_context() {
         const DARK: TraceTheme = TraceTheme::for_preset(ThemePreset::Dark);
         assert_eq!(DARK, TraceTheme::for_preset(ThemePreset::Dark));
+    }
+
+    #[test]
+    fn theme_preset_preview_swatches_helper_matches_trace_theme() {
+        // helper 必须返回与 `TraceTheme::for_preset(preset).preview_swatches`
+        // 完全一致的数组。任何 palette 重排都会在这里被拦截。
+        for preset in [
+            ThemePreset::Light,
+            ThemePreset::Dark,
+            ThemePreset::Paper,
+            ThemePreset::Dune,
+        ] {
+            assert_eq!(
+                preset.preview_swatches(),
+                TraceTheme::for_preset(preset).preview_swatches,
+                "preset {preset:?} 的 helper 色板必须与 TraceTheme 一致"
+            );
+        }
+    }
+
+    #[test]
+    fn theme_preset_preview_swatches_helper_is_const_fn() {
+        // `const fn` 保证在 const 上下文里可用。若有人不小心改成非 const,
+        // 这行会在编译期拒绝。
+        const LIGHT_SWATCHES: [TraceColor; 4] = ThemePreset::Light.preview_swatches();
+        assert_eq!(
+            LIGHT_SWATCHES,
+            TraceTheme::for_preset(ThemePreset::Light).preview_swatches
+        );
     }
 }

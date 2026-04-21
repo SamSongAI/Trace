@@ -41,13 +41,15 @@ impl WriteMode {
     ///   "sections" grid metaphor from `square.grid.2x2`.
     /// * [`Self::Thread`]    → `"≡"` (U+2261) — identical-to, evokes a
     ///   chat-bubble stack like `text.bubble`.
-    /// * [`Self::File`]      → `"▤"` (U+25A4) — squared ruled paper, mirrors
-    ///   `doc.text`.
+    /// * [`Self::File`]      → `"📄"` (U+1F4C4) — page-facing-up emoji from
+    ///   the Segoe UI Emoji family, mirrors `doc.text` and避免与
+    ///   [`crate::ThemePreset::Paper`] 的 `"▤"` 在设置面板里同时出现时产生视
+    ///   觉混淆。
     pub const fn icon_glyph(self) -> &'static str {
         match self {
             Self::Dimension => "\u{229E}",
             Self::Thread => "\u{2261}",
-            Self::File => "\u{25A4}",
+            Self::File => "\u{1F4C4}",
         }
     }
 
@@ -141,6 +143,16 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn write_mode_icon_glyph_values_are_locked() {
+        // 锁死每个变体当前使用的 unicode 码位,方便后续与 Mac SF Symbols
+        // 对照或回归检查。`File` 使用 U+1F4C4(📄)而非 U+25A4(▤),是为
+        // 了和 `ThemePreset::Paper` 拉开视觉差异——详见模块文档。
+        assert_eq!(WriteMode::Dimension.icon_glyph(), "\u{229E}");
+        assert_eq!(WriteMode::Thread.icon_glyph(), "\u{2261}");
+        assert_eq!(WriteMode::File.icon_glyph(), "\u{1F4C4}");
     }
 
     #[test]
