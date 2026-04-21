@@ -33,9 +33,11 @@ use std::sync::Arc;
 use iced::widget::{column, container, row, scrollable, text};
 use iced::{window, Element, Length, Pixels, Size, Subscription, Task, Theme};
 use trace_core::{
-    AppSettings, DailyFileDateFormat, EntryTheme, L10n, Language, NoteSection, ThemePreset,
-    TraceTheme, VaultPathValidationIssue, WriteMode,
+    join_folder_and_filename, split_target_file, AppSettings, DailyFileDateFormat, EntryTheme,
+    L10n, Language, NoteSection, ThemePreset, ThreadConfig, TraceTheme, VaultPathValidationIssue,
+    WriteMode,
 };
+use uuid::Uuid;
 
 use crate::theme::to_iced_theme;
 
@@ -163,6 +165,53 @@ pub enum SettingsMessage {
     /// the current length is above [`NoteSection::MINIMUM_COUNT`] (1) *and*
     /// `index` is in bounds; otherwise silently no-op.
     SectionRemoved(usize),
+    /// Fired on every keystroke in a thread name text input. Writes the new
+    /// string into the matching [`SettingsApp::thread_configs`] entry if one
+    /// exists for `id`; an unknown id silently no-ops (guards against stale
+    /// messages arriving after a [`ThreadRemoved`](SettingsMessage::ThreadRemoved)
+    /// drops the entry).
+    ThreadNameChanged(Uuid, String),
+    /// Fired on every keystroke in the folder-path portion of a thread row.
+    /// The shadow stores only the integrated `target_file`; the update branch
+    /// splits the current value, substitutes the new folder, and joins back.
+    /// Mirrors Mac `ThreadConfigRow.commitFolder`'s target-file rebuild, but
+    /// without the trim/default-filename normalization (that lives in the
+    /// sub-task 8 write-back path so the shadow can reflect in-progress keystrokes
+    /// faithfully).
+    ThreadFolderChanged(Uuid, String),
+    /// Fired on every keystroke in the filename portion of a thread row. Same
+    /// shadow-rebuild contract as
+    /// [`ThreadFolderChanged`](SettingsMessage::ThreadFolderChanged): split
+    /// the current target_file, substitute the new filename, join back.
+    ThreadFilenameChanged(Uuid, String),
+    /// Fired when the user clicks a row's "Choose Folder" button. Mirrors
+    /// [`BrowseVaultRequested`](SettingsMessage::BrowseVaultRequested) but
+    /// carries the thread `id` through the async round-trip so the follow-up
+    /// message can look up the right shadow entry.
+    BrowseThreadFolderRequested(Uuid),
+    /// Follow-up to
+    /// [`BrowseThreadFolderRequested`](SettingsMessage::BrowseThreadFolderRequested)
+    /// carrying the picker's result. A `Some(path)` converts to a relative
+    /// path when the picked folder sits inside the shadow vault (matching
+    /// Mac `ThreadConfigRow.chooseFolder`'s `vaultURL.path` prefix check) or
+    /// keeps the absolute path otherwise, then rebuilds the row's
+    /// `target_file` against the shadow filename. A `None` (cancelled) is a
+    /// no-op.
+    ThreadFolderBrowseChose(Uuid, Option<String>),
+    /// Adds a new [`ThreadConfig`] at the tail of [`SettingsApp::thread_configs`].
+    /// Mirrors Mac `AppSettings.addThread`: pick the first
+    /// [`L10n::new_thread_default_name`]-based name that does not collide
+    /// with an existing thread (add a numeric suffix when it does), default
+    /// the target file to `<name>.md`, and assign an `order` one above the
+    /// current max. No-op once the vec is at [`ThreadConfig::MAXIMUM_COUNT`].
+    ThreadAdded,
+    /// Removes the thread identified by `id` from
+    /// [`SettingsApp::thread_configs`]. No-op when the shadow is at
+    /// [`ThreadConfig::MINIMUM_COUNT`]; mirrors
+    /// [`SectionRemoved`](SettingsMessage::SectionRemoved)'s floor guard so a
+    /// stale message delivered after the button is already disabled cannot
+    /// drop the last thread.
+    ThreadRemoved(Uuid),
 }
 
 /// Mutable application state for the settings window.
@@ -247,6 +296,19 @@ pub struct SettingsApp {
     /// in sub-task 8 so the Mac reference's save-button semantics can be
     /// mirrored exactly there.
     pub section_titles: Vec<String>,
+    /// Shadow of [`AppSettings::thread_configs`] mutated by the Threads card
+    /// (sub-task 6). Each entry is a full [`ThreadConfig`] whose `target_file`
+    /// is kept as the integrated `folder/filename` string; the view layer
+    /// splits it on every render for the two editable sub-fields so the shadow
+    /// never has to maintain a parallel draft state.
+    ///
+    /// Physical order of the vec is not guaranteed to match `order` — renders
+    /// sort by `order` on demand so a reorder UX in a future sub-task can
+    /// stay a pure data operation. Length is bracketed by
+    /// `[ThreadConfig::MINIMUM_COUNT, ThreadConfig::MAXIMUM_COUNT]` by the
+    /// `ThreadAdded` / `ThreadRemoved` branches; persistence to
+    /// [`Self::settings`] is deferred to sub-task 8.
+    pub thread_configs: Vec<ThreadConfig>,
 }
 
 impl SettingsApp {
@@ -282,6 +344,10 @@ impl SettingsApp {
         // `Arc` and the shadow must remain mutable without taking a lock on
         // every edit.
         let section_titles = settings.section_titles.clone();
+        // Clone the persisted thread configs into the shadow for the same
+        // reason — the Threads card (sub-task 6) mutates the shadow freely
+        // without taking a lock on the `Arc<AppSettings>`.
+        let thread_configs = settings.thread_configs.clone();
         Self {
             theme,
             iced_theme,
@@ -297,6 +363,7 @@ impl SettingsApp {
             vault_path_issue,
             inbox_vault_path_issue,
             section_titles,
+            thread_configs,
         }
     }
 
@@ -417,7 +484,168 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
             }
             Task::none()
         }
+        SettingsMessage::ThreadNameChanged(id, value) => {
+            if let Some(thread) = state.thread_configs.iter_mut().find(|t| t.id == id) {
+                thread.name = value;
+            }
+            Task::none()
+        }
+        SettingsMessage::ThreadFolderChanged(id, folder) => {
+            // Split the existing target_file to preserve the current filename,
+            // then substitute in the new folder. Mirrors Mac
+            // `ThreadConfigRow.commitFolder`'s rebuild without the trim —
+            // the shadow carries raw keystroke state.
+            if let Some(thread) = state.thread_configs.iter_mut().find(|t| t.id == id) {
+                let (_, filename) = split_target_file(&thread.target_file);
+                thread.target_file = join_folder_and_filename(&folder, &filename);
+            }
+            Task::none()
+        }
+        SettingsMessage::ThreadFilenameChanged(id, filename) => {
+            if let Some(thread) = state.thread_configs.iter_mut().find(|t| t.id == id) {
+                let (folder, _) = split_target_file(&thread.target_file);
+                thread.target_file = join_folder_and_filename(&folder, &filename);
+            }
+            Task::none()
+        }
+        SettingsMessage::BrowseThreadFolderRequested(id) => pick_thread_folder_task(id),
+        SettingsMessage::ThreadFolderBrowseChose(id, Some(path)) => {
+            // Mac `ThreadConfigRow.chooseFolder`: when the picked folder sits
+            // inside the vault, store the relative path; otherwise keep the
+            // absolute path. We use a `"<vault>/"`-prefixed check to avoid
+            // accepting a sibling `vault-backup` folder as "inside the vault".
+            let vault_path = state.vault_path.clone();
+            let folder_for_target = normalize_thread_folder_to_vault(&vault_path, &path);
+            if let Some(thread) = state.thread_configs.iter_mut().find(|t| t.id == id) {
+                let (_, existing_filename) = split_target_file(&thread.target_file);
+                // Mac defaults an empty filename to `"Threads.md"` when the
+                // folder picker lands a value; we do the same so the user is
+                // not left with a bare-folder target after picking a path.
+                let filename: String = if existing_filename.is_empty() {
+                    DEFAULT_THREAD_FILENAME.to_string()
+                } else {
+                    existing_filename
+                };
+                thread.target_file =
+                    join_folder_and_filename(&folder_for_target, &filename);
+            }
+            Task::none()
+        }
+        SettingsMessage::ThreadFolderBrowseChose(_, None) => Task::none(),
+        SettingsMessage::ThreadAdded => {
+            if state.thread_configs.len() < ThreadConfig::MAXIMUM_COUNT {
+                let base_name = L10n::new_thread_default_name(state.language);
+                let (name, target_file) =
+                    unique_new_thread_name(&state.thread_configs, base_name);
+                let next_order = state
+                    .thread_configs
+                    .iter()
+                    .map(|t| t.order)
+                    .max()
+                    .map_or(0, |m| m + 1);
+                state
+                    .thread_configs
+                    .push(ThreadConfig::new(name, target_file, None, next_order));
+            }
+            Task::none()
+        }
+        SettingsMessage::ThreadRemoved(id) => {
+            if state.thread_configs.len() > ThreadConfig::MINIMUM_COUNT {
+                state.thread_configs.retain(|t| t.id != id);
+            }
+            Task::none()
+        }
     }
+}
+
+/// Default filename used when a user picks a folder for a thread row whose
+/// filename is still blank. Matches Mac `ThreadConfigRow.chooseFolder`'s
+/// `"Threads.md"` fallback.
+const DEFAULT_THREAD_FILENAME: &str = "Threads.md";
+
+/// Converts a folder path picked via the system folder dialog into the
+/// representation stored in `ThreadConfig::target_file`.
+///
+/// * Inside the shadow vault → relative path with no leading slash, matching
+///   Mac `ThreadConfigRow.chooseFolder`'s `"vault/"`-prefix check (guards
+///   against a sibling `vault-backup` folder being misread as inside-vault).
+/// * Outside the vault → the absolute path is preserved verbatim.
+/// * Empty vault_path → always keep the absolute path (there is nothing to
+///   compute a relative path against).
+fn normalize_thread_folder_to_vault(vault_path: &str, picked: &str) -> String {
+    if vault_path.is_empty() {
+        return picked.to_string();
+    }
+    // The exact match case returns an empty folder (root of the vault).
+    if picked == vault_path {
+        return String::new();
+    }
+    // Use a trailing-slash probe so the check rejects sibling folders that
+    // happen to share a prefix with the vault path. Normalize the probe
+    // ourselves because `vault_path` may or may not already end in `/`.
+    let vault_with_slash = if vault_path.ends_with('/') {
+        vault_path.to_string()
+    } else {
+        format!("{vault_path}/")
+    };
+    if picked.starts_with(&vault_with_slash) {
+        return picked[vault_with_slash.len()..].to_string();
+    }
+    picked.to_string()
+}
+
+/// Pick a fresh `(name, target_file)` pair for a newly added thread, skipping
+/// any value that collides with an existing entry.
+///
+/// Mirrors Mac `AppSettings.addThread`: start from the localized default name
+/// and append an integer suffix (starting from `1`) until nothing collides on
+/// either `name` or `target_file`. The helper stays pure so the tests in this
+/// module can exercise the de-dup logic without building a whole `SettingsApp`.
+fn unique_new_thread_name(
+    existing: &[ThreadConfig],
+    base_name: &str,
+) -> (String, String) {
+    let make_target = |name: &str| format!("{name}.md");
+    let is_taken = |name: &str, target_file: &str| {
+        existing
+            .iter()
+            .any(|t| t.name == name || t.target_file == target_file)
+    };
+    let base_target = make_target(base_name);
+    if !is_taken(base_name, &base_target) {
+        return (base_name.to_string(), base_target);
+    }
+    // Counter starts at 1 so the suffix matches the Mac reference's
+    // "New Thread 1", "New Thread 2"... progression.
+    let mut suffix = 1_usize;
+    loop {
+        let candidate_name = format!("{base_name} {suffix}");
+        let candidate_target = make_target(&candidate_name);
+        if !is_taken(&candidate_name, &candidate_target) {
+            return (candidate_name, candidate_target);
+        }
+        suffix += 1;
+    }
+}
+
+/// Kicks off an `rfd::AsyncFileDialog::pick_folder` picker and wraps the
+/// result in a [`SettingsMessage::ThreadFolderBrowseChose`] carrying the
+/// thread id.
+///
+/// A per-row dedicated helper because the generic [`pick_folder_task`] only
+/// wraps `Option<String>` into a single-argument message constructor; thread
+/// rows need to round-trip the `Uuid` through the async pick so the follow-up
+/// message can find the right shadow entry.
+fn pick_thread_folder_task(id: Uuid) -> Task<SettingsMessage> {
+    let future = async {
+        rfd::AsyncFileDialog::new()
+            .pick_folder()
+            .await
+            .map(|handle| handle.path().to_string_lossy().into_owned())
+    };
+    Task::perform(future, move |picked| {
+        SettingsMessage::ThreadFolderBrowseChose(id, picked)
+    })
 }
 
 /// Kicks off an `rfd::AsyncFileDialog::pick_folder` picker off the iced view
@@ -1453,5 +1681,410 @@ mod tests {
         );
         assert_eq!(app.write_mode, WriteMode::Thread);
         let _element: Element<'_, SettingsMessage> = build_cards(&app);
+    }
+
+    // --- Sub-task 6 ----------------------------------------------------
+
+    #[test]
+    fn settings_app_new_seeds_thread_configs_from_settings() {
+        // The shadow must mirror the persisted `thread_configs` on first
+        // paint so the Threads card renders the user's last configuration
+        // without waiting for a dispatched message.
+        let persisted = AppSettings {
+            thread_configs: vec![
+                ThreadConfig::new("想法", "想法.md", None, 0),
+                ThreadConfig::new("读书笔记", "读书笔记.md", None, 1),
+            ],
+            ..AppSettings::default()
+        };
+        let app = SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(persisted),
+        );
+        assert_eq!(app.thread_configs.len(), 2);
+        assert_eq!(app.thread_configs[0].name, "想法");
+        assert_eq!(app.thread_configs[1].name, "读书笔记");
+    }
+
+    fn thread_fixture(name: &str, target_file: &str, order: i32) -> ThreadConfig {
+        ThreadConfig::new(name, target_file, None, order)
+    }
+
+    fn seeded_app(threads: Vec<ThreadConfig>) -> SettingsApp {
+        let settings = AppSettings {
+            thread_configs: threads,
+            ..AppSettings::default()
+        };
+        SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(settings),
+        )
+    }
+
+    #[test]
+    fn thread_name_changed_writes_shadow() {
+        let t1 = thread_fixture("A", "A.md", 0);
+        let t2 = thread_fixture("B", "B.md", 1);
+        let id = t1.id;
+        let mut app = seeded_app(vec![t1, t2]);
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::ThreadNameChanged(id, "Renamed".into()),
+        );
+        assert_eq!(app.thread_configs[0].name, "Renamed");
+        // Other thread must stay untouched.
+        assert_eq!(app.thread_configs[1].name, "B");
+    }
+
+    #[test]
+    fn thread_name_changed_for_unknown_id_is_noop() {
+        let t1 = thread_fixture("A", "A.md", 0);
+        let mut app = seeded_app(vec![t1]);
+        let before = app.thread_configs.clone();
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::ThreadNameChanged(Uuid::new_v4(), "ghost".into()),
+        );
+        assert_eq!(app.thread_configs, before);
+    }
+
+    #[test]
+    fn thread_folder_changed_preserves_filename() {
+        // Mac `ThreadConfigRow.commitFolder` rebuilds `target_file` from the
+        // draft folder + draft filename. The shadow carries only the joined
+        // target_file, so the update branch must re-split to preserve the
+        // current filename.
+        let t1 = thread_fixture("A", "old/notes.md", 0);
+        let id = t1.id;
+        let mut app = seeded_app(vec![t1]);
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::ThreadFolderChanged(id, "new".into()),
+        );
+        assert_eq!(app.thread_configs[0].target_file, "new/notes.md");
+    }
+
+    #[test]
+    fn thread_filename_changed_preserves_folder() {
+        let t1 = thread_fixture("A", "keep/old.md", 0);
+        let id = t1.id;
+        let mut app = seeded_app(vec![t1]);
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::ThreadFilenameChanged(id, "new.md".into()),
+        );
+        assert_eq!(app.thread_configs[0].target_file, "keep/new.md");
+    }
+
+    #[test]
+    fn thread_folder_browse_chose_none_is_noop() {
+        let t1 = thread_fixture("A", "keep/old.md", 0);
+        let id = t1.id;
+        let mut app = seeded_app(vec![t1]);
+        let before = app.thread_configs.clone();
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::ThreadFolderBrowseChose(id, None),
+        );
+        assert_eq!(app.thread_configs, before);
+    }
+
+    #[test]
+    fn thread_folder_browse_chose_within_vault_stores_relative_path() {
+        let t1 = thread_fixture("A", "old/notes.md", 0);
+        let id = t1.id;
+        let mut app = seeded_app(vec![t1]);
+        app.vault_path = "/Users/you/Vault".into();
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::ThreadFolderBrowseChose(
+                id,
+                Some("/Users/you/Vault/Projects".into()),
+            ),
+        );
+        assert_eq!(app.thread_configs[0].target_file, "Projects/notes.md");
+    }
+
+    #[test]
+    fn thread_folder_browse_chose_outside_vault_keeps_absolute_path() {
+        let t1 = thread_fixture("A", "old/notes.md", 0);
+        let id = t1.id;
+        let mut app = seeded_app(vec![t1]);
+        app.vault_path = "/Users/you/Vault".into();
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::ThreadFolderBrowseChose(
+                id,
+                Some("/Users/other/Scratch".into()),
+            ),
+        );
+        assert_eq!(
+            app.thread_configs[0].target_file,
+            "/Users/other/Scratch/notes.md"
+        );
+    }
+
+    #[test]
+    fn thread_folder_browse_chose_guards_against_vault_prefix_collision() {
+        // "/Users/you/Vault-backup" starts with "/Users/you/Vault" textually,
+        // but the prefix check must reject it because it is not the vault
+        // folder. Mirrors Mac `ThreadConfigRow.chooseFolder`'s trailing-slash
+        // probe.
+        let t1 = thread_fixture("A", "keep.md", 0);
+        let id = t1.id;
+        let mut app = seeded_app(vec![t1]);
+        app.vault_path = "/Users/you/Vault".into();
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::ThreadFolderBrowseChose(
+                id,
+                Some("/Users/you/Vault-backup".into()),
+            ),
+        );
+        assert_eq!(
+            app.thread_configs[0].target_file,
+            "/Users/you/Vault-backup/keep.md"
+        );
+    }
+
+    #[test]
+    fn thread_folder_browse_chose_defaults_filename_when_blank() {
+        // Mac `ThreadConfigRow.chooseFolder` auto-sets the filename to
+        // `Threads.md` when the draft is empty. Mirror the same default so
+        // the user isn't left with a bare-folder target after picking a path.
+        let t1 = thread_fixture("A", "", 0);
+        let id = t1.id;
+        let mut app = seeded_app(vec![t1]);
+        app.vault_path = "/Users/you/Vault".into();
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::ThreadFolderBrowseChose(
+                id,
+                Some("/Users/you/Vault/Logs".into()),
+            ),
+        );
+        assert_eq!(app.thread_configs[0].target_file, "Logs/Threads.md");
+    }
+
+    #[test]
+    fn thread_folder_browse_chose_empty_vault_keeps_absolute() {
+        // When the vault path is blank, there's nothing to compute a relative
+        // path against, so the picked absolute path must be stored verbatim.
+        let t1 = thread_fixture("A", "notes.md", 0);
+        let id = t1.id;
+        let mut app = seeded_app(vec![t1]);
+        assert!(app.vault_path.is_empty());
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::ThreadFolderBrowseChose(
+                id,
+                Some("/Users/x/Folder".into()),
+            ),
+        );
+        assert_eq!(
+            app.thread_configs[0].target_file,
+            "/Users/x/Folder/notes.md"
+        );
+    }
+
+    #[test]
+    fn thread_added_appends_with_next_order() {
+        let t1 = thread_fixture("A", "A.md", 5);
+        let mut app = seeded_app(vec![t1]);
+        let before_len = app.thread_configs.len();
+        let _ = settings_update(&mut app, SettingsMessage::ThreadAdded);
+        assert_eq!(app.thread_configs.len(), before_len + 1);
+        let added = app.thread_configs.last().expect("must have last thread");
+        // order = max(existing) + 1
+        assert_eq!(added.order, 6);
+        // default target_file == "<name>.md"
+        assert_eq!(added.target_file, format!("{}.md", added.name));
+    }
+
+    #[test]
+    fn thread_added_from_empty_starts_at_zero() {
+        // Empty shadow (rare but possible during development) must start
+        // order at 0, not crash on `max().unwrap()`.
+        let mut app = seeded_app(vec![]);
+        let _ = settings_update(&mut app, SettingsMessage::ThreadAdded);
+        assert_eq!(app.thread_configs.len(), 1);
+        assert_eq!(app.thread_configs[0].order, 0);
+    }
+
+    #[test]
+    fn thread_added_appends_unique_name_on_collision() {
+        // The localized default "新线程" (Zh) / "New Thread" (En) might
+        // already exist; the helper must append a numeric suffix starting
+        // at 1 until nothing collides.
+        let lang = Language::Zh;
+        let base = L10n::new_thread_default_name(lang);
+        let settings = AppSettings {
+            language: lang,
+            thread_configs: vec![
+                ThreadConfig::new(base, format!("{base}.md"), None, 0),
+            ],
+            ..AppSettings::default()
+        };
+        let mut app = SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(settings),
+        );
+        let _ = settings_update(&mut app, SettingsMessage::ThreadAdded);
+        assert_eq!(app.thread_configs.len(), 2);
+        let added = app.thread_configs.last().unwrap();
+        assert_eq!(added.name, format!("{base} 1"));
+        assert_eq!(added.target_file, format!("{base} 1.md"));
+    }
+
+    #[test]
+    fn thread_added_at_maximum_is_noop() {
+        let threads: Vec<ThreadConfig> = (0..ThreadConfig::MAXIMUM_COUNT)
+            .map(|i| {
+                ThreadConfig::new(
+                    format!("T{i}"),
+                    format!("T{i}.md"),
+                    None,
+                    i as i32,
+                )
+            })
+            .collect();
+        let mut app = seeded_app(threads);
+        let before = app.thread_configs.clone();
+        let _ = settings_update(&mut app, SettingsMessage::ThreadAdded);
+        assert_eq!(app.thread_configs, before);
+        assert_eq!(app.thread_configs.len(), ThreadConfig::MAXIMUM_COUNT);
+    }
+
+    #[test]
+    fn thread_removed_filters_by_id() {
+        let t1 = thread_fixture("A", "A.md", 0);
+        let t2 = thread_fixture("B", "B.md", 1);
+        let t3 = thread_fixture("C", "C.md", 2);
+        let id_of_b = t2.id;
+        let mut app = seeded_app(vec![t1, t2, t3]);
+        let _ = settings_update(&mut app, SettingsMessage::ThreadRemoved(id_of_b));
+        assert_eq!(app.thread_configs.len(), 2);
+        assert!(app.thread_configs.iter().all(|t| t.id != id_of_b));
+    }
+
+    #[test]
+    fn thread_removed_at_minimum_is_noop() {
+        // Mirrors `canRemoveThread = count > 1` on Mac. The last remaining
+        // thread cannot be deleted from the shadow.
+        let t1 = thread_fixture("Solo", "Solo.md", 0);
+        let id = t1.id;
+        let mut app = seeded_app(vec![t1]);
+        let _ = settings_update(&mut app, SettingsMessage::ThreadRemoved(id));
+        assert_eq!(app.thread_configs.len(), 1);
+        assert_eq!(app.thread_configs[0].name, "Solo");
+    }
+
+    #[test]
+    fn thread_removed_for_unknown_id_is_noop() {
+        let t1 = thread_fixture("A", "A.md", 0);
+        let t2 = thread_fixture("B", "B.md", 1);
+        let mut app = seeded_app(vec![t1, t2]);
+        let before = app.thread_configs.clone();
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::ThreadRemoved(Uuid::new_v4()),
+        );
+        assert_eq!(app.thread_configs, before);
+    }
+
+    #[test]
+    fn thread_messages_do_not_mutate_shared_settings() {
+        // Sub-task 6 still only touches the shadow. Persistence lands in
+        // sub-task 8.
+        let t1 = thread_fixture("A", "A.md", 0);
+        let t2 = thread_fixture("B", "B.md", 1);
+        let id = t1.id;
+        let mut app = seeded_app(vec![t1, t2]);
+        let original = app.settings.thread_configs.clone();
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::ThreadNameChanged(id, "Renamed".into()),
+        );
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::ThreadFolderChanged(id, "folder".into()),
+        );
+        let _ = settings_update(&mut app, SettingsMessage::ThreadAdded);
+        let _ = settings_update(&mut app, SettingsMessage::ThreadRemoved(id));
+        assert_eq!(app.settings.thread_configs, original);
+    }
+
+    #[test]
+    fn normalize_thread_folder_to_vault_handles_every_branch() {
+        // `picked == vault_path` → empty relative folder
+        assert_eq!(
+            normalize_thread_folder_to_vault("/Users/x/Vault", "/Users/x/Vault"),
+            ""
+        );
+        // inside vault → relative
+        assert_eq!(
+            normalize_thread_folder_to_vault("/Users/x/Vault", "/Users/x/Vault/A"),
+            "A"
+        );
+        // vault with trailing slash → still relative
+        assert_eq!(
+            normalize_thread_folder_to_vault("/Users/x/Vault/", "/Users/x/Vault/A"),
+            "A"
+        );
+        // outside vault → absolute preserved
+        assert_eq!(
+            normalize_thread_folder_to_vault("/Users/x/Vault", "/tmp"),
+            "/tmp"
+        );
+        // vault-looking sibling → absolute preserved
+        assert_eq!(
+            normalize_thread_folder_to_vault(
+                "/Users/x/Vault",
+                "/Users/x/Vault-backup"
+            ),
+            "/Users/x/Vault-backup"
+        );
+        // empty vault → always absolute
+        assert_eq!(
+            normalize_thread_folder_to_vault("", "/tmp"),
+            "/tmp"
+        );
+    }
+
+    #[test]
+    fn unique_new_thread_name_returns_base_when_no_collision() {
+        assert_eq!(
+            unique_new_thread_name(&[], "New Thread"),
+            ("New Thread".to_string(), "New Thread.md".to_string())
+        );
+    }
+
+    #[test]
+    fn unique_new_thread_name_skips_name_collision() {
+        let existing = vec![ThreadConfig::new(
+            "New Thread",
+            "New Thread.md",
+            None,
+            0,
+        )];
+        let (name, target) = unique_new_thread_name(&existing, "New Thread");
+        assert_eq!(name, "New Thread 1");
+        assert_eq!(target, "New Thread 1.md");
+    }
+
+    #[test]
+    fn unique_new_thread_name_also_skips_target_file_collision() {
+        // A thread whose name differs but target_file collides must still
+        // bump the suffix. Matches Mac `AppSettings.addThread` which checks
+        // both the `name` and `targetFile` fields.
+        let existing = vec![ThreadConfig::new(
+            "Something else",
+            "New Thread.md",
+            None,
+            0,
+        )];
+        let (name, target) = unique_new_thread_name(&existing, "New Thread");
+        assert_eq!(name, "New Thread 1");
+        assert_eq!(target, "New Thread 1.md");
     }
 }
