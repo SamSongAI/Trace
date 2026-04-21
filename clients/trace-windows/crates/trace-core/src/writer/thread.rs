@@ -26,6 +26,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 
@@ -50,6 +51,19 @@ pub trait ThreadSettings {
     /// Preset controlling entry body formatting (fenced code block, plain
     /// text + timestamp, or markdown blockquote).
     fn entry_theme(&self) -> EntryTheme;
+}
+
+// Blanket forwarding for `Arc<T>` — mirrors the `DailyNoteSettings`
+// forwarding so the capture panel can reuse a single `Arc<AppSettings>`
+// without cloning on every Thread write.
+impl<T: ThreadSettings + ?Sized> ThreadSettings for Arc<T> {
+    fn vault_path(&self) -> &Path {
+        (**self).vault_path()
+    }
+
+    fn entry_theme(&self) -> EntryTheme {
+        (**self).entry_theme()
+    }
 }
 
 /// Writes thread-mode entries. Holds a clock-independent reference to

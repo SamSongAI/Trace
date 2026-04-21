@@ -28,6 +28,7 @@
 use std::fs;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 
@@ -69,6 +70,32 @@ pub trait DailyNoteSettings {
     /// `NoteSection` itself.
     fn header_for(&self, section: &NoteSection) -> String {
         section.header()
+    }
+}
+
+// Blanket forwarding for `Arc<T>` so hot paths (e.g. the iced capture
+// panel's writer construction in `Message::SendNote` / `AppendNote`) can
+// share a single settings snapshot through an `Arc` without cloning the
+// inner `AppSettings`. Every method delegates to the inner `T`.
+impl<T: DailyNoteSettings + ?Sized> DailyNoteSettings for Arc<T> {
+    fn vault_path(&self) -> &Path {
+        (**self).vault_path()
+    }
+
+    fn daily_folder_name(&self) -> &str {
+        (**self).daily_folder_name()
+    }
+
+    fn daily_file_date_format(&self) -> &str {
+        (**self).daily_file_date_format()
+    }
+
+    fn entry_theme(&self) -> EntryTheme {
+        (**self).entry_theme()
+    }
+
+    fn header_for(&self, section: &NoteSection) -> String {
+        (**self).header_for(section)
     }
 }
 

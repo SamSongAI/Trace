@@ -19,6 +19,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 
@@ -32,6 +33,14 @@ pub trait FileWriterSettings {
     /// Absolute filesystem path to the inbox vault root. Whitespace-only paths
     /// are rejected with `InvalidVaultPath`.
     fn inbox_vault_path(&self) -> &Path;
+}
+
+// Blanket forwarding for `Arc<T>` — lets the capture panel share a
+// single `Arc<AppSettings>` across File-mode writes without cloning.
+impl<T: FileWriterSettings + ?Sized> FileWriterSettings for Arc<T> {
+    fn inbox_vault_path(&self) -> &Path {
+        (**self).inbox_vault_path()
+    }
 }
 
 /// Writes one Markdown file per entry into an inbox vault. The writer is

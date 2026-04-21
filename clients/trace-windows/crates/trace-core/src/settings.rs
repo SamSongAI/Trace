@@ -1543,4 +1543,81 @@ mod tests {
         assert_eq!(VaultPathValidationIssue::is_blank("/tmp/x"), None);
         assert_eq!(VaultPathValidationIssue::is_blank("C:/vault"), None);
     }
+
+    // -------------------------------------------------------------------
+    // Arc<AppSettings> forwarding
+    //
+    // The blanket impls in `writer/{daily,thread,file,clipboard_image}.rs`
+    // let hosts share a single settings snapshot through an `Arc`
+    // without cloning. Pin the contract here so a regression in either
+    // the blanket impl or the per-field forwarding surfaces loudly.
+    // -------------------------------------------------------------------
+    #[test]
+    fn arc_app_settings_forwards_daily_thread_file_and_image_traits() {
+        use std::sync::Arc;
+
+        let mut settings = AppSettings::default();
+        settings.vault_path = "/tmp/trace-vault".to_string();
+        settings.inbox_vault_path = "/tmp/trace-inbox".to_string();
+        settings.daily_folder_name = "Daily".to_string();
+        settings.daily_file_date_format = "yyyy-MM-dd".to_string();
+        let shared = Arc::new(settings);
+
+        // DailyNoteSettings: key scalar + header_for default path.
+        assert_eq!(
+            DailyNoteSettings::vault_path(&shared),
+            Path::new("/tmp/trace-vault")
+        );
+        assert_eq!(DailyNoteSettings::daily_folder_name(&shared), "Daily");
+        assert_eq!(
+            DailyNoteSettings::daily_file_date_format(&shared),
+            "yyyy-MM-dd"
+        );
+        let section = NoteSection::new(0, "Note");
+        // header_for on AppSettings uses `header_for_index` — we only need
+        // to confirm the forwarding returns a non-empty string.
+        assert!(!DailyNoteSettings::header_for(&shared, &section).is_empty());
+
+        // ThreadSettings: vault_path.
+        assert_eq!(
+            ThreadSettings::vault_path(&shared),
+            Path::new("/tmp/trace-vault")
+        );
+
+        // FileWriterSettings: inbox_vault_path.
+        assert_eq!(
+            FileWriterSettings::inbox_vault_path(&shared),
+            Path::new("/tmp/trace-inbox")
+        );
+
+        // ClipboardImageWriterSettings.
+        assert_eq!(
+            ClipboardImageWriterSettings::vault_path(&shared),
+            Path::new("/tmp/trace-vault")
+        );
+        assert_eq!(
+            ClipboardImageWriterSettings::daily_folder_name(&shared),
+            "Daily"
+        );
+    }
+
+    #[test]
+    fn arc_app_settings_drives_a_daily_note_write() {
+        use std::sync::Arc;
+
+        // Round-trip: pass `Arc<AppSettings>` straight into the writer
+        // constructor, issue a save, and confirm the file lands.
+        let tmp = TempDir::new().unwrap();
+        let mut settings = AppSettings::default();
+        settings.vault_path = tmp.path().to_string_lossy().into_owned();
+        let shared = Arc::new(settings);
+
+        let writer = DailyNoteWriter::new(Arc::clone(&shared));
+        let section = NoteSection::new(0, NoteSection::DEFAULT_TITLES[0]);
+        let written = writer
+            .save_new_entry("arc forwarded body", &section, fixed_now())
+            .expect("save succeeds")
+            .expect("writer returns a Written record");
+        assert!(written.bytes_written > 0);
+    }
 }

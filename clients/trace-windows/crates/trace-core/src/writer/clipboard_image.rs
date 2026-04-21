@@ -25,6 +25,7 @@
 //! — every byte of these strings is asserted in the tests below.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 
@@ -44,6 +45,19 @@ pub trait ClipboardImageWriterSettings {
     /// Name of the daily-note sub-folder inside the vault (e.g. `"daily"`).
     /// Images land under `{vault_path}/{daily_folder_name}/assets/{date}/`.
     fn daily_folder_name(&self) -> &str;
+}
+
+// Blanket forwarding for `Arc<T>` — parity with the other writer
+// settings traits so hosts can share a single settings snapshot through
+// an `Arc` without cloning.
+impl<T: ClipboardImageWriterSettings + ?Sized> ClipboardImageWriterSettings for Arc<T> {
+    fn vault_path(&self) -> &Path {
+        (**self).vault_path()
+    }
+
+    fn daily_folder_name(&self) -> &str {
+        (**self).daily_folder_name()
+    }
 }
 
 /// Pure-computation result of [`ClipboardImageWriter::plan`]. Phase 13
