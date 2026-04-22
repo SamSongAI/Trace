@@ -480,6 +480,15 @@ pub struct SettingsApp {
     /// `SettingsApp` can stay `Send + Sync` without constraining the sink's
     /// concrete type (`Arc<T>` is `Send + Sync` when `T: Send + Sync`).
     pub launch_at_login_sink: Arc<dyn LaunchAtLoginSink>,
+    /// Most recent `Arc<AppSettings>` snapshot of [`Self::working`]. Refreshed
+    /// inside [`persist_working`] — i.e. every time a shadow-field
+    /// [`SettingsMessage`] commits a change — so the daemon layer can cheaply
+    /// `Arc::clone(&app.latest_snapshot)` and broadcast it to
+    /// [`crate::app::CaptureApp`] after each Settings dispatch. Sub-task 8c.3
+    /// is the first consumer; the constructor initialises it to the input
+    /// `Arc` so the very first broadcast (if any) points at the byte-for-byte
+    /// identical allocation the daemon is already holding.
+    pub latest_snapshot: Arc<AppSettings>,
 }
 
 impl SettingsApp {
@@ -597,6 +606,12 @@ impl SettingsApp {
         // on-disk JSON stays a byte-for-byte reflection of the user's most
         // recent edit — no debounce, no batching.
         let working = (*settings).clone();
+        // Seed the broadcast snapshot with the input `Arc` itself. Content
+        // is identical to `working` at construction time, and reusing the
+        // incoming pointer means the daemon's `state.shared_settings` and
+        // `SettingsApp::latest_snapshot` share one allocation until the
+        // first shadow-field edit triggers `persist_working`.
+        let latest_snapshot = Arc::clone(&settings);
         Self {
             theme,
             iced_theme,
@@ -623,6 +638,7 @@ impl SettingsApp {
             working,
             save_path,
             launch_at_login_sink,
+            latest_snapshot,
         }
     }
 
@@ -657,10 +673,30 @@ impl SettingsApp {
         self.iced_theme = to_iced_theme(&theme);
         self.theme = theme;
     }
+
+    /// Cheap `Arc::clone` of the most recent write-through snapshot.
+    ///
+    /// Used by the daemon layer (sub-task 8c.3) to broadcast settings
+    /// changes to [`crate::app::CaptureApp`] after every `settings_update`
+    /// dispatch. Because [`persist_working`] refreshes
+    /// [`Self::latest_snapshot`] on every shadow-field commit, successive
+    /// calls between two edits return pointers to the same allocation —
+    /// the `CaptureApp::ReplaceSettings` arm relies on `Arc::ptr_eq` to
+    /// short-circuit no-op dispatches.
+    pub fn latest_snapshot(&self) -> Arc<AppSettings> {
+        Arc::clone(&self.latest_snapshot)
+    }
 }
 
-/// Serialises the current [`SettingsApp::working`] copy to
-/// [`SettingsApp::save_path`], logging but otherwise swallowing any failure.
+/// Refreshes [`SettingsApp::latest_snapshot`] from the current `working`
+/// copy and serialises the same copy to [`SettingsApp::save_path`], logging
+/// but otherwise swallowing any failure.
+///
+/// The snapshot refresh is unconditional — it must run even when
+/// `save_path` is `None` (ephemeral test buffers, transient UI previews)
+/// so the daemon's broadcast to `CaptureApp` picks up the edit regardless
+/// of persistence configuration. The disk write still only fires when a
+/// `save_path` was supplied.
 ///
 /// Mirrors the UI-non-blocking contract of Mac `AppSettings`' `@Published` +
 /// `didSet { UserDefaults.set(...) }` pair: a save failure is surfaced to
@@ -668,11 +704,14 @@ impl SettingsApp {
 /// the view tree. The Mac reference's `updateLaunchAtLogin()` uses the same
 /// `NSLog` fallback for the same class of errors — a non-writable settings
 /// directory must not block the user from continuing to type.
-///
-/// `save_path = None` intentionally skips the disk write so UI-only tests
-/// (and any future call site that wants an ephemeral settings buffer) do
-/// not touch the filesystem.
-fn persist_working(state: &SettingsApp) {
+fn persist_working(state: &mut SettingsApp) {
+    // Refresh the broadcast snapshot before touching disk so a concurrent
+    // `latest_snapshot()` call observes the new value whether or not the
+    // save succeeds. Every call reallocates a fresh `Arc` — cheap compared
+    // to the full `AppSettings` clone below — so `Arc::ptr_eq` between
+    // pre-edit and post-edit snapshots always returns `false`, which the
+    // daemon layer relies on to detect real changes.
+    state.latest_snapshot = Arc::new(state.working.clone());
     let Some(path) = state.save_path.as_deref() else {
         return;
     };
@@ -3757,5 +3796,69 @@ mod tests {
             SettingsMessage::LaunchAtLoginToggled(false),
         );
         assert!(!legacy_save_path.launch_at_login_shadow);
+    }
+
+    // --- Sub-task 8c.3: `latest_snapshot` broadcast plumbing ----------
+
+    #[test]
+    fn latest_snapshot_reflects_shadow_edits_after_persist() {
+        // Every shadow-field dispatch must end with `persist_working`
+        // refreshing `latest_snapshot` to a *new* `Arc` — the daemon
+        // broadcasts after each settings message, so stale snapshots
+        // would defeat the whole live-sync pipeline.
+        let mut app = fresh_app();
+        let before = app.latest_snapshot();
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::LaunchAtLoginToggled(true),
+        );
+        let after = app.latest_snapshot();
+        assert!(
+            !Arc::ptr_eq(&before, &after),
+            "snapshot must be a fresh allocation after a persist"
+        );
+        assert!(
+            after.launch_at_login,
+            "snapshot must mirror the shadow edit"
+        );
+    }
+
+    #[test]
+    fn latest_snapshot_is_cheap_clone_not_new_allocation_per_call() {
+        // Between two edits, `latest_snapshot()` must hand out pointers
+        // to the *same* allocation so the daemon's broadcast short-circuit
+        // via `Arc::ptr_eq` has something to compare against.
+        let app = fresh_app();
+        let a = app.latest_snapshot();
+        let b = app.latest_snapshot();
+        assert!(
+            Arc::ptr_eq(&a, &b),
+            "successive snapshots without edits must share one allocation"
+        );
+    }
+
+    #[test]
+    fn latest_snapshot_initial_value_matches_input_arc() {
+        // Constructor must seed the snapshot from the input `Arc` so the
+        // very first broadcast (if the daemon dispatches one before any
+        // edit) mirrors the same bytes the caller just handed us. We
+        // sample a representative field rather than asserting full
+        // struct equality because `AppSettings` does not implement
+        // `PartialEq` — the public contract here is "observable state
+        // of `snap` matches the seed", not "pointer identity".
+        let settings = Arc::new(AppSettings {
+            vault_path: "/seed/path".into(),
+            note_write_mode: WriteMode::Thread,
+            launch_at_login: true,
+            ..AppSettings::default()
+        });
+        let app = SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::clone(&settings),
+        );
+        let snap = app.latest_snapshot();
+        assert_eq!(snap.vault_path, "/seed/path");
+        assert_eq!(snap.note_write_mode, WriteMode::Thread);
+        assert!(snap.launch_at_login);
     }
 }

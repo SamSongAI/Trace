@@ -280,7 +280,24 @@ fn update(state: &mut TraceApp, message: Message) -> Task<Message> {
         }
         Message::Settings(settings_message) => {
             if let Some(settings) = state.settings.as_mut() {
-                settings_app::settings_update(settings, settings_message).map(Message::Settings)
+                let task = settings_app::settings_update(settings, settings_message)
+                    .map(Message::Settings);
+                // Broadcast the latest snapshot so `CaptureApp` reflects
+                // live settings edits without a restart. `SettingsApp`
+                // refreshes its own `latest_snapshot` inside
+                // `persist_working`, so this is a cheap `Arc::clone` —
+                // the heavy `AppSettings` clone already happened at the
+                // shadow-field commit.
+                let new_snapshot = settings.latest_snapshot();
+                // Also refresh the top-level `shared_settings` so any
+                // future `SettingsApp` rebuild (after the user closes
+                // and reopens the settings window) seeds from the
+                // current state, not the stale startup snapshot.
+                state.shared_settings = Arc::clone(&new_snapshot);
+                let broadcast = Task::done(Message::Capture(
+                    capture_app::Message::ReplaceSettings(new_snapshot),
+                ));
+                Task::batch(vec![task, broadcast])
             } else {
                 // The capture panel is the only path that opens the settings
                 // window, and we initialise `state.settings` on

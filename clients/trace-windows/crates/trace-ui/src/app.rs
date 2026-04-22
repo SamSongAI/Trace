@@ -167,6 +167,27 @@ pub enum Message {
     /// `iced::window::Event::Opened` translated to a domain message so
     /// [`CaptureApp`] can capture the window id for the close task.
     WindowOpened(window::Id),
+    /// New [`AppSettings`] snapshot broadcast from the settings window.
+    ///
+    /// Emitted by the daemon layer (`trace-app::update`) after every
+    /// [`crate::settings::SettingsMessage`] dispatch so the capture panel
+    /// picks up language / theme / sections / threads / write_mode /
+    /// vault_path / daily-* edits live, without waiting for a restart.
+    ///
+    /// The handler re-derives every settings-driven field from the new
+    /// snapshot (theme, sections, threads, write mode) and replaces the
+    /// stored [`Arc<AppSettings>`] so subsequent writer dispatches see the
+    /// latest values. Transient UI state (editor contents, pinned flag,
+    /// focused chip) is intentionally preserved: an in-flight keystroke
+    /// must not be discarded because the user happened to tweak a colour
+    /// preset.
+    ///
+    /// `Arc::ptr_eq` short-circuits a no-op dispatch so a benign broadcast
+    /// after a hover event (should one ever arrive) doesn't re-derive any
+    /// cached field. In practice the daemon only broadcasts after a real
+    /// edit (every `persist_working` allocates a fresh `Arc`), so the
+    /// short-circuit is defensive but cheap.
+    ReplaceSettings(Arc<AppSettings>),
 }
 
 /// Stable identifier for a section chip, mirroring the index-based identity
@@ -328,6 +349,70 @@ impl CaptureApp {
     pub fn set_theme(&mut self, theme: TraceTheme) {
         self.iced_theme = to_iced_theme(&theme);
         self.theme = theme;
+    }
+}
+
+/// Re-derives every settings-driven field on `state` from the freshly
+/// broadcast `snap` and replaces the stored [`Arc<AppSettings>`]. Sub-task
+/// 8c.3 uses this helper from the [`Message::ReplaceSettings`] arm so the
+/// capture panel reflects settings window edits without a restart.
+///
+/// Settings-derived fields:
+///
+/// * `settings` — the `Arc` itself; writers constructed inside
+///   `dispatch_save` `Arc::clone` it on every dispatch.
+/// * `theme` / `iced_theme` — rebuilt from `snap.app_theme_preset` via
+///   [`TraceTheme::for_preset`] + [`to_iced_theme`], mirroring
+///   [`CaptureApp::set_theme`].
+/// * `sections` — rebuilt via [`AppSettings::sections`] so the footer chip
+///   list tracks renames / adds / removes.
+/// * `threads` — cloned from `snap.thread_configs` and sorted by `order`,
+///   matching the seeding contract in [`CaptureApp::new`].
+/// * `write_mode` — mirrored from `snap.note_write_mode`.
+///
+/// Transient UI fields (editor contents, pinned flag, toast, window ids)
+/// are intentionally untouched so the user's in-flight draft survives a
+/// live settings edit. Selection indices are clamped into the new chip
+/// list bounds: if the user's previously selected section index is now out
+/// of range (the settings window shrunk the list), we reset to the first
+/// slot; a previously selected thread whose id disappeared is cleared
+/// rather than aliased to a stranger.
+fn apply_settings_snapshot(state: &mut CaptureApp, snap: &Arc<AppSettings>) {
+    // Replace the shared pointer first so any subsequent `dispatch_save`
+    // triggered inside this pass already sees the new snapshot.
+    state.settings = Arc::clone(snap);
+    // Rebuild the theme cache via the existing helper — keeps the invariant
+    // `iced_theme == to_iced_theme(&theme)` centralised on `set_theme`.
+    state.set_theme(TraceTheme::for_preset(snap.app_theme_preset));
+    // `AppSettings::sections()` produces a `NoteSection` view over the
+    // stored titles with indices re-assigned in order. Mirrors the seeding
+    // used by the Mac port's `CaptureViewModel.refresh()`.
+    state.sections = snap.sections();
+    // Threads must be sorted by `order` to match the seeding contract in
+    // `CaptureApp::new`, otherwise `SelectByIndex(n)` would suddenly route
+    // to a different chip after a live edit.
+    let mut threads = snap.thread_configs.clone();
+    threads.sort_by_key(|t| t.order);
+    state.threads = threads;
+    state.write_mode = snap.note_write_mode;
+    // Clamp the current selection into the new chip list bounds so a
+    // shrunken settings list cannot leave `selected_section` pointing past
+    // the end. A cleared list → `None`; an in-range index → unchanged;
+    // an out-of-range index → the first slot (0) so the user still has a
+    // valid highlight rather than a silently dropped selection.
+    if let Some(selected) = state.selected_section {
+        if state.sections.is_empty() {
+            state.selected_section = None;
+        } else if selected >= state.sections.len() {
+            state.selected_section = Some(0);
+        }
+    }
+    // Thread selection is keyed by `Uuid`, not index — preserve the choice
+    // when the id still exists, clear it when the thread was removed.
+    if let Some(id) = state.selected_thread {
+        if !state.threads.iter().any(|t| t.id == id) {
+            state.selected_thread = None;
+        }
     }
 }
 
@@ -493,6 +578,19 @@ pub fn update(state: &mut CaptureApp, message: Message) -> Task<Message> {
         }
         Message::WindowOpened(id) => {
             state.capture_window_id = Some(id);
+            Task::none()
+        }
+        Message::ReplaceSettings(new_settings) => {
+            // Short-circuit when the daemon happens to hand us the exact
+            // same `Arc` allocation we already hold. `persist_working`
+            // refreshes the snapshot via `Arc::new(...)` on every shadow
+            // edit so this branch is effectively defensive — the initial
+            // broadcast after `SettingsWindowOpened` is the one case where
+            // pointer equality can trigger — but it keeps the invariant
+            // that a no-op dispatch has zero side effects.
+            if !Arc::ptr_eq(&state.settings, &new_settings) {
+                apply_settings_snapshot(state, &new_settings);
+            }
             Task::none()
         }
     }

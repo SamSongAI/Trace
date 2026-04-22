@@ -305,3 +305,156 @@ fn _public_api_surface_check() {
     let _: fn(&mut CaptureApp, Message) -> iced::Task<Message> = update;
     let _: fn(&CaptureApp) -> iced::Element<'_, Message> = view;
 }
+
+// --- Sub-task 8c.3: ReplaceSettings live sync -----------------------
+
+#[test]
+fn replace_settings_updates_derived_theme_sections_threads_and_mode() {
+    // Baseline: a Dark-theme CaptureApp with two sample threads and the
+    // four default sections. Assert the pre-broadcast snapshot so any
+    // drift in the derive paths has something to compare against.
+    let mut app = CaptureApp::new(
+        TraceTheme::for_preset(ThemePreset::Dark),
+        sample_sections(),
+        sample_threads(),
+        Arc::new(AppSettings::default()),
+    );
+    let dark_palette = app.theme.capture.panel_background;
+    assert_eq!(app.sections.len(), NoteSection::DEFAULT_TITLES.len());
+    assert_eq!(app.threads.len(), 2);
+    assert_eq!(app.write_mode, WriteMode::Dimension);
+
+    // Broadcast a fresh snapshot: Light theme, two custom section titles,
+    // one thread, Thread write mode. Every derived field must flip.
+    let new_settings = Arc::new(AppSettings {
+        app_theme_preset: ThemePreset::Light,
+        section_titles: vec!["Alpha".into(), "Beta".into()],
+        thread_configs: vec![ThreadConfig::new("只保留一个", "only.md", None, 0)],
+        note_write_mode: WriteMode::Thread,
+        ..AppSettings::default()
+    });
+    apply(&mut app, Message::ReplaceSettings(Arc::clone(&new_settings)));
+
+    // Theme palette rebuilt from the new preset.
+    let light_palette = app.theme.capture.panel_background;
+    assert_ne!(
+        dark_palette, light_palette,
+        "ReplaceSettings must rebuild the theme cache from the new preset"
+    );
+    // Sections re-derived from `section_titles`.
+    let titles: Vec<_> = app.sections.iter().map(|s| s.title.clone()).collect();
+    assert_eq!(titles, vec!["Alpha".to_string(), "Beta".to_string()]);
+    // Threads re-derived from `thread_configs`.
+    assert_eq!(app.threads.len(), 1);
+    assert_eq!(app.threads[0].name, "只保留一个");
+    // Write mode mirrored from `note_write_mode`.
+    assert_eq!(app.write_mode, WriteMode::Thread);
+    // Shared Arc points at the broadcast snapshot so writers see the
+    // latest bytes.
+    assert!(Arc::ptr_eq(&app.settings, &new_settings));
+}
+
+#[test]
+fn replace_settings_with_same_arc_is_noop() {
+    // When the daemon hands us the exact same `Arc` allocation we already
+    // hold (edge case — the broadcast ran before any edit), the handler
+    // must short-circuit via `Arc::ptr_eq`. We can't directly observe
+    // "did not re-derive" without reaching into private helpers, so
+    // proxy via the pointer: `state.settings` must still point at the
+    // same allocation, and no derived field must change.
+    let shared = Arc::new(AppSettings::default());
+    let mut app = CaptureApp::new(
+        TraceTheme::for_preset(ThemePreset::Dark),
+        sample_sections(),
+        sample_threads(),
+        Arc::clone(&shared),
+    );
+    let sections_before = app.sections.len();
+    let threads_before = app.threads.len();
+    apply(&mut app, Message::ReplaceSettings(Arc::clone(&shared)));
+    // `settings` still points at the same allocation (this is also true
+    // for the non-no-op branch, but combined with the unchanged derived
+    // fields it locks the invariant).
+    assert!(Arc::ptr_eq(&app.settings, &shared));
+    assert_eq!(app.sections.len(), sections_before);
+    assert_eq!(app.threads.len(), threads_before);
+}
+
+#[test]
+fn replace_settings_clamps_selected_section_when_shrunk() {
+    // Pre-broadcast state: a 4-section list with the last slot selected.
+    let mut app = CaptureApp::new(
+        TraceTheme::for_preset(ThemePreset::Dark),
+        sample_sections(),
+        sample_threads(),
+        Arc::new(AppSettings::default()),
+    );
+    // Default section list has 4 entries (Note/Memo/Link/Task); pick the
+    // tail one so a shrunk list forces a clamp.
+    let tail_index = app.sections.len() - 1;
+    apply(&mut app, Message::SectionSelected(tail_index));
+    assert_eq!(app.selected_section, Some(tail_index));
+
+    // Broadcast a snapshot that only keeps two sections.
+    let new_settings = Arc::new(AppSettings {
+        section_titles: vec!["Keep A".into(), "Keep B".into()],
+        ..AppSettings::default()
+    });
+    apply(&mut app, Message::ReplaceSettings(new_settings));
+
+    // The stale `tail_index` (= 3) is past the new length (= 2), so the
+    // handler clamps back to the first slot so the user still has a
+    // valid highlight rather than an out-of-range silent drop.
+    assert_eq!(app.selected_section, Some(0));
+}
+
+#[test]
+fn replace_settings_clears_selected_thread_when_id_missing() {
+    // Thread selection is keyed by `Uuid`, not index. If the settings
+    // window removed the selected thread, the handler must clear the
+    // selection rather than keep a dangling id.
+    let mut app = CaptureApp::new(
+        TraceTheme::for_preset(ThemePreset::Dark),
+        sample_sections(),
+        sample_threads(),
+        Arc::new(AppSettings::default()),
+    );
+    let original_id = app.threads[0].id;
+    apply(&mut app, Message::ThreadSelected(original_id));
+    assert_eq!(app.selected_thread, Some(original_id));
+
+    // Broadcast a snapshot with a single thread whose id differs.
+    let new_settings = Arc::new(AppSettings {
+        thread_configs: vec![ThreadConfig::new("新线程", "new.md", None, 0)],
+        ..AppSettings::default()
+    });
+    apply(&mut app, Message::ReplaceSettings(new_settings));
+
+    assert_eq!(app.selected_thread, None);
+}
+
+#[test]
+fn replace_settings_preserves_transient_editor_state() {
+    // Transient UI state (editor draft, pinned flag) must survive a live
+    // settings edit — the user's in-flight keystrokes cannot be discarded
+    // because they happened to flip a colour preset mid-typing.
+    let mut app = CaptureApp::new(
+        TraceTheme::for_preset(ThemePreset::Dark),
+        sample_sections(),
+        sample_threads(),
+        Arc::new(AppSettings::default()),
+    );
+    app.editor_content = text_editor::Content::with_text("in-flight draft");
+    apply(&mut app, Message::PinToggled);
+    assert!(app.pinned);
+
+    let new_settings = Arc::new(AppSettings {
+        app_theme_preset: ThemePreset::Paper,
+        ..AppSettings::default()
+    });
+    apply(&mut app, Message::ReplaceSettings(new_settings));
+
+    // Editor draft and pin flag untouched even though the theme flipped.
+    assert_eq!(app.editor_text(), "in-flight draft");
+    assert!(app.pinned);
+}
