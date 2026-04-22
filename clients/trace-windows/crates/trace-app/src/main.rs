@@ -39,7 +39,67 @@ use std::sync::Arc;
 use iced::{window, Element, Subscription, Task, Theme};
 use trace_core::{AppSettings, NoteSection, ThreadConfig, TraceTheme};
 use trace_ui::app::{self as capture_app, CaptureApp};
-use trace_ui::settings::{self as settings_app, SettingsApp};
+use trace_ui::settings::{self as settings_app, LaunchAtLoginSink, SettingsApp};
+
+/// Registry name used for the Windows Run-key autostart entry. Must match the
+/// user-facing brand so existing installs surface a recognisable label under
+/// Task Manager → Startup. Kept in a constant so the enable/disable sides
+/// cannot drift.
+///
+/// The `cfg_attr` silences `dead_code` on macOS/Linux dev builds, where
+/// `trace_platform::autostart` collapses to a no-op and this constant is
+/// unreferenced — without it, the warning blocks
+/// `cargo clippy -D warnings`.
+#[cfg_attr(not(windows), allow(dead_code))]
+const AUTOSTART_APP_NAME: &str = "Trace";
+
+/// Production sink that forwards every Settings-window "Launch at Login"
+/// toggle to the Windows Run-key entry managed by
+/// [`trace_platform::autostart`]. On non-Windows dev builds this collapses
+/// to a no-op with a `tracing::debug!` breadcrumb — `trace_platform::autostart`
+/// is itself Windows-gated, so a real implementation could not compile.
+///
+/// Errors are swallowed via `tracing::warn!` to mirror Mac
+/// `AppSettings.updateLaunchAtLogin`, which `NSLog`s and continues. The UI
+/// never surfaces autostart failures; the JSON shadow still reflects the
+/// user's request and re-try on the next toggle is trivial.
+struct AutostartSink;
+
+impl LaunchAtLoginSink for AutostartSink {
+    fn apply(&self, enabled: bool) {
+        #[cfg(windows)]
+        {
+            let result: Result<(), String> = if enabled {
+                match std::env::current_exe() {
+                    Ok(exe) => trace_platform::autostart::enable(AUTOSTART_APP_NAME, &exe)
+                        .map_err(|e| format!("enable: {e}")),
+                    Err(e) => Err(format!("current_exe: {e}")),
+                }
+            } else {
+                trace_platform::autostart::disable(AUTOSTART_APP_NAME)
+                    .map_err(|e| format!("disable: {e}"))
+            };
+            if let Err(msg) = result {
+                tracing::warn!(
+                    target: "trace_app::autostart",
+                    error = %msg,
+                    enabled,
+                    "launch-at-login sink failed",
+                );
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            // Silence the unused binding on non-Windows without resorting to
+            // `#[allow(unused_variables)]` at the trait impl level.
+            let _ = enabled;
+            tracing::debug!(
+                target: "trace_app::autostart",
+                "non-Windows build: launch-at-login sink is a no-op",
+            );
+        }
+    }
+}
 
 /// Messages for the top-level daemon. Tagged on the sub-state they mutate so
 /// the `update` dispatcher can route without type-switching.
@@ -188,10 +248,17 @@ fn update(state: &mut TraceApp, message: Message) -> Task<Message> {
             // `settings_window_id` cache stays in sync.
             if let capture_app::Message::SettingsWindowOpened(_) = &capture_message {
                 if state.settings.is_none() {
-                    state.settings = Some(SettingsApp::new_with_save_path(
+                    // Inject the production `AutostartSink` so the "Launch at
+                    // Login" toggle reaches the Windows Run key. Non-Windows
+                    // dev builds still get a valid sink (the cfg-gated impl
+                    // falls through to a tracing breadcrumb), so we don't
+                    // need a separate branch here.
+                    let sink: Arc<dyn LaunchAtLoginSink> = Arc::new(AutostartSink);
+                    state.settings = Some(SettingsApp::new_with_dependencies(
                         state.theme,
                         Arc::clone(&state.shared_settings),
                         state.settings_save_path.clone(),
+                        sink,
                     ));
                 }
             }

@@ -23,6 +23,7 @@
 //! top-level `iced::daemon` wiring that routes messages between the two
 //! windows.
 
+pub mod autostart;
 mod quick_sections;
 mod shortcut_event;
 mod shortcuts;
@@ -31,6 +32,8 @@ mod system;
 mod threads;
 pub mod tiles;
 pub mod widgets;
+
+pub use autostart::{LaunchAtLoginSink, NoopLaunchAtLoginSink};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -467,6 +470,16 @@ pub struct SettingsApp {
     /// `None` to keep the existing test harness and `trace-app` wiring
     /// bit-for-bit identical.
     pub save_path: Option<PathBuf>,
+    /// Host-OS launch-at-login sink invoked from the
+    /// [`SettingsMessage::LaunchAtLoginToggled`] arm. Production `trace-app`
+    /// wires this to [`trace_platform::autostart::enable`] /
+    /// [`trace_platform::autostart::disable`] via a local
+    /// [`LaunchAtLoginSink`] impl; legacy constructors default to
+    /// [`NoopLaunchAtLoginSink`] so unit tests and non-Windows dev builds
+    /// stay filesystem-/registry-free. Held behind `Arc<dyn ...>` so the
+    /// `SettingsApp` can stay `Send + Sync` without constraining the sink's
+    /// concrete type (`Arc<T>` is `Send + Sync` when `T: Send + Sync`).
+    pub launch_at_login_sink: Arc<dyn LaunchAtLoginSink>,
 }
 
 impl SettingsApp {
@@ -483,8 +496,27 @@ impl SettingsApp {
         Self::new_with_save_path(theme, settings, None)
     }
 
+    /// Builds a fresh [`SettingsApp`] with an optional write-through save
+    /// path, defaulting the autostart sink to [`NoopLaunchAtLoginSink`].
+    ///
+    /// Preserves the pre-8c.2 two-argument-plus-path signature so the entire
+    /// in-repo test harness keeps compiling untouched. Production startup
+    /// wiring in `trace-app/main.rs` calls
+    /// [`Self::new_with_dependencies`] directly so the real
+    /// registry-backed sink is in place; every other call site (unit tests,
+    /// transient UI previews) stays registry-free through this shim.
+    pub fn new_with_save_path(
+        theme: TraceTheme,
+        settings: Arc<AppSettings>,
+        save_path: Option<PathBuf>,
+    ) -> Self {
+        Self::new_with_dependencies(theme, settings, save_path, Arc::new(NoopLaunchAtLoginSink))
+    }
+
     /// Builds a fresh [`SettingsApp`] and optionally arms the write-through
-    /// persistence pipeline by supplying a `save_path`.
+    /// persistence pipeline by supplying a `save_path`, plus injects the
+    /// [`LaunchAtLoginSink`] that the
+    /// [`SettingsMessage::LaunchAtLoginToggled`] arm forwards toggles to.
     ///
     /// `settings.language` is copied into the local `language` field so the
     /// settings window can render immediately without waiting for the first
@@ -495,14 +527,22 @@ impl SettingsApp {
     /// pair. A `None` skips the write so UI-only call sites (unit tests,
     /// transient previews) keep their filesystem-free behaviour.
     ///
+    /// The `launch_at_login_sink` is called from the `LaunchAtLoginToggled`
+    /// arm *after* the shadow + `working` fields have been updated and
+    /// `persist_working` has run, so failing (or stubbed) sinks never prevent
+    /// the on-disk JSON from catching up. Pass
+    /// [`NoopLaunchAtLoginSink`] wrapped in an `Arc` for non-production
+    /// callers.
+    ///
     /// Callers must still keep the `Arc<AppSettings>` in sync if other
     /// windows mutate the underlying settings; sub-task 8c introduces an
     /// `RwLock` wrapper for the cross-window synchronisation that Mac gets
     /// for free from `@ObservedObject`.
-    pub fn new_with_save_path(
+    pub fn new_with_dependencies(
         theme: TraceTheme,
         settings: Arc<AppSettings>,
         save_path: Option<PathBuf>,
+        launch_at_login_sink: Arc<dyn LaunchAtLoginSink>,
     ) -> Self {
         let iced_theme = to_iced_theme(&theme);
         let language = settings.language;
@@ -582,6 +622,7 @@ impl SettingsApp {
             launch_at_login_shadow,
             working,
             save_path,
+            launch_at_login_sink,
         }
     }
 
@@ -972,13 +1013,17 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
             Task::none()
         }
         SettingsMessage::LaunchAtLoginToggled(value) => {
-            // Sub-task 8b: persist the flag on every toggle so the Mac-parity
-            // "no-debounce" contract holds. Sub-task 8c will additionally
-            // route this through `trace_platform::autostart` so the Windows
-            // registry Run key stays in sync with the JSON.
+            // Sub-task 8b persisted the flag on every toggle; sub-task 8c.2
+            // additionally routes the toggle through a
+            // [`LaunchAtLoginSink`] so the Windows registry Run key stays in
+            // sync. The JSON write happens *before* the sink so a failing
+            // sink never blocks persistence — both failure paths log via
+            // `tracing::warn!` and neither surfaces to the UI, matching Mac
+            // `AppSettings.updateLaunchAtLogin`.
             state.launch_at_login_shadow = value;
             state.working.launch_at_login = value;
             persist_working(state);
+            state.launch_at_login_sink.apply(value);
             Task::none()
         }
     }
@@ -3604,5 +3649,115 @@ mod tests {
         );
         assert!(app.save_path.is_none());
         assert_eq!(app.working.vault_path, "C:/pre-existing");
+    }
+
+    // --- Sub-task 8c.2: launch-at-login sink wiring -----------------------
+
+    /// Recording sink used by the `LaunchAtLoginToggled` tests below. Kept as
+    /// a tests-only helper so the production `trace-ui` surface never exposes
+    /// a mock implementation. We intentionally duplicate a small amount of the
+    /// `autostart::tests::RecordingSink` boilerplate rather than reach into a
+    /// sibling `mod tests` block — `#[cfg(test)]` submodules aren't visible
+    /// across module boundaries.
+    #[derive(Default)]
+    struct RecordingSink {
+        calls: std::sync::Mutex<Vec<bool>>,
+    }
+
+    impl LaunchAtLoginSink for RecordingSink {
+        fn apply(&self, enabled: bool) {
+            self.calls
+                .lock()
+                .expect("recording sink mutex")
+                .push(enabled);
+        }
+    }
+
+    #[test]
+    fn toggling_launch_at_login_invokes_sink_in_order() {
+        // Arm the Settings window with a recording sink so we can observe the
+        // sequence of `apply` calls that the `LaunchAtLoginToggled` arm
+        // produces. Each UI toggle must produce exactly one sink call with
+        // the same polarity as the shadow field.
+        let sink = Arc::new(RecordingSink::default());
+        let sink_trait: Arc<dyn LaunchAtLoginSink> = sink.clone();
+        let mut app = SettingsApp::new_with_dependencies(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(AppSettings::default()),
+            None,
+            sink_trait,
+        );
+
+        let _ = settings_update(&mut app, SettingsMessage::LaunchAtLoginToggled(true));
+        let _ = settings_update(&mut app, SettingsMessage::LaunchAtLoginToggled(false));
+        let _ = settings_update(&mut app, SettingsMessage::LaunchAtLoginToggled(true));
+
+        let calls = sink.calls.lock().expect("recording sink mutex").clone();
+        assert_eq!(calls, vec![true, false, true]);
+    }
+
+    #[test]
+    fn sink_sees_shadow_and_working_already_updated() {
+        // Contract: the sink is invoked *after* the shadow + working fields
+        // settle, so a production sink that queries `AppSettings::load()` in
+        // any follow-up code path sees the new value. We can't inspect state
+        // from inside `apply` (the trait takes `&self`), so assert the
+        // observable post-condition: by the time dispatch returns, both the
+        // shadow + the on-disk JSON reflect the new flag *and* the sink was
+        // called once with the matching value.
+        let sink = Arc::new(RecordingSink::default());
+        let sink_trait: Arc<dyn LaunchAtLoginSink> = sink.clone();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("settings.json");
+        let mut app = SettingsApp::new_with_dependencies(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(AppSettings::default()),
+            Some(path.clone()),
+            sink_trait,
+        );
+
+        let _ = settings_update(&mut app, SettingsMessage::LaunchAtLoginToggled(true));
+
+        // Shadow + working mirror the toggle.
+        assert!(app.launch_at_login_shadow);
+        assert!(app.working.launch_at_login);
+        // Write-through ran before the sink: the on-disk JSON is already
+        // carrying the new value.
+        let loaded = AppSettings::load(&path).expect("load persisted settings");
+        assert!(loaded.launch_at_login);
+        // Sink was called exactly once with the same polarity.
+        assert_eq!(
+            *sink.calls.lock().expect("recording sink mutex"),
+            vec![true]
+        );
+    }
+
+    #[test]
+    fn legacy_constructors_inject_noop_sink() {
+        // The two pre-8c.2 constructors must continue to build a working
+        // app and must not panic when the toggle arm forwards to the default
+        // `NoopLaunchAtLoginSink`. We can't assert the sink's concrete type
+        // without exposing a downcast surface, so instead we dispatch the
+        // toggle through both shims and confirm no panic + shadow updates.
+        let mut legacy_new = SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Light),
+            Arc::new(AppSettings::default()),
+        );
+        let _ = settings_update(
+            &mut legacy_new,
+            SettingsMessage::LaunchAtLoginToggled(true),
+        );
+        assert!(legacy_new.launch_at_login_shadow);
+
+        let mut legacy_save_path = SettingsApp::new_with_save_path(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(AppSettings::default()),
+            None,
+        );
+        let _ = settings_update(
+            &mut legacy_save_path,
+            SettingsMessage::LaunchAtLoginToggled(false),
+        );
+        assert!(!legacy_save_path.launch_at_login_shadow);
     }
 }
