@@ -66,10 +66,12 @@ struct TraceApp {
     /// [`CaptureApp::theme`] so both windows render under the same preset.
     theme: TraceTheme,
     /// Disk destination for settings persistence, resolved once at startup
-    /// via [`trace_platform::app_paths::settings_file_path`]. `None` only
-    /// when the platform layer could not resolve a user-data directory
-    /// (e.g. neither `APPDATA` nor `HOME` is set) — in that case the app
-    /// still runs but acts as an ephemeral buffer: the lazy `SettingsApp`
+    /// via [`trace_platform::app_paths::try_settings_file_path`] (the
+    /// diagnostic variant of the spec-shaped
+    /// [`trace_platform::app_paths::settings_file_path`]). `None` only when
+    /// the platform layer could not resolve a user-data directory (e.g.
+    /// neither `APPDATA` nor `HOME` is set) — in that case the app still
+    /// runs but acts as an ephemeral buffer: the lazy `SettingsApp`
     /// receives `None` and skips the write-through path, matching the
     /// pre-8c.1 behaviour so a broken environment cannot block launch.
     settings_save_path: Option<PathBuf>,
@@ -118,7 +120,12 @@ impl TraceApp {
 /// the app then runs without persistence, preserving the pre-8c.1
 /// behaviour that kept a broken user-data directory from blocking launch.
 fn load_settings_with_save_path() -> (Arc<AppSettings>, Option<PathBuf>) {
-    let path = match trace_platform::app_paths::settings_file_path() {
+    // Prefer the `try_*` diagnostic variant over the spec-shaped
+    // `settings_file_path() -> Option<PathBuf>` so a resolution failure is
+    // logged with its full cause (which of the three `AppPathsError`
+    // variants fired). The public Option wrapper exists for callers that
+    // don't need that detail — startup does.
+    let path = match trace_platform::app_paths::try_settings_file_path() {
         Ok(p) => p,
         Err(err) => {
             tracing::warn!(

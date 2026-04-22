@@ -131,7 +131,13 @@ mod imp {
     /// The directory is created if it does not already exist. Use this
     /// for `settings.json` and other per-user configuration that should
     /// roam across machines signed in with the same Microsoft account.
-    pub fn roaming_app_data_dir() -> Result<PathBuf, AppPathsError> {
+    ///
+    /// `Result` variant — preserves the diagnostic variant
+    /// ([`AppPathsError`]) so callers can distinguish
+    /// `SHGetKnownFolderPath` failures from `create_dir_all` failures.
+    /// See [`super::app_data_dir`] for the Option-returning wrapper that
+    /// aligns with the spec's caller contract.
+    pub fn try_roaming_app_data_dir() -> Result<PathBuf, AppPathsError> {
         resolve_and_create(&FOLDERID_RoamingAppData)
     }
 
@@ -140,7 +146,7 @@ mod imp {
     /// The directory is created if it does not already exist. Use this
     /// for logs, caches, and other machine-local data that should not
     /// roam.
-    pub fn local_app_data_dir() -> Result<PathBuf, AppPathsError> {
+    pub fn try_local_app_data_dir() -> Result<PathBuf, AppPathsError> {
         resolve_and_create(&FOLDERID_LocalAppData)
     }
 
@@ -148,15 +154,18 @@ mod imp {
     ///
     /// The parent directory is created; the file itself is not. This
     /// function only answers "where should settings live".
-    pub fn settings_file_path() -> Result<PathBuf, AppPathsError> {
-        let mut p = roaming_app_data_dir()?;
+    ///
+    /// `Result` variant — diagnostic counterpart of the spec-shaped
+    /// [`super::settings_file_path`].
+    pub fn try_settings_file_path() -> Result<PathBuf, AppPathsError> {
+        let mut p = try_roaming_app_data_dir()?;
         p.push("settings.json");
         Ok(p)
     }
 
     /// Returns `%LOCALAPPDATA%\Trace\logs`, creating it if absent.
     pub fn log_dir() -> Result<PathBuf, AppPathsError> {
-        let mut p = local_app_data_dir()?;
+        let mut p = try_local_app_data_dir()?;
         p.push("logs");
         std::fs::create_dir_all(&p).map_err(|e| AppPathsError::CreateDirectory {
             io_kind: e.kind(),
@@ -166,7 +175,9 @@ mod imp {
 }
 
 #[cfg(windows)]
-pub use imp::{local_app_data_dir, log_dir, roaming_app_data_dir, settings_file_path};
+pub use imp::{
+    log_dir, try_local_app_data_dir, try_roaming_app_data_dir, try_settings_file_path,
+};
 
 // ---------------------------------------------------------------------------
 // Non-Windows fallback
@@ -179,10 +190,11 @@ pub use imp::{local_app_data_dir, log_dir, roaming_app_data_dir, settings_file_p
 // rest of the trace-core crate, while the Windows path keeps the capitalised
 // `Trace` folder that mirrors the installer's program-files branding.
 //
-// Only `settings_file_path` is exposed here — the roaming/local split and
-// `log_dir` are Windows-only concepts that do not have a meaningful XDG
-// analogue at this layer. If a later non-Windows feature needs a cache or
-// log directory we can grow the module then, not now.
+// Only `try_roaming_app_data_dir` / `try_settings_file_path` are exposed
+// here — the local-app-data split and `log_dir` are Windows-only concepts
+// that do not have a meaningful XDG analogue at this layer. If a later
+// non-Windows feature needs a cache or log directory we can grow the
+// module then, not now.
 // ---------------------------------------------------------------------------
 
 #[cfg(not(windows))]
@@ -193,15 +205,14 @@ mod imp_fallback {
     /// Sub-directory appended to the XDG config base.
     const APP_SUBDIR: &str = "trace";
 
-    /// Returns `$HOME/.config/trace/settings.json`, creating the parent
-    /// directory if absent.
+    /// Returns `$HOME/.config/trace`, creating the directory if absent.
     ///
     /// The underlying I/O is intentionally forgiving: when `$HOME` is unset
     /// we return [`AppPathsError::KnownFolderResolution`] with the Windows
     /// HRESULT for `E_FAIL` so callers that only pattern-match variant names
     /// keep working on every platform. `create_dir_all` failures surface as
     /// [`AppPathsError::CreateDirectory`], exactly like the Windows path.
-    pub fn settings_file_path() -> Result<PathBuf, AppPathsError> {
+    pub fn try_roaming_app_data_dir() -> Result<PathBuf, AppPathsError> {
         let home = std::env::var_os("HOME")
             .ok_or(AppPathsError::KnownFolderResolution { hresult: 0x8000_4005_u32 as i32 })?;
         let mut dir = PathBuf::from(home);
@@ -212,13 +223,62 @@ mod imp_fallback {
             io_kind: e.kind(),
         })?;
 
+        Ok(dir)
+    }
+
+    /// Returns `$HOME/.config/trace/settings.json`, creating the parent
+    /// directory if absent. Mirrors the Windows
+    /// [`super::imp::try_settings_file_path`] signature so downstream code
+    /// can call the same function on every target.
+    pub fn try_settings_file_path() -> Result<PathBuf, AppPathsError> {
+        let mut dir = try_roaming_app_data_dir()?;
         dir.push("settings.json");
         Ok(dir)
     }
 }
 
 #[cfg(not(windows))]
-pub use imp_fallback::settings_file_path;
+pub use imp_fallback::{try_roaming_app_data_dir, try_settings_file_path};
+
+// ---------------------------------------------------------------------------
+// Cross-platform `Option`-returning wrappers (spec-shaped API).
+//
+// The spec for sub-task 8c requires a cross-platform `app_data_dir()` and
+// `settings_file_path() -> Option<PathBuf>` on the public surface of
+// `trace-platform::app_paths`. The diagnostic-preserving `Result` versions
+// above remain the primary implementation — these wrappers simply `.ok()`
+// them so callers that only care about the happy path (the SDD-described
+// contract) can take them as-is, while startup code in `trace-app` can
+// still reach for the `try_*` variants when it wants to log the exact
+// failure mode.
+// ---------------------------------------------------------------------------
+
+use std::path::PathBuf;
+
+/// Cross-platform application data directory (`Option` variant — swallows
+/// the diagnostic [`AppPathsError`] for call-sites that only care about
+/// the happy path). Consumers needing to distinguish "env missing" from
+/// "SHGetKnownFolderPath failed" should call
+/// [`try_roaming_app_data_dir`] instead.
+///
+/// * Windows: Roaming AppData directory joined with `"Trace"`
+///   (i.e. `%APPDATA%\Trace`).
+/// * Non-Windows: `$HOME/.config/trace` (dev convenience).
+///
+/// Returns `None` only when the OS cannot resolve the directory (missing
+/// `HOME`, `SHGetKnownFolderPath` failure, `create_dir_all` refusal).
+pub fn app_data_dir() -> Option<PathBuf> {
+    try_roaming_app_data_dir().ok()
+}
+
+/// Cross-platform full path to `settings.json` (`Option` variant).
+///
+/// See [`app_data_dir`] for the `None` semantics. This is the spec-aligned
+/// entry point; [`try_settings_file_path`] is the diagnostic-preserving
+/// counterpart used by startup code.
+pub fn settings_file_path() -> Option<PathBuf> {
+    app_data_dir().map(|dir| dir.join("settings.json"))
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -237,10 +297,16 @@ mod tests {
     // only the *shape* of the returned path — no environment variables are
     // mutated, so these tests run safely in parallel with the rest of the
     // suite.
+    //
+    // The spec-aligned Option-returning `settings_file_path` and
+    // `app_data_dir` are the public contract, so the assertions target them
+    // directly. A `try_settings_file_path` smoke test below confirms the
+    // Result-returning diagnostic variant is still wired up.
 
     #[test]
     fn settings_file_path_ends_with_settings_json_on_any_platform() {
-        let path = settings_file_path().expect("settings_file_path should succeed");
+        let path = settings_file_path()
+            .expect("settings_file_path should resolve on a standard dev environment");
         assert_eq!(
             path.file_name().and_then(|n| n.to_str()),
             Some("settings.json"),
@@ -251,7 +317,8 @@ mod tests {
 
     #[test]
     fn settings_file_path_parent_basename_matches_expected_brand() {
-        let path = settings_file_path().expect("settings_file_path should succeed");
+        let path = settings_file_path()
+            .expect("settings_file_path should resolve on a standard dev environment");
         let parent_name = path
             .parent()
             .and_then(|p| p.file_name())
@@ -262,6 +329,39 @@ mod tests {
         assert_eq!(
             parent_name, expected,
             "parent directory name should be {expected:?}, got: {}",
+            path.display()
+        );
+    }
+
+    #[test]
+    fn app_data_dir_basename_matches_expected_brand() {
+        let dir = app_data_dir()
+            .expect("app_data_dir should resolve on a standard dev environment");
+        let name = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|s| s.to_string())
+            .expect("app_data_dir should have a file name component");
+        let expected = if cfg!(windows) { "Trace" } else { "trace" };
+        assert_eq!(
+            name, expected,
+            "app_data_dir should end with {expected:?}, got: {}",
+            dir.display()
+        );
+    }
+
+    #[test]
+    fn try_settings_file_path_diagnostic_variant_returns_ok_on_dev_env() {
+        // Sanity check: the Result-returning diagnostic variant is the
+        // primary implementation under the Option wrapper. If this starts
+        // failing, the Option tests above will too — but the distinct
+        // assertion makes the error message point at the right layer.
+        let path = try_settings_file_path()
+            .expect("try_settings_file_path should succeed on a standard dev environment");
+        assert_eq!(
+            path.file_name().and_then(|n| n.to_str()),
+            Some("settings.json"),
+            "path should end with 'settings.json', got: {}",
             path.display()
         );
     }
@@ -323,13 +423,14 @@ mod tests {
     #[cfg(windows)]
     mod windows_only {
         use super::super::{
-            local_app_data_dir, log_dir, roaming_app_data_dir, settings_file_path,
+            log_dir, settings_file_path, try_local_app_data_dir, try_roaming_app_data_dir,
         };
 
         #[test]
         #[ignore = "requires a Windows interactive session; run manually on Windows"]
         fn roaming_app_data_dir_ends_with_trace_and_exists() {
-            let dir = roaming_app_data_dir().expect("roaming_app_data_dir should succeed");
+            let dir = try_roaming_app_data_dir()
+                .expect("try_roaming_app_data_dir should succeed");
             assert_eq!(
                 dir.file_name().and_then(|n| n.to_str()),
                 Some("Trace"),
@@ -342,7 +443,8 @@ mod tests {
         #[test]
         #[ignore = "requires a Windows interactive session; run manually on Windows"]
         fn local_app_data_dir_ends_with_trace_and_exists() {
-            let dir = local_app_data_dir().expect("local_app_data_dir should succeed");
+            let dir =
+                try_local_app_data_dir().expect("try_local_app_data_dir should succeed");
             assert_eq!(
                 dir.file_name().and_then(|n| n.to_str()),
                 Some("Trace"),

@@ -26,11 +26,17 @@
 //! - [`app_paths`] — Resolves the Windows known folders
 //!   `FOLDERID_RoamingAppData` and `FOLDERID_LocalAppData` to
 //!   `%APPDATA%\Trace` and `%LOCALAPPDATA%\Trace` respectively, creating
-//!   the sub-directory when absent. Convenience helpers
-//!   [`app_paths::settings_file_path`] and [`app_paths::log_dir`] cover
-//!   the two most common lookups. The error type
-//!   [`app_paths::AppPathsError`] is cross-platform; the path functions
-//!   themselves are Windows-only.
+//!   the sub-directory when absent. The cross-platform spec-shaped entry
+//!   points [`app_paths::app_data_dir`] and
+//!   [`app_paths::settings_file_path`] return `Option<PathBuf>` (they
+//!   also fall back to `$HOME/.config/trace` on dev hosts); the
+//!   diagnostic-preserving counterparts
+//!   [`app_paths::try_roaming_app_data_dir`] /
+//!   [`app_paths::try_settings_file_path`] keep the original `Result`
+//!   variant for startup code that wants to log the exact failure mode.
+//!   [`app_paths::log_dir`] and the Win32-only
+//!   [`app_paths::try_local_app_data_dir`] remain Windows-only; the
+//!   error type [`app_paths::AppPathsError`] is cross-platform.
 //! - [`single_instance`] — Named-mutex based single-instance enforcement.
 //!   macOS gets this from the bundle identifier; on Windows we must
 //!   create a `Local\` scoped mutex at startup and exit if another copy
