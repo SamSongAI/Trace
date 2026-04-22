@@ -25,6 +25,12 @@ SIZES = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256
 
 
 def main() -> None:
+    # Explicit existence check before PIL: PIL's own error ("cannot identify
+    # image file") is ambiguous (corrupt file vs. missing file) and dumps a
+    # full traceback that buries the actual cause in CI output. A plain
+    # SystemExit keeps the error surface consistent with the size check below.
+    if not SRC.exists():
+        raise SystemExit(f"source PNG not found: {SRC}")
     base = Image.open(SRC).convert("RGBA")
     if base.size != (32, 32):
         raise SystemExit(f"expected 32x32 source, got {base.size}")
