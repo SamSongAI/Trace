@@ -31,3 +31,11 @@ tracing = { workspace = true }
 # emitted by settings persistence and autostart code paths actually reach
 # the developer console. Default filter is `warn`; `RUST_LOG` overrides.
 tracing-subscriber = { workspace = true }
+# Plain-text clipboard read for the capture panel's paste hook.
+# `trace_platform::clipboard_image` covers the image channel; this dep
+# supplies the text fallback so `TracePlatformClipboardProbe::read_text`
+# can call `arboard::Clipboard::new()?.get_text()` without going through
+# the UI crate. Version/features pinned to match the transitive use
+# inside `trace-platform` so Cargo does not resolve two incompatible
+# `arboard` copies into the dep graph.
+arboard = { version = "3", default-features = false, features = ["image-data"] }

@@ -39,6 +39,7 @@ use std::sync::Arc;
 use iced::{window, Element, Subscription, Task, Theme};
 use trace_core::{AppSettings, NoteSection, ThreadConfig, TraceTheme};
 use trace_ui::app::{self as capture_app, CaptureApp};
+use trace_ui::clipboard::{ClipboardProbe, ClipboardProbeError};
 use trace_ui::settings::{self as settings_app, LaunchAtLoginSink, SettingsApp};
 
 /// Registry name used for the Windows Run-key autostart entry. Must match the
@@ -101,6 +102,44 @@ impl LaunchAtLoginSink for AutostartSink {
     }
 }
 
+/// Production [`ClipboardProbe`] backing the capture panel's paste hook.
+///
+/// The image side delegates to
+/// [`trace_platform::clipboard_image::read_clipboard_image_as_png`], which
+/// wraps [`arboard::Clipboard::get_image`] + PNG encoding in a single
+/// tri-state return (`Ok(None)` on empty, `Ok(Some(bytes))` on hit,
+/// `Err` on platform failure). The text side opens its own
+/// [`arboard::Clipboard`] handle and calls `get_text()` with the same
+/// `ContentNotAvailable → Ok(None)` mapping so the UI layer can
+/// distinguish an empty clipboard from a real read failure.
+///
+/// The probe is stateless — each call opens a fresh clipboard handle —
+/// which matches [`trace_platform::clipboard_image`]'s internal idiom and
+/// means the wrapper is `Send + Sync` without interior mutability.
+#[derive(Debug)]
+struct TracePlatformClipboardProbe;
+
+impl ClipboardProbe for TracePlatformClipboardProbe {
+    fn read_image_as_png(&self) -> Result<Option<Vec<u8>>, ClipboardProbeError> {
+        trace_platform::clipboard_image::read_clipboard_image_as_png()
+            .map_err(|e| ClipboardProbeError::ReadFailed(e.to_string()))
+    }
+
+    fn read_text(&self) -> Result<Option<String>, ClipboardProbeError> {
+        let mut clipboard = arboard::Clipboard::new()
+            .map_err(|e| ClipboardProbeError::ReadFailed(e.to_string()))?;
+        match clipboard.get_text() {
+            Ok(text) => Ok(Some(text)),
+            // `ContentNotAvailable` is the "normal" miss: user copied an
+            // image or the clipboard is empty. Map it to `Ok(None)` so the
+            // UI falls through to its empty-clipboard branch instead of
+            // toasting.
+            Err(arboard::Error::ContentNotAvailable) => Ok(None),
+            Err(e) => Err(ClipboardProbeError::ReadFailed(e.to_string())),
+        }
+    }
+}
+
 /// Messages for the top-level daemon. Tagged on the sub-state they mutate so
 /// the `update` dispatcher can route without type-switching.
 #[derive(Debug, Clone)]
@@ -155,7 +194,13 @@ impl TraceApp {
         let sections = default_sections();
         let threads: Vec<ThreadConfig> = Vec::new();
 
-        let capture = CaptureApp::new(theme, sections, threads, Arc::clone(&shared_settings));
+        // Wire the platform-backed clipboard probe so Ctrl+V in the capture
+        // panel routes through `trace_platform::clipboard_image` (image) +
+        // `arboard` (text fallback). The probe is stateless and cheap to
+        // build, so we hand it to `CaptureApp` unconditionally.
+        let clipboard_probe: Arc<dyn ClipboardProbe> = Arc::new(TracePlatformClipboardProbe);
+        let capture = CaptureApp::new(theme, sections, threads, Arc::clone(&shared_settings))
+            .with_clipboard_probe(clipboard_probe);
 
         (
             Self {
