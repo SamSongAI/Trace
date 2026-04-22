@@ -88,11 +88,17 @@
 
     <!--
       开始菜单快捷方式。MSI 要求每个 Component 有且仅有一个 KeyPath。
-      Shortcut 本身不是合法的 KeyPath，所以补一条 HKCU RegistryValue 做
-      KeyPath — 这是 WiX 官方推荐的 "Advertised Shortcut" 替代模式，既
-      满足 MSI 要求又保持 per-user 卸载时清理干净。RemoveFolder 保证
-      uninstall 时顺手把父目录 Start Menu\Programs\Trace 移掉，否则
-      会留下空目录。
+      Shortcut 本身不是合法的 KeyPath，所以补一条 Registry 条目做 KeyPath。
+
+      Root="HKMU" 是 WiX 的魔法：perMachine 安装时解析成 HKLM，perUser
+      安装时解析成 HKCU。用 HKMU 而不是 HKCU 避免经典陷阱——perMachine
+      + HKCU KeyPath 的组合会让每个新登录的 Windows 用户首次运行 Trace
+      时触发 self-repair（因为 HKCU 只写入了安装者那份 hive），在多用户
+      机器上表现为反复弹 UAC 安装提示。HKMU 把 KeyPath 放到全机可见的
+      HKLM 下，新用户运行时不会再触发修复。
+
+      RemoveFolder 保证 uninstall 时顺手把父目录 Start Menu\Programs\
+      Trace 移掉，否则会留下空目录。
     -->
     <ComponentGroup Id="StartMenuShortcuts" Directory="ApplicationProgramsFolder">
       <Component Id="StartMenuShortcut" Guid="*">
@@ -105,7 +111,7 @@
         <RemoveFolder Id="RemoveApplicationProgramsFolder"
                       Directory="ApplicationProgramsFolder"
                       On="uninstall" />
-        <RegistryValue Root="HKCU"
+        <RegistryValue Root="HKMU"
                        Key="Software\Trace\Installer"
                        Name="StartMenuShortcutInstalled"
                        Type="integer"
@@ -116,8 +122,9 @@
 
     <!--
       桌面快捷方式。拆成独立 Feature (DesktopShortcutFeature) + AllowAbsent
-      以便用户在 "Custom Setup" 页面取消勾选。同样用 HKCU RegistryValue 做
-      KeyPath；桌面快捷方式本身在 DesktopFolder 根下，不需要 RemoveFolder。
+      以便用户在 "Custom Setup" 页面取消勾选。KeyPath 同样走 HKMU 而非
+      HKCU，原因见 StartMenuShortcuts 的注释。桌面快捷方式落在 Desktop
+      Folder 根下，不需要 RemoveFolder。
     -->
     <ComponentGroup Id="DesktopShortcutComponents" Directory="DesktopFolder">
       <Component Id="DesktopShortcut" Guid="*">
@@ -127,7 +134,7 @@
                   Target="[INSTALLFOLDER]trace-app.exe"
                   WorkingDirectory="INSTALLFOLDER"
                   Icon="TraceIcon.ico" />
-        <RegistryValue Root="HKCU"
+        <RegistryValue Root="HKMU"
                        Key="Software\Trace\Installer"
                        Name="DesktopShortcutInstalled"
                        Type="integer"
