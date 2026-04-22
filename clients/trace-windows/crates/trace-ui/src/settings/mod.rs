@@ -27,6 +27,7 @@ mod quick_sections;
 mod shortcut_event;
 mod shortcuts;
 pub mod storage;
+mod system;
 mod threads;
 pub mod tiles;
 pub mod widgets;
@@ -306,6 +307,15 @@ pub enum SettingsMessage {
         /// Bitmask of modifier flags (`MOD_ALT|MOD_CONTROL|MOD_SHIFT|MOD_WIN`).
         modifiers: u32,
     },
+    /// Fired by the System card's "Launch at Login" toggle.
+    ///
+    /// Sub-task 8a keeps the variant shadow-only: the update branch flips
+    /// [`SettingsApp::launch_at_login_shadow`] and returns `Task::none()`.
+    /// Persistence to the filesystem + the actual Windows autostart registry
+    /// entry are wired in sub-tasks 8b (persistence architecture) and 8c
+    /// (autostart integration) respectively, following the same shadow-only
+    /// → write-back split every other sub-task 1-7 card already uses.
+    LaunchAtLoginToggled(bool),
 }
 
 /// Mutable application state for the settings window.
@@ -433,6 +443,12 @@ pub struct SettingsApp {
     /// [`SettingsMessage::RecordingCancelled`]. Matches Mac
     /// `SettingsView.shortcutRecorderMessage`.
     pub shortcut_recorder_message: Option<String>,
+    /// Shadow of [`AppSettings::launch_at_login`], driving the System card's
+    /// "Launch at Login" toggle (sub-task 8a). Seeded from the persisted
+    /// `bool` in [`Self::new`] and mutated in-place by
+    /// [`SettingsMessage::LaunchAtLoginToggled`]. Persistence + registry
+    /// integration are deferred to sub-tasks 8b and 8c.
+    pub launch_at_login_shadow: bool,
 }
 
 impl SettingsApp {
@@ -487,6 +503,10 @@ impl SettingsApp {
             settings.mode_toggle_key_code,
             settings.mode_toggle_modifiers,
         );
+        // Mirror the persisted `launch_at_login` flag into the shadow so the
+        // System card reads the user's last choice on first paint. Sub-task
+        // 8a is UI-only — the shadow never writes back to the `Arc` here.
+        let launch_at_login_shadow = settings.launch_at_login;
         Self {
             theme,
             iced_theme,
@@ -509,6 +529,7 @@ impl SettingsApp {
             mode_toggle_shortcut,
             recording_target: None,
             shortcut_recorder_message: None,
+            launch_at_login_shadow,
         }
     }
 
@@ -811,6 +832,13 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
             state.shortcut_recorder_message = None;
             Task::none()
         }
+        SettingsMessage::LaunchAtLoginToggled(value) => {
+            // Shadow-only: sub-task 8a does not touch the persisted
+            // `AppSettings.launch_at_login` flag or the Windows autostart
+            // registry entry. Those land in sub-tasks 8b / 8c respectively.
+            state.launch_at_login_shadow = value;
+            Task::none()
+        }
     }
 }
 
@@ -1037,6 +1065,16 @@ fn build_cards(state: &SettingsApp) -> Element<'_, SettingsMessage> {
     // keyboard configuration is not scoped to a specific Storage layout, so
     // it sits after the write-mode–specific cards in the scroll.
     cards.push(shortcuts::shortcuts_card(state, palette));
+
+    // System card: also write-mode-agnostic — the "Launch at Login" flag it
+    // carries applies to every Storage layout. Renders unconditionally after
+    // the Shortcuts card so the scroll ends on the card that owns the
+    // version caption.
+    cards.push(system::system_card(
+        palette,
+        state.language,
+        state.launch_at_login_shadow,
+    ));
 
     column(cards)
         .spacing(SETTINGS_CARD_STACK_SPACING)
@@ -3100,5 +3138,68 @@ mod tests {
         let event = Event::Window(iced::window::Event::Focused);
         let msg = keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
         assert!(msg.is_none());
+    }
+
+    // --- Sub-task 8a: System card ------------------------------------------
+
+    #[test]
+    fn settings_app_new_seeds_launch_at_login_shadow_from_settings() {
+        // The new shadow flag must hydrate from the persisted `AppSettings`
+        // snapshot so the System card reads the user's last choice on first
+        // paint without waiting for a message dispatch.
+        let persisted = AppSettings {
+            launch_at_login: true,
+            ..AppSettings::default()
+        };
+        let app = SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(persisted),
+        );
+        assert!(app.launch_at_login_shadow);
+
+        // Default is `false` — guard the opposite branch too.
+        let default_app = fresh_app();
+        assert!(!default_app.launch_at_login_shadow);
+    }
+
+    #[test]
+    fn launch_at_login_shadow_updates_on_message() {
+        // Sub-task 8a is shadow-only: flipping the toggle must land on
+        // `launch_at_login_shadow` without leaking into the persisted
+        // `AppSettings.launch_at_login`. Drive both directions through the
+        // update fn so a later regression that forgets one arm is caught.
+        let mut app = fresh_app();
+        assert!(!app.launch_at_login_shadow);
+
+        let _ = settings_update(&mut app, SettingsMessage::LaunchAtLoginToggled(true));
+        assert!(app.launch_at_login_shadow);
+        // Persistence is deferred to sub-task 8b — the shared Arc must stay
+        // untouched.
+        assert!(!app.settings.launch_at_login);
+
+        let _ = settings_update(&mut app, SettingsMessage::LaunchAtLoginToggled(false));
+        assert!(!app.launch_at_login_shadow);
+        assert!(!app.settings.launch_at_login);
+    }
+
+    #[test]
+    fn system_card_renders_unconditionally_across_write_modes() {
+        // The System card is not gated on `WriteMode` (unlike Quick Sections /
+        // Threads), so `build_cards` must include it under every mode. iced
+        // 0.14 gives no direct card-count introspection, but rendering the
+        // full view for each mode catches a dropped match arm in the card
+        // pusher the same way the Shortcuts parity tests above do.
+        for mode in [WriteMode::Dimension, WriteMode::Thread, WriteMode::File] {
+            let settings = AppSettings {
+                note_write_mode: mode,
+                ..AppSettings::default()
+            };
+            let app = SettingsApp::new(
+                TraceTheme::for_preset(ThemePreset::Dark),
+                Arc::new(settings),
+            );
+            let _element: Element<'_, SettingsMessage> = build_cards(&app);
+            let _view: Element<'_, SettingsMessage> = settings_view(&app);
+        }
     }
 }
