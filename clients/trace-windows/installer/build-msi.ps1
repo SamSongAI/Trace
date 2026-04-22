@@ -101,10 +101,17 @@ if (-not (Test-Path $BinPath)) {
 # Ensure LICENSE.rtf and trace.ico are up to date before handing them to wix.
 # These scripts are idempotent and produce ASCII / binary that diff-compare
 # byte-for-byte on unchanged inputs, so they are safe to run every time.
+#
+# Use `python` rather than `python3`: on `windows-latest` GitHub runners
+# actions/setup-python@v5 only registers `python`, not `python3`, so calling
+# the latter errors with "command not found". On a local Windows dev machine
+# Python installed from python.org also registers `python`. If a dev prefers
+# `python3`, they can still run the asset scripts manually from mac/Linux
+# shells — build-msi.ps1 is Windows-only (pwsh-only) by design.
 Write-Information "regenerating LICENSE.rtf and trace.ico from sources"
-& python3 (Join-Path $InstallerRoot 'scripts\build-ico.py')
+& python (Join-Path $InstallerRoot 'scripts\build-ico.py')
 if ($LASTEXITCODE -ne 0) { throw "build-ico.py failed ($LASTEXITCODE)" }
-& python3 (Join-Path $InstallerRoot 'scripts\build-license-rtf.py')
+& python (Join-Path $InstallerRoot 'scripts\build-license-rtf.py')
 if ($LASTEXITCODE -ne 0) { throw "build-license-rtf.py failed ($LASTEXITCODE)" }
 
 $null = New-Item -ItemType Directory -Path $OutDir -Force

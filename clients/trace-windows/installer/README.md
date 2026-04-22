@@ -29,7 +29,8 @@ installer/
 3. WiX v4 global tool：`dotnet tool install --global wix --version 4.0.5`
 4. WiX UI 扩展：`wix extension add -g WixToolset.UI.wixext/4.0.5`
 5. PowerShell 7+（Windows 10 自带的 `powershell.exe` 是 5.1，不行）
-6. Python 3.11+ 与 Pillow 10.x（仅在需要再生成 ICO 时）：`pip install Pillow==10.*`
+6. Python 3.11+ 与 Pillow 10.x：`pip install Pillow==10.*`
+   （**每次构建都会跑**，用来再生成 `trace.ico` 和 `LICENSE.rtf`；Python 解释器在 Windows 下必须以 `python` 命令可用）
 
 构建：
 
