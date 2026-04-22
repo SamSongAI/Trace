@@ -11,11 +11,11 @@
 //!   path-building, filename-formatting, and vault-validation steps
 //!   without any filesystem or image I/O.
 //!
-//! Phase 13 extends this module with `write_png(png_bytes, now)` that
-//! creates the target directory, encodes the clipboard image, and writes
-//! it atomically. The Windows clipboard reading and PNG encoding live in
-//! `trace-platform`; by the time bytes reach this module they are already
-//! PNG-encoded.
+//! Phase 13 added [`ClipboardImageWriter::write_png`], which builds the
+//! plan, creates the target directory, and writes the caller-provided PNG
+//! bytes atomically. The Windows clipboard reading and PNG encoding live
+//! in `trace-platform`; by the time bytes reach this module they are
+//! already PNG-encoded.
 //!
 //! # Byte-level parity with Mac reference
 //!
@@ -78,8 +78,8 @@ pub struct ImageWritePlan {
 /// Clipboard image writer. The struct carries only the settings; `now`
 /// is injected per call so tests can pin the clock without a time source.
 ///
-/// Phase 2.6 provides only [`Self::plan`] (pure computation). Phase 13
-/// adds `write_png(png_bytes, now)` — see the module-level docs.
+/// Phase 2.6 provides [`Self::plan`] (pure computation); Phase 13 adds
+/// [`Self::write_png`] (disk-backed). See the module-level docs.
 pub struct ClipboardImageWriter<S: ClipboardImageWriterSettings> {
     settings: S,
 }
@@ -114,6 +114,52 @@ impl<S: ClipboardImageWriterSettings> ClipboardImageWriter<S> {
             relative_path,
             markdown_link,
         })
+    }
+
+    /// Writes `png_bytes` to disk under the configured vault's daily asset
+    /// tree and returns the full [`ImageWritePlan`] that drove the write.
+    ///
+    /// This is a thin wrapper over [`Self::plan`] + `create_dir_all` +
+    /// [`crate::writer::atomic::write_atomic`]. The byte-level path and
+    /// Markdown-link format are locked by the `plan` tests — we deliberately
+    /// do **not** duplicate path construction here.
+    ///
+    /// Mirrors Swift's `ClipboardImageWriter.saveFromPasteboardImage`
+    /// (atomic temp + rename, recursive parent-dir creation, overwrites
+    /// allowed at the target path) but returns the full plan instead of
+    /// just the Markdown link so Rust callers can log the target path.
+    ///
+    /// `png_bytes` is trusted as-is — the platform layer (Task 13.2) owns
+    /// clipboard reading and PNG encoding; this method performs no magic-
+    /// number validation. Empty slices are accepted (Swift parity: Swift's
+    /// `Data.write` does not reject empty data either).
+    ///
+    /// Errors:
+    /// - [`TraceError::InvalidVaultPath`] if the configured vault path is
+    ///   blank (propagated from [`Self::plan`] before any I/O).
+    /// - [`TraceError::AtomicWriteFailed`] if the parent-directory
+    ///   creation or the atomic write itself fails.
+    pub fn write_png(
+        &self,
+        png_bytes: &[u8],
+        now: DateTime<Utc>,
+    ) -> Result<ImageWritePlan, TraceError> {
+        let plan = self.plan(now)?;
+
+        let parent = plan
+            .target_path
+            .parent()
+            .expect("plan.target_path always has a parent (vault-rooted)");
+        std::fs::create_dir_all(parent).map_err(|e| {
+            TraceError::AtomicWriteFailed(format!(
+                "create dir {} failed: {e}",
+                parent.display()
+            ))
+        })?;
+
+        crate::writer::atomic::write_atomic(&plan.target_path, png_bytes)?;
+
+        Ok(plan)
     }
 }
 
@@ -310,5 +356,142 @@ mod tests {
         };
         let b = a.clone();
         assert_eq!(a, b);
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 13 — `write_png` (disk-backed) tests.
+    //
+    // The byte-level path and Markdown-link format stays pinned by the
+    // `plan` tests above; these tests only verify the disk-write contract:
+    // atomic write, recursive parent creation, overwrite-allowed, and the
+    // invariance that `write_png` returns exactly what `plan` returns.
+    // ------------------------------------------------------------------
+
+    /// Fixed `now` reused by every `write_png` test so the produced paths
+    /// remain byte-identical to the Swift reference asserted in `plan` tests.
+    fn pinned_now() -> DateTime<Utc> {
+        fixed_time_ms(2026, 4, 20, 12, 5, 0, 123)
+    }
+
+    fn stub_settings(vault: &Path) -> StubSettings {
+        StubSettings {
+            vault: vault.to_path_buf(),
+            daily_folder: "daily".to_string(),
+        }
+    }
+
+    #[test]
+    fn write_png_creates_asset_tree_and_writes_bytes_atomically() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let writer = ClipboardImageWriter::new(stub_settings(tempdir.path()));
+        let now = pinned_now();
+        let payload: &[u8] = b"\x89PNG";
+
+        let plan = writer.write_png(payload, now).unwrap();
+
+        // File landed at the planned path with byte-exact contents.
+        assert!(plan.target_path.exists(), "target path must exist on disk");
+        assert_eq!(std::fs::read(&plan.target_path).unwrap(), payload);
+
+        // Markdown link is byte-identical to Swift's reference format.
+        assert_eq!(
+            plan.markdown_link,
+            "![image](assets/2026-04-20/trace-20260420-120500-123.png)",
+        );
+
+        // Atomic-write should leave no temp siblings behind.
+        let parent = plan.target_path.parent().unwrap();
+        let leftover: Vec<_> = std::fs::read_dir(parent)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains("trace-tmp-"))
+            .collect();
+        assert!(
+            leftover.is_empty(),
+            "expected no .trace-tmp-* siblings, found {leftover:?}",
+        );
+    }
+
+    #[test]
+    fn write_png_creates_parent_dirs_recursively() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let writer = ClipboardImageWriter::new(stub_settings(tempdir.path()));
+        let now = pinned_now();
+
+        // Pre-condition: none of the intermediate dirs exist yet.
+        assert!(!tempdir.path().join("daily").exists());
+
+        writer.write_png(b"bytes", now).unwrap();
+
+        // Each layer of the asset tree must be materialized.
+        assert!(tempdir.path().join("daily").is_dir());
+        assert!(tempdir.path().join("daily/assets").is_dir());
+        assert!(tempdir.path().join("daily/assets/2026-04-20").is_dir());
+    }
+
+    #[test]
+    fn write_png_overwrites_existing_file_at_same_timestamp() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let writer = ClipboardImageWriter::new(stub_settings(tempdir.path()));
+        let now = pinned_now();
+
+        let first = writer.write_png(b"first payload", now).unwrap();
+        let second = writer.write_png(b"second payload", now).unwrap();
+
+        // Same `now` ⇒ same target path, second write wins.
+        assert_eq!(first.target_path, second.target_path);
+        assert_eq!(
+            std::fs::read(&second.target_path).unwrap(),
+            b"second payload",
+        );
+    }
+
+    #[test]
+    fn write_png_rejects_invalid_vault_path() {
+        let settings = StubSettings {
+            vault: PathBuf::from("   "),
+            daily_folder: "daily".to_string(),
+        };
+        let writer = ClipboardImageWriter::new(settings);
+
+        let err = writer.write_png(b"x", pinned_now()).unwrap_err();
+
+        // Error must come from the `plan()` stage before any I/O happens —
+        // `InvalidVaultPath`, not `AtomicWriteFailed`.
+        assert!(
+            matches!(err, TraceError::InvalidVaultPath(_)),
+            "expected InvalidVaultPath, got {err:?}",
+        );
+    }
+
+    #[test]
+    fn write_png_accepts_empty_byte_slice() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let writer = ClipboardImageWriter::new(stub_settings(tempdir.path()));
+
+        let plan = writer.write_png(&[], pinned_now()).unwrap();
+
+        assert!(plan.target_path.exists());
+        assert_eq!(
+            std::fs::metadata(&plan.target_path).unwrap().len(),
+            0,
+            "empty payload must yield a zero-byte file (Swift parity)",
+        );
+    }
+
+    #[test]
+    fn write_png_returns_same_plan_as_standalone_plan_call() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let writer = ClipboardImageWriter::new(stub_settings(tempdir.path()));
+        let now = pinned_now();
+
+        // Same `now` + same settings ⇒ `plan` and `write_png` must agree on
+        // every field of `ImageWritePlan`. This guards against future
+        // refactors that might duplicate path construction inside `write_png`.
+        let planned = writer.plan(now).unwrap();
+        let written = writer.write_png(b"payload", now).unwrap();
+
+        assert_eq!(planned, written);
     }
 }
