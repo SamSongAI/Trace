@@ -20,6 +20,9 @@ installer/
     └── Product.wxs            # WiX v4 产品声明
 ```
 
+Release 发布通过仓库根的 `.github/workflows/trace-windows-release.yml`
+驱动，见下方 [Release 发布流水线](#release-发布流水线phase-15) 一节。
+
 ## 本地构建（Windows dev 机）
 
 前置：
@@ -130,7 +133,87 @@ issue。
 - [ ] 装 0.2.0 后尝试装 0.1.0 MSI → 弹出"已安装更新的 Trace 版本，无法
   降级。"且不继续
 
+### 签名产物（仅 Release workflow 产物）
+
+- [ ] `signtool verify /pa /all Trace-<ver>-x64.msi` 返回 Successfully
+      verified
+- [ ] MSI 属性对话框 → 数字签名 → 看到 Sam Song 签名 + ACS 时间戳
+- [ ] UAC 弹窗显示 "已验证的发布者：Sam Song"（不是"未知发布者"）
+- [ ] SmartScreen 不再弹"Windows 已保护你的电脑"警告（可能需要少量
+      下载量后 Microsoft reputation 才完全建立，新证书前几次安装可能
+      仍会被拦，但签名有效性已建立）
+- [ ] 解开 portable.zip 后 `trace-app.exe` 属性对话框也带签名
+- [ ] arm64 MSI 在 Windows on ARM 机器 / VM 里安装成功（可选，视硬
+      件条件；至少在 x64 机器上 `msiexec /a Trace-<ver>-arm64.msi /qn
+      TARGETDIR=C:\tmp\arm64-probe` 展开无报错）
+
 ## CI 产物
 
 GitHub Actions 的 `build-msi` job 会在每次 push 后产出 `trace-msi-x64`
 artifact（保留 14 天）。代码签名和 Release 发布由 Phase 15 负责。
+
+## Release 发布流水线（Phase 15）
+
+`trace-windows-release.yml` 负责对齐 tag 的正式发布：`push tags
+v*.*.*` 会并行构建 x64 与 arm64 签名 MSI + 便携 ZIP，并自动发布到
+GitHub Releases。
+
+### 一次性准备：Azure Trusted Signing
+
+1. Azure 订阅下创建一个 **Trusted Signing Account**（资源类型
+   `Microsoft.CodeSigning/codeSigningAccounts`）。
+2. 在账户下完成 **Identity Validation**（个人作者走 `publicTrust`，
+   审核周期几分钟到几小时）。
+3. 创建一个 **Certificate Profile**（记下名字，例如
+   `TraceAuthorCert`）。
+4. 创建一个 **Service Principal** 并授权其 `Trusted Signing Certificate
+   Profile Signer` 角色；记下 tenant id / client id / client secret。
+5. 在仓库 Settings → Secrets → Actions 添加 6 个 secret：
+   - `AZURE_TENANT_ID`
+   - `AZURE_CLIENT_ID`
+   - `AZURE_CLIENT_SECRET`
+   - `AZURE_TS_ENDPOINT`（例如 `https://eus.codesigning.azure.net/`）
+   - `AZURE_TS_ACCOUNT_NAME`
+   - `AZURE_TS_PROFILE_NAME`
+
+**任一 secret 缺失时，release workflow 仍然会构建，但产物不会签名**
+——`build-msi.ps1` 的 `Invoke-TrustedSign` 函数在检测到环境变量缺失
+时会打印 `skipping signing` 并继续。本地开发机不配置这些变量即可。
+
+### 打 tag 发布
+
+```bash
+# 1. 确认 Cargo.toml 的 workspace version 已 bump 到目标版本
+grep '^version' clients/trace-windows/Cargo.toml | head -1
+
+# 2. 本地打 tag
+git tag v0.2.0
+git push origin v0.2.0
+
+# 3. 观察 Actions 页面，等待 trace-windows-release workflow 结束
+#    （x64 + arm64 两条腿独立，一条失败另一条仍会发布）
+
+# 4. 打开 Releases 页面核对：
+#    Trace-0.2.0-x64.msi
+#    Trace-0.2.0-x64-portable.zip
+#    Trace-0.2.0-arm64.msi
+#    Trace-0.2.0-arm64-portable.zip
+```
+
+预发布 tag（带 `-`，如 `v0.2.0-rc1`）会自动标记为 Pre-release。
+
+### 验证签名
+
+在 Windows 机器上：
+
+```powershell
+# signtool 在 "Windows Kits\10\bin\<ver>\x64\signtool.exe" 下
+signtool verify /pa /all Trace-0.2.0-x64.msi
+signtool verify /pa /all trace-app.exe   # 从 MSI 解出或从 ZIP 解出
+```
+
+输出应该包含 `Successfully verified` 和时间戳信息（来自
+`timestamp.acs.microsoft.com`）。
+
+或者在 Explorer 里右键 MSI → 属性 → 数字签名，看到 "Sam Song"（通过
+Microsoft Identity Verification CA 颁发的证书）。
