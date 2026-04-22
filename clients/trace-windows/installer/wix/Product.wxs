@@ -42,12 +42,36 @@
         Schedule="afterInstallInitialize"
         DowngradeErrorMessage="已安装更新的 Trace 版本，无法降级。" />
 
+    <!--
+      图标 + ARP (Add/Remove Programs) 元数据。ARPPRODUCTICON 指向一个
+      先前声明的 <Icon Id="...ico">（WiX v4 要求 Id 以 .ico 结尾），其余
+      ARP* 属性填充控制面板「程序与功能」条目的 publisher / help link /
+      contact / 禁用修复与修改（我们没有独立 repair CA，就关掉）。
+    -->
+    <Icon Id="TraceIcon.ico" SourceFile="$(AssetsDir)\trace.ico" />
+    <Property Id="ARPPRODUCTICON" Value="TraceIcon.ico" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/SamSong1997/Trace" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/SamSong1997/Trace" />
+    <Property Id="ARPCONTACT" Value="samsong199705@gmail.com" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+
     <MediaTemplate EmbedCab="yes" />
 
     <!-- 目录结构: C:\Program Files\Trace\ -->
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Trace" />
     </StandardDirectory>
+
+    <!--
+      开始菜单子目录: Start Menu\Programs\Trace\Trace.lnk。桌面快捷方式
+      落在 DesktopFolder 根下，不再嵌套子目录。StandardDirectory 引用
+      的是 Windows Installer 预定义的标准路径，安装时自动展开。
+    -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Trace" />
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
 
     <!--
       主 exe 组件。Guid="*" tells WiX to hash the file path so the GUID is
@@ -62,10 +86,70 @@
       </Component>
     </ComponentGroup>
 
-    <!-- 主特性 -->
+    <!--
+      开始菜单快捷方式。MSI 要求每个 Component 有且仅有一个 KeyPath。
+      Shortcut 本身不是合法的 KeyPath，所以补一条 HKCU RegistryValue 做
+      KeyPath — 这是 WiX 官方推荐的 "Advertised Shortcut" 替代模式，既
+      满足 MSI 要求又保持 per-user 卸载时清理干净。RemoveFolder 保证
+      uninstall 时顺手把父目录 Start Menu\Programs\Trace 移掉，否则
+      会留下空目录。
+    -->
+    <ComponentGroup Id="StartMenuShortcuts" Directory="ApplicationProgramsFolder">
+      <Component Id="StartMenuShortcut" Guid="*">
+        <Shortcut Id="StartMenuShortcutExe"
+                  Name="Trace"
+                  Description="Trace — 快速捕获"
+                  Target="[INSTALLFOLDER]trace-app.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="TraceIcon.ico" />
+        <RemoveFolder Id="RemoveApplicationProgramsFolder"
+                      Directory="ApplicationProgramsFolder"
+                      On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\Trace\Installer"
+                       Name="StartMenuShortcutInstalled"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!--
+      桌面快捷方式。拆成独立 Feature (DesktopShortcutFeature) + AllowAbsent
+      以便用户在 "Custom Setup" 页面取消勾选。同样用 HKCU RegistryValue 做
+      KeyPath；桌面快捷方式本身在 DesktopFolder 根下，不需要 RemoveFolder。
+    -->
+    <ComponentGroup Id="DesktopShortcutComponents" Directory="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="*">
+        <Shortcut Id="DesktopShortcutExe"
+                  Name="Trace"
+                  Description="Trace — 快速捕获"
+                  Target="[INSTALLFOLDER]trace-app.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="TraceIcon.ico" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\Trace\Installer"
+                       Name="DesktopShortcutInstalled"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- 主特性: 必装项（主 exe + 开始菜单快捷方式） -->
     <Feature Id="MainFeature" Title="Trace" Level="1"
              Description="Trace 主程序">
       <ComponentGroupRef Id="TraceAppComponents" />
+      <ComponentGroupRef Id="StartMenuShortcuts" />
+    </Feature>
+
+    <!-- 桌面快捷方式: 可选 Feature，AllowAbsent=yes 允许用户反选 -->
+    <Feature Id="DesktopShortcutFeature"
+             Title="桌面快捷方式"
+             Level="1"
+             AllowAbsent="yes"
+             Description="在桌面创建 Trace 图标">
+      <ComponentGroupRef Id="DesktopShortcutComponents" />
     </Feature>
 
     <!--
