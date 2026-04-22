@@ -59,7 +59,7 @@ pub fn editor<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iced::widget::text_editor::Content;
+    use iced::widget::text_editor::{Binding, Content, KeyPress, Status};
     use trace_core::{ThemePreset, TraceTheme};
 
     #[test]
@@ -83,5 +83,68 @@ mod tests {
         // want the test suite to shout.
         assert_eq!(EDITOR_HORIZONTAL_PADDING, 16);
         assert_eq!(EDITOR_VERTICAL_PADDING, 12);
+    }
+
+    /// Duplicate of `app.rs::tests::key_press` — keeps this module's coverage
+    /// self-contained so a reader inspecting `widgets/editor.rs` can verify
+    /// the `.key_binding(paste_key_binding)` wire without jumping files.
+    fn key_press(
+        key: iced::keyboard::Key,
+        modifiers: iced::keyboard::Modifiers,
+        physical: iced::keyboard::key::Physical,
+    ) -> KeyPress {
+        KeyPress {
+            key: key.clone(),
+            modified_key: key,
+            physical_key: physical,
+            modifiers,
+            text: None,
+            status: Status::Focused { is_hovered: false },
+        }
+    }
+
+    #[test]
+    fn paste_key_binding_intercepts_command_v() {
+        // Mirrors `app.rs::tests::paste_key_binding_intercepts_command_v` so
+        // the widget file documents its own paste wiring: the
+        // `.key_binding(paste_key_binding)` call above routes Ctrl/Cmd+V into
+        // `Message::PasteRequested`.
+        use iced::keyboard::key::{Code, Physical};
+        use iced::keyboard::{Key, Modifiers};
+
+        let press = key_press(
+            Key::Character("v".into()),
+            Modifiers::COMMAND,
+            Physical::Code(Code::KeyV),
+        );
+        let binding = paste_key_binding(press);
+        match binding {
+            Some(Binding::Custom(Message::PasteRequested)) => {}
+            other => panic!(
+                "Ctrl/Cmd+V should map to Binding::Custom(PasteRequested), got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn paste_key_binding_falls_through_for_other_keys() {
+        // Mirrors `app.rs::tests::paste_key_binding_falls_through_for_other_keys`.
+        // A plain 'A' with no modifiers must not produce our custom paste
+        // message — it should delegate to iced's default binding.
+        use iced::keyboard::key::{Code, Physical};
+        use iced::keyboard::{Key, Modifiers};
+
+        let press = key_press(
+            Key::Character("a".into()),
+            Modifiers::empty(),
+            Physical::Code(Code::KeyA),
+        );
+        let binding = paste_key_binding(press);
+        assert!(
+            !matches!(binding, Some(Binding::Custom(Message::PasteRequested))),
+            "non-V key must not route to PasteRequested, got {:?}",
+            binding
+        );
     }
 }
