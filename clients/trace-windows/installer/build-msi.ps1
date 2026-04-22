@@ -43,6 +43,106 @@ param(
 $ErrorActionPreference = 'Stop'
 $InformationPreference = 'Continue'
 
+function Invoke-TrustedSign {
+    <#
+    .SYNOPSIS
+        Sign a file with Azure Trusted Signing, or skip silently when
+        credentials are not configured.
+
+    .DESCRIPTION
+        Phase 15 wires Azure Trusted Signing via the `signtool sign /dlib`
+        path. All seven ATS knobs are sourced from environment variables
+        so that local dev boxes and PR builds (which never see the
+        secrets) naturally fall through to unsigned output. The CI
+        release workflow (trace-windows-release.yml) wires the secrets in
+        as job-level `env:` entries.
+
+        Callers sign the application executable **before** WiX consumes
+        it (so the embedded binary on the installed machine is signed)
+        and sign the final MSI **after** WiX produces it (so Windows
+        SmartScreen / UAC show a verified publisher at install time).
+        MSI signatures are separate from inner-payload signatures — both
+        calls are required.
+
+        The function throws on signtool non-zero exit when signing was
+        attempted; it returns silently when signing is skipped. Temp
+        metadata JSON is cleaned up in a `finally` block even on throw.
+
+    .PARAMETER Path
+        Absolute path to the file to sign (.exe or .msi).
+
+    .OUTPUTS
+        None.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    # Required env list: the three Azure service-principal knobs, the
+    # three Trusted Signing account knobs, and the path to the
+    # CodeSigning.Dlib.dll (installed via NuGet in CI, documented in
+    # installer/README.md for local sign-test). Missing any one means
+    # we cannot perform a signing call at all, so skip cleanly.
+    $requiredEnv = @(
+        'AZURE_TENANT_ID',
+        'AZURE_CLIENT_ID',
+        'AZURE_CLIENT_SECRET',
+        'AZURE_TS_ENDPOINT',
+        'AZURE_TS_ACCOUNT_NAME',
+        'AZURE_TS_PROFILE_NAME',
+        'TRACE_ATS_DLIB'
+    )
+    $missing = $requiredEnv | Where-Object {
+        -not [Environment]::GetEnvironmentVariable($_)
+    }
+    if ($missing) {
+        Write-Information "skipping signing for $Path (missing env: $($missing -join ', '))"
+        return
+    }
+
+    if (-not (Test-Path $Path)) {
+        throw "Invoke-TrustedSign: target does not exist: $Path"
+    }
+
+    # The CodeSigning dlib reads the three Trusted Signing knobs from a
+    # JSON metadata file (not from CLI args). Write a per-call temp file
+    # so concurrent signings on the same box do not clobber each other.
+    $metadata = [ordered]@{
+        Endpoint               = $env:AZURE_TS_ENDPOINT
+        CodeSigningAccountName = $env:AZURE_TS_ACCOUNT_NAME
+        CertificateProfileName = $env:AZURE_TS_PROFILE_NAME
+    }
+    $metadataJson = $metadata | ConvertTo-Json -Depth 3
+    $metadataPath = Join-Path ([System.IO.Path]::GetTempPath()) "trace-trusted-signing-$([guid]::NewGuid()).json"
+    Set-Content -Path $metadataPath -Value $metadataJson -Encoding utf8
+
+    try {
+        Write-Information "signing $Path via Azure Trusted Signing"
+        # /dlib -> CodeSigning client DLL (resolved via NuGet restore
+        # into $env:TRACE_ATS_DLIB). /dmdf -> metadata file above.
+        # /tr   -> Microsoft's RFC 3161 timestamp server that pairs with
+        #          ATS; /td / /fd pin hash to SHA-256 (ATS minimum).
+        # /v + /debug keep the output verbose so failure diagnosis is
+        # tractable from the CI log without another rerun.
+        signtool sign `
+            /v `
+            /debug `
+            /fd SHA256 `
+            /tr 'http://timestamp.acs.microsoft.com' `
+            /td SHA256 `
+            /dlib $env:TRACE_ATS_DLIB `
+            /dmdf $metadataPath `
+            $Path
+        if ($LASTEXITCODE -ne 0) {
+            throw "signtool exited $LASTEXITCODE while signing $Path"
+        }
+    } finally {
+        Remove-Item -Path $metadataPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # $PSScriptRoot is only populated when the script is invoked as a file.
 # Dot-sourcing (. ./build-msi.ps1) or pasting the body into an interactive
 # session leaves it null, at which point every Join-Path below would silently
@@ -102,6 +202,14 @@ if (-not (Test-Path $BinPath)) {
     throw "expected $BinPath after cargo build"
 }
 
+# --- sign app executable (pre-WiX) -----------------------------------------
+# Sign trace-app.exe before WiX embeds it. This way the binary that lands
+# in Program Files\Trace\ on the user's disk carries a valid signature —
+# not just the MSI wrapper. When the ATS env vars are absent (every local
+# build, every PR build), Invoke-TrustedSign prints "skipping signing"
+# and returns without error.
+Invoke-TrustedSign -Path $BinPath
+
 # --- wix build --------------------------------------------------------------
 # Ensure LICENSE.rtf and trace.ico are up to date before handing them to wix.
 # These scripts are idempotent and produce ASCII / binary that diff-compare
@@ -142,6 +250,14 @@ try {
 if (-not (Test-Path $MsiPath)) {
     throw "wix build claimed success but $MsiPath is missing"
 }
+
+# --- sign MSI (post-WiX) ----------------------------------------------------
+# Sign the installer package itself so Windows SmartScreen and UAC show a
+# verified publisher at install time. MSI signatures are independent of
+# the exe signature above — Windows Installer wraps the payload but does
+# not propagate any signature, so both invocations are mandatory for a
+# fully-signed distribution.
+Invoke-TrustedSign -Path $MsiPath
 
 $size = (Get-Item $MsiPath).Length
 Write-Information ("produced {0} ({1:N0} bytes)" -f $MsiPath, $size)
