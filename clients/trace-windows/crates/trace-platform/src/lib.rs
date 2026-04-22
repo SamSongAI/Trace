@@ -49,6 +49,15 @@
 //!   The error type [`autostart::AutostartError`] is cross-platform; the
 //!   [`autostart::enable`] / [`autostart::disable`] / [`autostart::is_enabled`]
 //!   functions are Windows-only.
+//! - [`clipboard_image`] — Cross-platform clipboard → PNG pipeline for
+//!   Phase 13 image paste. Reads the platform clipboard via `arboard`,
+//!   encodes the RGBA8 frame as PNG bytes via the `png` crate, and hands
+//!   the result to `trace_core::ClipboardImageWriter::write_png` (the
+//!   disk-write layer). The error type
+//!   [`clipboard_image::ClipboardImageError`] and both public entry
+//!   points ([`clipboard_image::read_clipboard_image_as_png`] /
+//!   [`clipboard_image::encode_rgba_as_png`]) are cross-platform, so the
+//!   paste shortcut also works on macOS dev builds.
 //! - [`vault_validation`] — Cross-platform vault-path classification.
 //!   Layers `std::fs::metadata` + a write-probe on top of the
 //!   [`trace_core::VaultPathValidationIssue::is_blank`] helper so the
@@ -59,6 +68,7 @@
 
 pub mod app_paths;
 pub mod autostart;
+pub mod clipboard_image;
 pub mod global_hotkey;
 pub mod single_instance;
 pub mod system_tray;

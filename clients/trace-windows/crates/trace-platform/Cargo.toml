@@ -15,6 +15,15 @@ trace-core = { path = "../trace-core" }
 # directory.
 uuid = { workspace = true }
 
+# Cross-platform clipboard reader used by Phase 13 image paste.
+# `image-data` feature enables `Clipboard::get_image()` which returns
+# tightly-packed RGBA8 pixels. Disable default features to stay lean —
+# we only need raw clipboard I/O, no platform-specific serialization.
+arboard = { version = "3", default-features = false, features = ["image-data"] }
+# Used to encode the RGBA frame arboard returns into PNG bytes, which
+# `trace_core::ClipboardImageWriter::write_png` consumes as-is.
+png = "0.17"
+
 # `windows` is only declared on Windows targets so the workspace remains
 # buildable on macOS/Linux developer machines (the crate body stays empty on
 # non-Windows targets via `#[cfg(windows)]`).
@@ -34,3 +43,6 @@ windows = { workspace = true, features = [
 
 [dev-dependencies]
 tempfile = "3"
+# Mirror the prod encoder so clipboard_image round-trip tests can decode
+# the PNG bytes we just wrote and assert pixel-for-pixel equality.
+png = "0.17"
