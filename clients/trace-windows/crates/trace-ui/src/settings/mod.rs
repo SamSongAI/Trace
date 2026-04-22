@@ -488,7 +488,13 @@ pub struct SettingsApp {
     /// is the first consumer; the constructor initialises it to the input
     /// `Arc` so the very first broadcast (if any) points at the byte-for-byte
     /// identical allocation the daemon is already holding.
-    pub latest_snapshot: Arc<AppSettings>,
+    ///
+    /// Visibility: `pub(crate)` so only [`persist_working`] (the one endorsed
+    /// writer) and the in-crate tests can mutate the field directly. External
+    /// readers must go through the [`Self::latest_snapshot`] accessor so the
+    /// invariant "snapshot == last persisted working copy" cannot be bypassed
+    /// from outside the crate.
+    pub(crate) latest_snapshot: Arc<AppSettings>,
 }
 
 impl SettingsApp {
