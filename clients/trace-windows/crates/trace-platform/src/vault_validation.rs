@@ -166,10 +166,7 @@ mod tests {
             .unwrap()
             .filter_map(|e| e.ok())
             .collect();
-        assert!(
-            leftover.is_empty(),
-            "probe left files behind: {leftover:?}"
-        );
+        assert!(leftover.is_empty(), "probe left files behind: {leftover:?}");
     }
 
     // TODO: cross-platform `NotWritable` coverage is non-trivial — on

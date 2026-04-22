@@ -146,8 +146,7 @@ mod tests {
             ThemePreset::Dune,
         ] {
             let palette = TraceTheme::for_preset(preset).settings;
-            let _element: Element<'_, SettingsMessage> =
-                system_card(palette, Language::En, false);
+            let _element: Element<'_, SettingsMessage> = system_card(palette, Language::En, false);
         }
     }
 

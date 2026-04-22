@@ -38,13 +38,12 @@ pub enum AppPathsError {
 impl fmt::Display for AppPathsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AppPathsError::KnownFolderResolution { hresult } => write!(
-                f,
-                "SHGetKnownFolderPath failed (HRESULT {hresult:#010x})"
-            ),
-            AppPathsError::InvalidPathEncoding => f.write_str(
-                "the path returned by SHGetKnownFolderPath is not valid UTF-16",
-            ),
+            AppPathsError::KnownFolderResolution { hresult } => {
+                write!(f, "SHGetKnownFolderPath failed (HRESULT {hresult:#010x})")
+            }
+            AppPathsError::InvalidPathEncoding => {
+                f.write_str("the path returned by SHGetKnownFolderPath is not valid UTF-16")
+            }
             AppPathsError::CreateDirectory { io_kind } => write!(
                 f,
                 "failed to create the Trace application directory: {io_kind:?}"
@@ -113,15 +112,14 @@ mod imp {
 
         // SAFETY: `guard.0` is a valid NUL-terminated UTF-16 pointer
         // returned by a successful `SHGetKnownFolderPath` call.
-        let path_string = unsafe { guard.0.to_string() }
-            .map_err(|_| AppPathsError::InvalidPathEncoding)?;
+        let path_string =
+            unsafe { guard.0.to_string() }.map_err(|_| AppPathsError::InvalidPathEncoding)?;
 
         let mut path = PathBuf::from(path_string);
         path.push(APP_SUBDIR);
 
-        std::fs::create_dir_all(&path).map_err(|e| AppPathsError::CreateDirectory {
-            io_kind: e.kind(),
-        })?;
+        std::fs::create_dir_all(&path)
+            .map_err(|e| AppPathsError::CreateDirectory { io_kind: e.kind() })?;
 
         Ok(path)
     }
@@ -167,17 +165,14 @@ mod imp {
     pub fn log_dir() -> Result<PathBuf, AppPathsError> {
         let mut p = try_local_app_data_dir()?;
         p.push("logs");
-        std::fs::create_dir_all(&p).map_err(|e| AppPathsError::CreateDirectory {
-            io_kind: e.kind(),
-        })?;
+        std::fs::create_dir_all(&p)
+            .map_err(|e| AppPathsError::CreateDirectory { io_kind: e.kind() })?;
         Ok(p)
     }
 }
 
 #[cfg(windows)]
-pub use imp::{
-    log_dir, try_local_app_data_dir, try_roaming_app_data_dir, try_settings_file_path,
-};
+pub use imp::{log_dir, try_local_app_data_dir, try_roaming_app_data_dir, try_settings_file_path};
 
 // ---------------------------------------------------------------------------
 // Non-Windows fallback
@@ -213,15 +208,15 @@ mod imp_fallback {
     /// keep working on every platform. `create_dir_all` failures surface as
     /// [`AppPathsError::CreateDirectory`], exactly like the Windows path.
     pub fn try_roaming_app_data_dir() -> Result<PathBuf, AppPathsError> {
-        let home = std::env::var_os("HOME")
-            .ok_or(AppPathsError::KnownFolderResolution { hresult: 0x8000_4005_u32 as i32 })?;
+        let home = std::env::var_os("HOME").ok_or(AppPathsError::KnownFolderResolution {
+            hresult: 0x8000_4005_u32 as i32,
+        })?;
         let mut dir = PathBuf::from(home);
         dir.push(".config");
         dir.push(APP_SUBDIR);
 
-        std::fs::create_dir_all(&dir).map_err(|e| AppPathsError::CreateDirectory {
-            io_kind: e.kind(),
-        })?;
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| AppPathsError::CreateDirectory { io_kind: e.kind() })?;
 
         Ok(dir)
     }
@@ -336,7 +331,8 @@ mod tests {
             .expect("path should have a parent directory with a name");
         let expected = if cfg!(windows) { "Trace" } else { "trace" };
         assert_eq!(
-            parent_name, expected,
+            parent_name,
+            expected,
             "parent directory name should be {expected:?}, got: {}",
             path.display()
         );
@@ -344,8 +340,8 @@ mod tests {
 
     #[test]
     fn app_data_dir_basename_matches_expected_brand() {
-        let dir = app_data_dir()
-            .expect("app_data_dir should resolve on a standard dev environment");
+        let dir =
+            app_data_dir().expect("app_data_dir should resolve on a standard dev environment");
         let name = dir
             .file_name()
             .and_then(|n| n.to_str())
@@ -353,7 +349,8 @@ mod tests {
             .expect("app_data_dir should have a file name component");
         let expected = if cfg!(windows) { "Trace" } else { "trace" };
         assert_eq!(
-            name, expected,
+            name,
+            expected,
             "app_data_dir should end with {expected:?}, got: {}",
             dir.display()
         );
@@ -394,8 +391,10 @@ mod tests {
     #[test]
     fn app_paths_error_display_includes_error_code_or_kind() {
         // -2147024893 == 0x80070003 (ERROR_PATH_NOT_FOUND wrapped as HRESULT).
-        let msg =
-            AppPathsError::KnownFolderResolution { hresult: -2147024893_i32 }.to_string();
+        let msg = AppPathsError::KnownFolderResolution {
+            hresult: -2147024893_i32,
+        }
+        .to_string();
         assert!(
             msg.contains("0x80070003"),
             "Display should include hex HRESULT, got: {msg:?}"
@@ -419,10 +418,7 @@ mod tests {
         let r = format!("{:?}", AppPathsError::InvalidPathEncoding);
         assert!(r.contains("InvalidPathEncoding"), "got: {r:?}");
 
-        let r = format!(
-            "{:?}",
-            AppPathsError::KnownFolderResolution { hresult: 0 }
-        );
+        let r = format!("{:?}", AppPathsError::KnownFolderResolution { hresult: 0 });
         assert!(r.contains("KnownFolderResolution"), "got: {r:?}");
 
         let r = format!(
@@ -454,8 +450,7 @@ mod tests {
         #[test]
         #[ignore = "requires a Windows interactive session; run manually on Windows"]
         fn roaming_app_data_dir_ends_with_trace_and_exists() {
-            let dir = try_roaming_app_data_dir()
-                .expect("try_roaming_app_data_dir should succeed");
+            let dir = try_roaming_app_data_dir().expect("try_roaming_app_data_dir should succeed");
             assert_eq!(
                 dir.file_name().and_then(|n| n.to_str()),
                 Some("Trace"),
@@ -468,8 +463,7 @@ mod tests {
         #[test]
         #[ignore = "requires a Windows interactive session; run manually on Windows"]
         fn local_app_data_dir_ends_with_trace_and_exists() {
-            let dir =
-                try_local_app_data_dir().expect("try_local_app_data_dir should succeed");
+            let dir = try_local_app_data_dir().expect("try_local_app_data_dir should succeed");
             assert_eq!(
                 dir.file_name().and_then(|n| n.to_str()),
                 Some("Trace"),

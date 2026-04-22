@@ -63,12 +63,12 @@ pub fn to_iced_theme(theme: &TraceTheme) -> Theme {
 /// Returns a `container::StyleFn`-compatible closure painting a panel
 /// background using [`CapturePalette::panel_background`] and the primary text
 /// color.
-pub fn panel_container_style(
-    palette: CapturePalette,
-) -> impl Fn(&Theme) -> container::Style {
+pub fn panel_container_style(palette: CapturePalette) -> impl Fn(&Theme) -> container::Style {
     move |_theme: &Theme| {
         container::Style::default()
-            .background(Background::Color(trace_color_to_iced(palette.panel_background)))
+            .background(Background::Color(trace_color_to_iced(
+                palette.panel_background,
+            )))
             .color(trace_color_to_iced(palette.text_primary))
     }
 }
@@ -76,9 +76,7 @@ pub fn panel_container_style(
 /// Returns a `container::StyleFn`-compatible closure painting a chrome
 /// background (header/footer) using [`CapturePalette::chrome_background`] and
 /// the muted icon color.
-pub fn chrome_container_style(
-    palette: CapturePalette,
-) -> impl Fn(&Theme) -> container::Style {
+pub fn chrome_container_style(palette: CapturePalette) -> impl Fn(&Theme) -> container::Style {
     move |_theme: &Theme| {
         container::Style::default()
             .background(Background::Color(trace_color_to_iced(
@@ -90,13 +88,10 @@ pub fn chrome_container_style(
 
 /// Returns a `container::StyleFn`-compatible closure painting a one-pixel
 /// horizontal separator line using [`CapturePalette::border`].
-pub fn separator_container_style(
-    palette: CapturePalette,
-) -> impl Fn(&Theme) -> container::Style {
+pub fn separator_container_style(palette: CapturePalette) -> impl Fn(&Theme) -> container::Style {
     move |_theme: &Theme| {
-        container::Style::default().background(Background::Color(trace_color_to_iced(
-            palette.border,
-        )))
+        container::Style::default()
+            .background(Background::Color(trace_color_to_iced(palette.border)))
     }
 }
 
@@ -484,10 +479,7 @@ mod tests {
         let style = style_fn(&Theme::Light, button::Status::Active);
         let expected_bg = Background::Color(expected_iced_color(palette.selected_surface));
         assert_eq!(style.background, Some(expected_bg));
-        assert_eq!(
-            style.text_color,
-            expected_iced_color(palette.selected_text)
-        );
+        assert_eq!(style.text_color, expected_iced_color(palette.selected_text));
     }
 
     #[test]

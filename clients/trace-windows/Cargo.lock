@@ -3515,6 +3515,7 @@ dependencies = [
 name = "trace-app"
 version = "0.1.0"
 dependencies = [
+ "arboard",
  "iced",
  "trace-core",
  "trace-platform",
@@ -3556,6 +3557,7 @@ dependencies = [
  "iced",
  "rfd",
  "tempfile",
+ "thiserror 1.0.69",
  "trace-core",
  "trace-platform",
  "tracing",

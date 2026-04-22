@@ -780,7 +780,9 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
             persist_working(state);
             Task::none()
         }
-        SettingsMessage::BrowseVaultRequested => pick_folder_task(SettingsMessage::VaultBrowseChose),
+        SettingsMessage::BrowseVaultRequested => {
+            pick_folder_task(SettingsMessage::VaultBrowseChose)
+        }
         SettingsMessage::VaultBrowseChose(Some(path)) => {
             state.vault_path = path;
             state.vault_path_issue = trace_platform::validate_vault_path(&state.vault_path);
@@ -913,8 +915,7 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
             // accepting a sibling `vault-backup` folder as "inside the vault".
             let vault_path = state.vault_path.clone();
             let folder_for_target = normalize_thread_folder_to_vault(&vault_path, &path);
-            let mutated = if let Some(thread) =
-                state.thread_configs.iter_mut().find(|t| t.id == id)
+            let mutated = if let Some(thread) = state.thread_configs.iter_mut().find(|t| t.id == id)
             {
                 let (_, existing_filename) = split_target_file(&thread.target_file);
                 // Mac defaults an empty filename to `"Threads.md"` when the
@@ -925,8 +926,7 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
                 } else {
                     existing_filename
                 };
-                thread.target_file =
-                    join_folder_and_filename(&folder_for_target, &filename);
+                thread.target_file = join_folder_and_filename(&folder_for_target, &filename);
                 true
             } else {
                 false
@@ -941,8 +941,7 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
         SettingsMessage::ThreadAdded => {
             if state.thread_configs.len() < ThreadConfig::MAXIMUM_COUNT {
                 let base_name = L10n::new_thread_default_name(state.language);
-                let (name, target_file) =
-                    unique_new_thread_name(&state.thread_configs, base_name);
+                let (name, target_file) = unique_new_thread_name(&state.thread_configs, base_name);
                 let next_order = state
                     .thread_configs
                     .iter()
@@ -987,7 +986,10 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
             state.shortcut_recorder_message = None;
             Task::none()
         }
-        SettingsMessage::RecordingCaptured { key_code, modifiers } => {
+        SettingsMessage::RecordingCaptured {
+            key_code,
+            modifiers,
+        } => {
             // No target armed: defensive no-op for the (very rare) race where
             // a keystroke arrives after the recorder has already been
             // cancelled.
@@ -1192,10 +1194,7 @@ fn normalize_thread_folder_to_vault(vault_path: &str, picked: &str) -> String {
 /// and append an integer suffix (starting from `1`) until nothing collides on
 /// either `name` or `target_file`. The helper stays pure so the tests in this
 /// module can exercise the de-dup logic without building a whole `SettingsApp`.
-fn unique_new_thread_name(
-    existing: &[ThreadConfig],
-    base_name: &str,
-) -> (String, String) {
+fn unique_new_thread_name(existing: &[ThreadConfig], base_name: &str) -> (String, String) {
     let make_target = |name: &str| format!("{name}.md");
     let is_taken = |name: &str, target_file: &str| {
         existing
@@ -1243,9 +1242,7 @@ fn pick_thread_folder_task(id: Uuid) -> Task<SettingsMessage> {
 /// thread and wraps the selection in `wrap`. A cancellation surfaces as
 /// `wrap(None)`. Extracted so the Dimension-vault and File-inbox browse
 /// requests share a single code path.
-fn pick_folder_task(
-    wrap: fn(Option<String>) -> SettingsMessage,
-) -> Task<SettingsMessage> {
+fn pick_folder_task(wrap: fn(Option<String>) -> SettingsMessage) -> Task<SettingsMessage> {
     // `AsyncFileDialog::pick_folder` returns a `Future<Output = Option<FileHandle>>`.
     // We flatten to `Option<String>` so the follow-up `SettingsMessage` carries
     // plain, owned UTF-8 and the rest of the app never has to know about
@@ -1581,10 +1578,7 @@ fn keyboard_event_to_message(
     _status: iced_event::Status,
     _window: window::Id,
 ) -> Option<SettingsMessage> {
-    let Event::Keyboard(KeyboardEvent::KeyPressed {
-        key, modifiers, ..
-    }) = event
-    else {
+    let Event::Keyboard(KeyboardEvent::KeyPressed { key, modifiers, .. }) = event else {
         return None;
     };
     let key_code = shortcut_event::key_to_vk(&key)?;
@@ -1821,10 +1815,7 @@ mod tests {
                         note_write_mode: mode,
                         ..AppSettings::default()
                     };
-                    let app = SettingsApp::new(
-                        TraceTheme::for_preset(preset),
-                        Arc::new(settings),
-                    );
+                    let app = SettingsApp::new(TraceTheme::for_preset(preset), Arc::new(settings));
                     let _element: Element<'_, SettingsMessage> = settings_view(&app);
                 }
             }
@@ -1991,10 +1982,7 @@ mod tests {
         let original_date_format = app.settings.daily_file_date_format.clone();
         let original_entry_theme = app.settings.daily_entry_theme_preset;
 
-        let _ = settings_update(
-            &mut app,
-            SettingsMessage::VaultPathChanged("C:/new".into()),
-        );
+        let _ = settings_update(&mut app, SettingsMessage::VaultPathChanged("C:/new".into()));
         let _ = settings_update(
             &mut app,
             SettingsMessage::InboxVaultPathChanged("C:/new-inbox".into()),
@@ -2098,10 +2086,7 @@ mod tests {
         // `vault_path_issue` doc comment contract that the view pass never
         // has to call `validate_vault_path`.
         let app = fresh_app();
-        assert_eq!(
-            app.vault_path_issue,
-            Some(VaultPathValidationIssue::Empty)
-        );
+        assert_eq!(app.vault_path_issue, Some(VaultPathValidationIssue::Empty));
         assert_eq!(
             app.inbox_vault_path_issue,
             Some(VaultPathValidationIssue::Empty)
@@ -2114,20 +2099,14 @@ mod tests {
         // this the Storage card would render a stale warning after the user
         // types a new value.
         let mut app = fresh_app();
-        assert_eq!(
-            app.vault_path_issue,
-            Some(VaultPathValidationIssue::Empty)
-        );
+        assert_eq!(app.vault_path_issue, Some(VaultPathValidationIssue::Empty));
         let _ = settings_update(
             &mut app,
             SettingsMessage::VaultPathChanged("/nonexistent/path/for/trace-cache-test".into()),
         );
         // A non-blank, non-existent path must reclassify — the exact variant
         // depends on the host filesystem, but it can no longer be `Empty`.
-        assert_ne!(
-            app.vault_path_issue,
-            Some(VaultPathValidationIssue::Empty)
-        );
+        assert_ne!(app.vault_path_issue, Some(VaultPathValidationIssue::Empty));
     }
 
     #[test]
@@ -2139,14 +2118,9 @@ mod tests {
         let mut app = fresh_app();
         let _ = settings_update(
             &mut app,
-            SettingsMessage::VaultBrowseChose(Some(
-                "/nonexistent/browse-cache-test".into(),
-            )),
+            SettingsMessage::VaultBrowseChose(Some("/nonexistent/browse-cache-test".into())),
         );
-        assert_ne!(
-            app.vault_path_issue,
-            Some(VaultPathValidationIssue::Empty)
-        );
+        assert_ne!(app.vault_path_issue, Some(VaultPathValidationIssue::Empty));
     }
 
     #[test]
@@ -2175,9 +2149,7 @@ mod tests {
         let mut app = fresh_app();
         let _ = settings_update(
             &mut app,
-            SettingsMessage::InboxVaultPathChanged(
-                "/nonexistent/inbox-cache-test".into(),
-            ),
+            SettingsMessage::InboxVaultPathChanged("/nonexistent/inbox-cache-test".into()),
         );
         assert_ne!(
             app.inbox_vault_path_issue,
@@ -2250,10 +2222,9 @@ mod tests {
         // and do nothing. Guards against a future refactor that forgets the
         // `< MAXIMUM_COUNT` gate.
         let mut app = fresh_app();
-        app.section_titles =
-            (0..NoteSection::MAXIMUM_COUNT)
-                .map(NoteSection::default_title_for)
-                .collect();
+        app.section_titles = (0..NoteSection::MAXIMUM_COUNT)
+            .map(NoteSection::default_title_for)
+            .collect();
         let before = app.section_titles.clone();
         let _ = settings_update(&mut app, SettingsMessage::SectionAdded);
         assert_eq!(app.section_titles, before);
@@ -2460,10 +2431,7 @@ mod tests {
         let id = t1.id;
         let mut app = seeded_app(vec![t1]);
         let before = app.thread_configs.clone();
-        let _ = settings_update(
-            &mut app,
-            SettingsMessage::ThreadFolderBrowseChose(id, None),
-        );
+        let _ = settings_update(&mut app, SettingsMessage::ThreadFolderBrowseChose(id, None));
         assert_eq!(app.thread_configs, before);
     }
 
@@ -2475,10 +2443,7 @@ mod tests {
         app.vault_path = "/Users/you/Vault".into();
         let _ = settings_update(
             &mut app,
-            SettingsMessage::ThreadFolderBrowseChose(
-                id,
-                Some("/Users/you/Vault/Projects".into()),
-            ),
+            SettingsMessage::ThreadFolderBrowseChose(id, Some("/Users/you/Vault/Projects".into())),
         );
         assert_eq!(app.thread_configs[0].target_file, "Projects/notes.md");
     }
@@ -2491,10 +2456,7 @@ mod tests {
         app.vault_path = "/Users/you/Vault".into();
         let _ = settings_update(
             &mut app,
-            SettingsMessage::ThreadFolderBrowseChose(
-                id,
-                Some("/Users/other/Scratch".into()),
-            ),
+            SettingsMessage::ThreadFolderBrowseChose(id, Some("/Users/other/Scratch".into())),
         );
         assert_eq!(
             app.thread_configs[0].target_file,
@@ -2514,10 +2476,7 @@ mod tests {
         app.vault_path = "/Users/you/Vault".into();
         let _ = settings_update(
             &mut app,
-            SettingsMessage::ThreadFolderBrowseChose(
-                id,
-                Some("/Users/you/Vault-backup".into()),
-            ),
+            SettingsMessage::ThreadFolderBrowseChose(id, Some("/Users/you/Vault-backup".into())),
         );
         assert_eq!(
             app.thread_configs[0].target_file,
@@ -2536,10 +2495,7 @@ mod tests {
         app.vault_path = "/Users/you/Vault".into();
         let _ = settings_update(
             &mut app,
-            SettingsMessage::ThreadFolderBrowseChose(
-                id,
-                Some("/Users/you/Vault/Logs".into()),
-            ),
+            SettingsMessage::ThreadFolderBrowseChose(id, Some("/Users/you/Vault/Logs".into())),
         );
         assert_eq!(app.thread_configs[0].target_file, "Logs/Threads.md");
     }
@@ -2554,10 +2510,7 @@ mod tests {
         assert!(app.vault_path.is_empty());
         let _ = settings_update(
             &mut app,
-            SettingsMessage::ThreadFolderBrowseChose(
-                id,
-                Some("/Users/x/Folder".into()),
-            ),
+            SettingsMessage::ThreadFolderBrowseChose(id, Some("/Users/x/Folder".into())),
         );
         assert_eq!(
             app.thread_configs[0].target_file,
@@ -2598,9 +2551,7 @@ mod tests {
         let base = L10n::new_thread_default_name(lang);
         let settings = AppSettings {
             language: lang,
-            thread_configs: vec![
-                ThreadConfig::new(base, format!("{base}.md"), None, 0),
-            ],
+            thread_configs: vec![ThreadConfig::new(base, format!("{base}.md"), None, 0)],
             ..AppSettings::default()
         };
         let mut app = SettingsApp::new(
@@ -2617,14 +2568,7 @@ mod tests {
     #[test]
     fn thread_added_at_maximum_is_noop() {
         let threads: Vec<ThreadConfig> = (0..ThreadConfig::MAXIMUM_COUNT)
-            .map(|i| {
-                ThreadConfig::new(
-                    format!("T{i}"),
-                    format!("T{i}.md"),
-                    None,
-                    i as i32,
-                )
-            })
+            .map(|i| ThreadConfig::new(format!("T{i}"), format!("T{i}.md"), None, i as i32))
             .collect();
         let mut app = seeded_app(threads);
         let before = app.thread_configs.clone();
@@ -2663,10 +2607,7 @@ mod tests {
         let t2 = thread_fixture("B", "B.md", 1);
         let mut app = seeded_app(vec![t1, t2]);
         let before = app.thread_configs.clone();
-        let _ = settings_update(
-            &mut app,
-            SettingsMessage::ThreadRemoved(Uuid::new_v4()),
-        );
+        let _ = settings_update(&mut app, SettingsMessage::ThreadRemoved(Uuid::new_v4()));
         assert_eq!(app.thread_configs, before);
     }
 
@@ -2716,17 +2657,11 @@ mod tests {
         );
         // vault-looking sibling → absolute preserved
         assert_eq!(
-            normalize_thread_folder_to_vault(
-                "/Users/x/Vault",
-                "/Users/x/Vault-backup"
-            ),
+            normalize_thread_folder_to_vault("/Users/x/Vault", "/Users/x/Vault-backup"),
             "/Users/x/Vault-backup"
         );
         // empty vault → always absolute
-        assert_eq!(
-            normalize_thread_folder_to_vault("", "/tmp"),
-            "/tmp"
-        );
+        assert_eq!(normalize_thread_folder_to_vault("", "/tmp"), "/tmp");
     }
 
     #[test]
@@ -2739,12 +2674,7 @@ mod tests {
 
     #[test]
     fn unique_new_thread_name_skips_name_collision() {
-        let existing = vec![ThreadConfig::new(
-            "New Thread",
-            "New Thread.md",
-            None,
-            0,
-        )];
+        let existing = vec![ThreadConfig::new("New Thread", "New Thread.md", None, 0)];
         let (name, target) = unique_new_thread_name(&existing, "New Thread");
         assert_eq!(name, "New Thread 1");
         assert_eq!(target, "New Thread 1.md");
@@ -2919,7 +2849,7 @@ mod tests {
         // the round-trip through `ShortcutSpec::new` is exercised by more
         // than just the all-default path.
         let persisted = AppSettings {
-            hot_key_code: 0x41,       // A
+            hot_key_code: 0x41, // A
             hot_key_modifiers: MOD_ALT,
             send_note_key_code: 0x42, // B
             send_note_modifiers: MOD_SHIFT,
@@ -3161,11 +3091,12 @@ mod tests {
         );
         assert_eq!(app.recording_target, Some(ShortcutTarget::Append));
         assert_eq!(app.append_note_shortcut, before);
-        let expected = L10n::shortcut_conflict(
-            app.language,
-            ShortcutTarget::Send.name(app.language),
+        let expected =
+            L10n::shortcut_conflict(app.language, ShortcutTarget::Send.name(app.language));
+        assert_eq!(
+            app.shortcut_recorder_message.as_deref(),
+            Some(expected.as_str())
         );
-        assert_eq!(app.shortcut_recorder_message.as_deref(), Some(expected.as_str()));
     }
 
     #[test]
@@ -3320,11 +3251,16 @@ mod tests {
             text: None,
             repeat: false,
         });
-        let msg = keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
+        let msg =
+            keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
         // `SettingsMessage` is intentionally not `PartialEq` (its payloads
         // include iced task handles on other variants); destructure the
         // tuple to assert the shape explicitly.
-        let Some(SettingsMessage::RecordingCaptured { key_code, modifiers }) = msg else {
+        let Some(SettingsMessage::RecordingCaptured {
+            key_code,
+            modifiers,
+        }) = msg
+        else {
             panic!("expected RecordingCaptured, got {msg:?}");
         };
         assert_eq!(key_code, 0x4E);
@@ -3347,8 +3283,13 @@ mod tests {
             text: None,
             repeat: false,
         });
-        let msg = keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
-        let Some(SettingsMessage::RecordingCaptured { key_code, modifiers }) = msg else {
+        let msg =
+            keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
+        let Some(SettingsMessage::RecordingCaptured {
+            key_code,
+            modifiers,
+        }) = msg
+        else {
             panic!("expected RecordingCaptured, got {msg:?}");
         };
         assert_eq!(key_code, 0x1B);
@@ -3372,7 +3313,8 @@ mod tests {
             text: None,
             repeat: false,
         });
-        let msg = keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
+        let msg =
+            keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
         assert!(msg.is_none());
     }
 
@@ -3392,7 +3334,8 @@ mod tests {
             text: None,
             repeat: false,
         });
-        let msg = keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
+        let msg =
+            keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
         assert!(msg.is_none());
     }
 
@@ -3409,7 +3352,8 @@ mod tests {
             location: iced::keyboard::Location::Standard,
             modifiers: iced::keyboard::Modifiers::CTRL,
         });
-        let msg = keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
+        let msg =
+            keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
         assert!(msg.is_none());
     }
 
@@ -3418,7 +3362,8 @@ mod tests {
         // Window / mouse / touch events must never produce a recorder
         // message, so the decoder returns `None` on the first match guard.
         let event = Event::Window(iced::window::Event::Focused);
-        let msg = keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
+        let msg =
+            keyboard_event_to_message(event, iced_event::Status::Ignored, window::Id::unique());
         assert!(msg.is_none());
     }
 
@@ -3618,10 +3563,7 @@ mod tests {
             Arc::new(AppSettings::default()),
             None,
         );
-        let _ = settings_update(
-            &mut app,
-            SettingsMessage::VaultPathChanged("/nope".into()),
-        );
+        let _ = settings_update(&mut app, SettingsMessage::VaultPathChanged("/nope".into()));
         // Nothing should have materialised in the temp dir — we never gave the
         // app a pointer to it.
         let entries: Vec<_> = std::fs::read_dir(tmp.path())
@@ -3672,10 +3614,7 @@ mod tests {
         );
         // Would panic if `persist_working` bubbled the save error. The message
         // itself still needs to land on the working copy regardless.
-        let _ = settings_update(
-            &mut app,
-            SettingsMessage::LanguageChanged(Language::Ja),
-        );
+        let _ = settings_update(&mut app, SettingsMessage::LanguageChanged(Language::Ja));
         assert_eq!(app.working.language, Language::Ja);
     }
 
@@ -3786,10 +3725,7 @@ mod tests {
             TraceTheme::for_preset(ThemePreset::Light),
             Arc::new(AppSettings::default()),
         );
-        let _ = settings_update(
-            &mut legacy_new,
-            SettingsMessage::LaunchAtLoginToggled(true),
-        );
+        let _ = settings_update(&mut legacy_new, SettingsMessage::LaunchAtLoginToggled(true));
         assert!(legacy_new.launch_at_login_shadow);
 
         let mut legacy_save_path = SettingsApp::new_with_save_path(
@@ -3814,10 +3750,7 @@ mod tests {
         // would defeat the whole live-sync pipeline.
         let mut app = fresh_app();
         let before = app.latest_snapshot();
-        let _ = settings_update(
-            &mut app,
-            SettingsMessage::LaunchAtLoginToggled(true),
-        );
+        let _ = settings_update(&mut app, SettingsMessage::LaunchAtLoginToggled(true));
         let after = app.latest_snapshot();
         assert!(
             !Arc::ptr_eq(&before, &after),

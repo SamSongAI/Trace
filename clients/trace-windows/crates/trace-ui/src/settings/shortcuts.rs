@@ -126,8 +126,18 @@ pub(super) fn shortcuts_card<'a>(
 
     // Fixed informational rows. Labels are derived in iced at paint time
     // from the L10n catalog so every language gets the same affordance.
-    body.push(fixed_row(palette, lang, "Esc", L10n::shortcut_close_panel(lang)));
-    body.push(fixed_row(palette, lang, "Ctrl+P", L10n::shortcut_pin_panel(lang)));
+    body.push(fixed_row(
+        palette,
+        lang,
+        "Esc",
+        L10n::shortcut_close_panel(lang),
+    ));
+    body.push(fixed_row(
+        palette,
+        lang,
+        "Ctrl+P",
+        L10n::shortcut_pin_panel(lang),
+    ));
     body.push(fixed_row(
         palette,
         lang,

@@ -138,18 +138,23 @@ where
         .color(trace_color_to_iced(text_color));
 
     button(label_widget)
-        .padding([LANGUAGE_CHIP_PADDING_VERTICAL, LANGUAGE_CHIP_PADDING_HORIZONTAL])
+        .padding([
+            LANGUAGE_CHIP_PADDING_VERTICAL,
+            LANGUAGE_CHIP_PADDING_HORIZONTAL,
+        ])
         .on_press(on_press)
-        .style(move |_theme: &Theme, _status: button::Status| button::Style {
-            background: Some(Background::Color(trace_color_to_iced(background))),
-            text_color: trace_color_to_iced(text_color),
-            border: Border {
-                radius: LANGUAGE_CHIP_CORNER_RADIUS.into(),
-                width: 0.0,
-                color: Color::TRANSPARENT,
+        .style(
+            move |_theme: &Theme, _status: button::Status| button::Style {
+                background: Some(Background::Color(trace_color_to_iced(background))),
+                text_color: trace_color_to_iced(text_color),
+                border: Border {
+                    radius: LANGUAGE_CHIP_CORNER_RADIUS.into(),
+                    width: 0.0,
+                    color: Color::TRANSPARENT,
+                },
+                ..button::Style::default()
             },
-            ..button::Style::default()
-        })
+        )
         .into()
 }
 
@@ -219,7 +224,12 @@ where
     // 图标框背景从 `chipBackground` 切到 `accentStrong`,字色从 `accent`
     // 切到 `primaryButtonText`。把 `selected` 传给 `build_icon_box` 由它
     // 内部决定配色。
-    let icon_box = build_icon_box(palette, icon_glyph, WRITE_MODE_TILE_ICON_FONT_SIZE, selected);
+    let icon_box = build_icon_box(
+        palette,
+        icon_glyph,
+        WRITE_MODE_TILE_ICON_FONT_SIZE,
+        selected,
+    );
 
     let title_widget = text(compact_title)
         .size(Pixels(TILE_TITLE_FONT_SIZE))
@@ -292,16 +302,18 @@ where
     .width(Length::Fill)
     .padding(0)
     .on_press(on_press)
-    .style(move |_theme: &Theme, _status: button::Status| button::Style {
-        background: Some(Background::Color(trace_color_to_iced(background))),
-        text_color: trace_color_to_iced(palette.row_label),
-        border: Border {
-            radius: TILE_CORNER_RADIUS.into(),
-            width: border_width,
-            color: trace_color_to_iced(border_color),
+    .style(
+        move |_theme: &Theme, _status: button::Status| button::Style {
+            background: Some(Background::Color(trace_color_to_iced(background))),
+            text_color: trace_color_to_iced(palette.row_label),
+            border: Border {
+                radius: TILE_CORNER_RADIUS.into(),
+                width: border_width,
+                color: trace_color_to_iced(border_color),
+            },
+            ..button::Style::default()
         },
-        ..button::Style::default()
-    })
+    )
     .into()
 }
 
@@ -416,12 +428,8 @@ mod tests {
         // language row — make sure the chip factory accepts it without
         // panicking on construction.
         let palette = TraceTheme::for_preset(ThemePreset::Dark).settings;
-        let _chip: Element<'_, TestMsg> = language_chip(
-            palette,
-            "System default",
-            false,
-            TestMsg::Language("sys"),
-        );
+        let _chip: Element<'_, TestMsg> =
+            language_chip(palette, "System default", false, TestMsg::Language("sys"));
     }
 
     #[test]

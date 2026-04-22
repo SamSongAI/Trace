@@ -128,14 +128,16 @@ mod imp {
     /// wrapping a guard that must be held for the process lifetime.
     pub fn acquire() -> Result<SingleInstance, SingleInstanceError> {
         // Convert the UTF-8 name to a null-terminated UTF-16 buffer.
-        let name_utf16: Vec<u16> = MUTEX_NAME.encode_utf16().chain(std::iter::once(0)).collect();
+        let name_utf16: Vec<u16> = MUTEX_NAME
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
 
         // SAFETY: `name_utf16` lives until the end of this function, longer
         // than the `CreateMutexW` call. The pointer we pass is valid for
         // the duration of the call. `None` for `lpMutexAttributes` means
         // "default security descriptor (not inheritable)".
-        let create_result =
-            unsafe { CreateMutexW(None, false, PCWSTR(name_utf16.as_ptr())) };
+        let create_result = unsafe { CreateMutexW(None, false, PCWSTR(name_utf16.as_ptr())) };
 
         let handle = match create_result {
             Ok(h) => h,

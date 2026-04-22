@@ -334,7 +334,10 @@ fn replace_settings_updates_derived_theme_sections_threads_and_mode() {
         note_write_mode: WriteMode::Thread,
         ..AppSettings::default()
     });
-    apply(&mut app, Message::ReplaceSettings(Arc::clone(&new_settings)));
+    apply(
+        &mut app,
+        Message::ReplaceSettings(Arc::clone(&new_settings)),
+    );
 
     // Theme palette rebuilt from the new preset.
     let light_palette = app.theme.capture.panel_background;

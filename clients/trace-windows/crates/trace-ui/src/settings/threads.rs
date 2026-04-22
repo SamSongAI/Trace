@@ -142,7 +142,9 @@ pub(super) fn threads_card<'a>(
     let body = column(
         std::iter::once::<Element<'a, SettingsMessage>>(header)
             .chain(rows)
-            .chain(std::iter::once::<Element<'a, SettingsMessage>>(add_button.into())),
+            .chain(std::iter::once::<Element<'a, SettingsMessage>>(
+                add_button.into(),
+            )),
     )
     .spacing(CARD_VERTICAL_SPACING)
     .width(Length::Fill);
@@ -209,11 +211,10 @@ fn thread_config_row<'a>(
         .width(Length::Fill)
         .style(settings_field_style(palette));
 
-    let choose_button = button(
-        text(L10n::choose_folder(lang)).size(Pixels(CHOOSE_FOLDER_FONT_SIZE)),
-    )
-    .on_press(SettingsMessage::BrowseThreadFolderRequested(thread_id))
-    .style(settings_secondary_button_style(palette));
+    let choose_button =
+        button(text(L10n::choose_folder(lang)).size(Pixels(CHOOSE_FOLDER_FONT_SIZE)))
+            .on_press(SettingsMessage::BrowseThreadFolderRequested(thread_id))
+            .style(settings_secondary_button_style(palette));
 
     // Folder + Choose-Folder are a single logical group. The outer `row!`
     // width is `Length::Fill` so the group absorbs the residual horizontal

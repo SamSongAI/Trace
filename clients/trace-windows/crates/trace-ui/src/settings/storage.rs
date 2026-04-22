@@ -298,12 +298,14 @@ mod tests {
 
     #[test]
     fn entry_theme_option_display_matches_core_title_per_language() {
-        for lang in [Language::SystemDefault, Language::Zh, Language::En, Language::Ja] {
+        for lang in [
+            Language::SystemDefault,
+            Language::Zh,
+            Language::En,
+            Language::Ja,
+        ] {
             for theme in EntryTheme::ALL {
-                assert_eq!(
-                    EntryThemeOption(theme, lang).to_string(),
-                    theme.title(lang)
-                );
+                assert_eq!(EntryThemeOption(theme, lang).to_string(), theme.title(lang));
             }
         }
     }
@@ -313,7 +315,12 @@ mod tests {
         // A missing arm would make the helper return an empty string or fail
         // to compile; the assertion pins the non-empty contract for every
         // (variant, lang) pair.
-        for lang in [Language::SystemDefault, Language::Zh, Language::En, Language::Ja] {
+        for lang in [
+            Language::SystemDefault,
+            Language::Zh,
+            Language::En,
+            Language::Ja,
+        ] {
             for issue in [
                 VaultPathValidationIssue::Empty,
                 VaultPathValidationIssue::DoesNotExist,
@@ -364,7 +371,12 @@ mod tests {
     #[test]
     fn inbox_vault_path_row_builds_for_every_language() {
         let palette = sample_palette();
-        for lang in [Language::SystemDefault, Language::Zh, Language::En, Language::Ja] {
+        for lang in [
+            Language::SystemDefault,
+            Language::Zh,
+            Language::En,
+            Language::Ja,
+        ] {
             let _row: Element<'_, TestMsg> = inbox_vault_path_row(
                 palette,
                 lang,
@@ -389,19 +401,20 @@ mod tests {
     fn file_name_format_row_builds_for_every_preset() {
         let palette = sample_palette();
         for preset in DailyFileDateFormat::ALL {
-            let _row: Element<'_, TestMsg> = file_name_format_row(
-                palette,
-                Language::Zh,
-                preset,
-                TestMsg::FormatChanged,
-            );
+            let _row: Element<'_, TestMsg> =
+                file_name_format_row(palette, Language::Zh, preset, TestMsg::FormatChanged);
         }
     }
 
     #[test]
     fn entry_format_row_builds_for_every_theme_and_language() {
         let palette = sample_palette();
-        for lang in [Language::SystemDefault, Language::Zh, Language::En, Language::Ja] {
+        for lang in [
+            Language::SystemDefault,
+            Language::Zh,
+            Language::En,
+            Language::Ja,
+        ] {
             for theme in EntryTheme::ALL {
                 let _row: Element<'_, TestMsg> =
                     entry_format_row(palette, lang, theme, TestMsg::ThemeChanged);

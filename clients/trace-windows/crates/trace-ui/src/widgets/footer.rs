@@ -26,7 +26,10 @@ use iced::{Alignment, Length, Pixels};
 use trace_core::{CapturePalette, NoteSection, ThreadConfig, WriteMode};
 
 use crate::app::{Message, SectionId, ThreadId, SEPARATOR_HEIGHT};
-use crate::theme::{chip_button_style, chrome_container_style, document_title_input_style, separator_container_style};
+use crate::theme::{
+    chip_button_style, chrome_container_style, document_title_input_style,
+    separator_container_style,
+};
 
 /// Number of chip columns used by the Phase 10 static grid layout.
 ///
@@ -149,9 +152,7 @@ fn chrome_wrapper<'a>(
         .into()
 }
 
-fn chip_grid<'a>(
-    chips: Vec<iced::Element<'a, Message>>,
-) -> iced::Element<'a, Message> {
+fn chip_grid<'a>(chips: Vec<iced::Element<'a, Message>>) -> iced::Element<'a, Message> {
     let columns = SECTION_GRID_COLUMNS.max(1);
     let expected_rows = chips.len().div_ceil(columns);
     let mut rows: Vec<iced::Element<'a, Message>> = Vec::with_capacity(expected_rows);
@@ -175,9 +176,7 @@ fn chip_grid<'a>(
         rows.push(finalize_row(current_row));
     }
 
-    let grid = column(rows)
-        .spacing(CHIP_SPACING)
-        .width(Length::Fill);
+    let grid = column(rows).spacing(CHIP_SPACING).width(Length::Fill);
 
     container(grid)
         .padding([FOOTER_VERTICAL_PADDING, FOOTER_HORIZONTAL_PADDING])
@@ -185,9 +184,7 @@ fn chip_grid<'a>(
         .into()
 }
 
-fn finalize_row<'a>(
-    items: Vec<iced::Element<'a, Message>>,
-) -> iced::Element<'a, Message> {
+fn finalize_row<'a>(items: Vec<iced::Element<'a, Message>>) -> iced::Element<'a, Message> {
     row(items)
         .spacing(CHIP_SPACING)
         .align_y(Alignment::Center)

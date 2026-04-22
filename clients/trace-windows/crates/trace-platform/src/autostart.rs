@@ -147,16 +147,8 @@ mod imp {
         // SAFETY: `value_name` outlives the call; all null out-params are
         // explicitly allowed by RegQueryValueExW when caller only wants
         // existence / size information.
-        let status = unsafe {
-            RegQueryValueExW(
-                key.0,
-                PCWSTR(value_name.as_ptr()),
-                None,
-                None,
-                None,
-                None,
-            )
-        };
+        let status =
+            unsafe { RegQueryValueExW(key.0, PCWSTR(value_name.as_ptr()), None, None, None, None) };
         match status {
             s if s == ERROR_SUCCESS => Ok(true),
             s if s == ERROR_FILE_NOT_FOUND => Ok(false),

@@ -61,7 +61,10 @@ mod tests {
 
     impl LaunchAtLoginSink for RecordingSink {
         fn apply(&self, enabled: bool) {
-            self.calls.lock().expect("recording sink mutex").push(enabled);
+            self.calls
+                .lock()
+                .expect("recording sink mutex")
+                .push(enabled);
         }
     }
 

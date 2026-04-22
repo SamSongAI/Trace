@@ -229,7 +229,7 @@ mod imp {
 
     impl Drop for MenuGuard {
         fn drop(&mut self) {
-            if !self.0.0.is_null() {
+            if !self.0 .0.is_null() {
                 unsafe {
                     let _ = DestroyMenu(self.0);
                 }
