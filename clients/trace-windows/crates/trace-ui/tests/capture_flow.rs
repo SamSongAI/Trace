@@ -320,6 +320,7 @@ fn replace_settings_updates_derived_theme_sections_threads_and_mode() {
         Arc::new(AppSettings::default()),
     );
     let dark_palette = app.theme.capture.panel_background;
+    let dark_iced_bg = app.iced_theme.palette().background;
     assert_eq!(app.sections.len(), NoteSection::DEFAULT_TITLES.len());
     assert_eq!(app.threads.len(), 2);
     assert_eq!(app.write_mode, WriteMode::Dimension);
@@ -340,6 +341,14 @@ fn replace_settings_updates_derived_theme_sections_threads_and_mode() {
     assert_ne!(
         dark_palette, light_palette,
         "ReplaceSettings must rebuild the theme cache from the new preset"
+    );
+    // Cached iced Theme rebuilt alongside TraceTheme — `iced::Theme` lacks
+    // a useful `PartialEq`, so compare via the palette background (same
+    // pattern as `set_theme_refreshes_cached_iced_theme` in src/app.rs).
+    let light_iced_bg = app.iced_theme.palette().background;
+    assert_ne!(
+        dark_iced_bg, light_iced_bg,
+        "iced_theme must be rebuilt alongside TraceTheme"
     );
     // Sections re-derived from `section_titles`.
     let titles: Vec<_> = app.sections.iter().map(|s| s.title.clone()).collect();
@@ -448,6 +457,19 @@ fn replace_settings_preserves_transient_editor_state() {
     apply(&mut app, Message::PinToggled);
     assert!(app.pinned);
 
+    // Seed the remaining transient fields so the preservation check
+    // covers the full set the apply_settings_snapshot helper must leave
+    // untouched. `capture_window_id` / `settings_window_id` are
+    // `Option<window::Id>` with no public constructor from tests, so we
+    // assert they stay at their `None` default — the handler never
+    // touches them.
+    app.toast = Some("sticky toast".into());
+    app.toast_generation = 42;
+    let toast_before = app.toast.clone();
+    let toast_gen_before = app.toast_generation;
+    let capture_id_before = app.capture_window_id;
+    let settings_id_before = app.settings_window_id;
+
     let new_settings = Arc::new(AppSettings {
         app_theme_preset: ThemePreset::Paper,
         ..AppSettings::default()
@@ -457,4 +479,23 @@ fn replace_settings_preserves_transient_editor_state() {
     // Editor draft and pin flag untouched even though the theme flipped.
     assert_eq!(app.editor_text(), "in-flight draft");
     assert!(app.pinned);
+    // Toast + toast_generation exercise the "preserve non-default
+    // transient state" path; the _id assertions lock in that the
+    // handler never reaches the window-id fields.
+    assert_eq!(
+        app.toast, toast_before,
+        "toast must survive live settings broadcast"
+    );
+    assert_eq!(
+        app.toast_generation, toast_gen_before,
+        "toast_generation must survive live settings broadcast"
+    );
+    assert_eq!(
+        app.capture_window_id, capture_id_before,
+        "capture_window_id must survive live settings broadcast"
+    );
+    assert_eq!(
+        app.settings_window_id, settings_id_before,
+        "settings_window_id must survive live settings broadcast"
+    );
 }
