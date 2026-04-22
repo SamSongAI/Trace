@@ -39,10 +39,13 @@ use thiserror::Error;
 /// that triage on substring.
 #[derive(Debug, Error)]
 pub enum ClipboardImageError {
-    /// `arboard::Clipboard::new()` failed. On Windows this typically
-    /// means `OpenClipboard` returned an error (another process is
-    /// holding the clipboard open, COM initialisation lost, etc.).
-    /// On macOS it means the `NSPasteboard` handle could not be
+    /// `arboard::Clipboard::new()` failed with an error *other* than
+    /// transient cross-process contention — that specific case
+    /// (`arboard::Error::ClipboardOccupied`) is intercepted by
+    /// [`read_clipboard_image_as_png`] and reported as `Ok(None)`, so it
+    /// never reaches this variant. On Windows the remaining triggers are
+    /// COM-initialisation loss or a non-contention `OpenClipboard`
+    /// failure; on macOS it means the `NSPasteboard` handle could not be
     /// acquired — vanishingly rare outside of sandbox misconfigurations.
     #[error("clipboard unavailable: {0}")]
     ClipboardUnavailable(String),
