@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Trace Windows client MSI — WiX v4 declaration.
+
+  Build (local dev / CI):
+    wix build -arch x64 ^
+      -d Version=0.1.0 ^
+      -d BinDir=..\..\target\x86_64-pc-windows-msvc\release ^
+      -d AssetsDir=..\assets ^
+      -ext WixToolset.UI.wixext ^
+      -o Trace-0.1.0-x64.msi Product.wxs
+
+  ===========================================================================
+  UpgradeCode is FIXED for the lifetime of this product. Windows Installer
+  uses it as the identity every ProductCode maps back to; changing it would
+  make every future release look like a separate product and break the
+  MajorUpgrade path (double-install instead of in-place upgrade).
+
+  Generated 2026-04-22 — DO NOT EDIT the GUID below.
+  ===========================================================================
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package
+      Name="Trace"
+      Manufacturer="Sam Song"
+      Version="$(Version)"
+      UpgradeCode="4F0FC3A3-C718-4DD4-BB01-0351E9960E8C"
+      Compressed="yes"
+      Scope="perMachine"
+      InstallerVersion="500">
+
+    <SummaryInformation Description="Trace — macOS 风格的系统级快速捕获工具（Windows 版）" />
+
+    <!--
+      MajorUpgrade: schedule afterInstallInitialize so the old version is
+      uninstalled before the new one lays files down. %APPDATA%\Trace is
+      user-owned data, so the installer never touches it — notes, settings,
+      and daily files survive every upgrade automatically.
+    -->
+    <MajorUpgrade
+        Schedule="afterInstallInitialize"
+        DowngradeErrorMessage="已安装更新的 Trace 版本，无法降级。" />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- 目录结构: C:\Program Files\Trace\ -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Trace" />
+    </StandardDirectory>
+
+    <!--
+      主 exe 组件。Guid="*" tells WiX to hash the file path so the GUID is
+      stable across rebuilds as long as the component's identity (file
+      location + keypath) does not change.
+    -->
+    <ComponentGroup Id="TraceAppComponents" Directory="INSTALLFOLDER">
+      <Component Id="TraceAppExe" Guid="*">
+        <File Id="TraceAppExeFile"
+              Source="$(BinDir)\trace-app.exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- 主特性 -->
+    <Feature Id="MainFeature" Title="Trace" Level="1"
+             Description="Trace 主程序">
+      <ComponentGroupRef Id="TraceAppComponents" />
+    </Feature>
+
+    <!--
+      UI: WixUI_InstallDir shows Welcome -> EULA -> InstallDir -> Ready
+      -> Progress -> Exit. The extension is referenced via xmlns:ui at
+      the top and -ext WixToolset.UI.wixext on the command line.
+    -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(AssetsDir)\LICENSE.rtf" />
+  </Package>
+</Wix>
