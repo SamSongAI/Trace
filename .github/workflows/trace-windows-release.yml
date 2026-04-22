@@ -1,0 +1,160 @@
+name: trace-windows-release
+
+# Triggered only by tags shaped like v1.2.3 / v0.1.0 / v1.2.3-rc1.
+# Pushes to main and PRs are handled by trace-windows-build.yml.
+#
+# Security note: `github.ref_name` is the tag name. Because the trigger
+# glob is `v*.*.*`, the tag shape is constrained, but we still feed the
+# value through the safe patterns: in `run:` blocks we read the env var
+# `$GITHUB_REF_NAME` (not `${{ github.ref_name }}` interpolated into
+# shell), and every other consumer is an action input — never a shell
+# command line.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+# Release job uploads signed artifacts to the matching GitHub Release.
+# Requires write permission on `contents`.
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: clients/trace-windows
+
+jobs:
+  build-release:
+    name: build ${{ matrix.arch }} MSI + portable
+    runs-on: windows-latest
+    strategy:
+      # Keep going even if one arch blows up; we'd rather publish a
+      # partial release than nothing. The final publish step gracefully
+      # handles missing arch artifacts by globbing the output directory.
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+        include:
+          - arch: x64
+            triple: x86_64-pc-windows-msvc
+          - arch: arm64
+            triple: aarch64-pc-windows-msvc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust (stable + ${{ matrix.triple }})
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/trace-windows -> target
+          # Separate cache buckets per arch so x64 / arm64 caches don't
+          # thrash each other.
+          key: release-${{ matrix.arch }}
+
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install WiX v4 global tool
+        run: dotnet tool install --global wix --version 4.0.5
+
+      - name: Add WiX UI extension
+        run: wix extension add -g WixToolset.UI.wixext/4.0.5
+
+      - name: Setup Python (for asset regeneration)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Pillow
+        run: python -m pip install Pillow==10.*
+
+      # Azure Trusted Signing requires the CodeSigning dlib (a C# DLL)
+      # which ships as a NuGet package. `dotnet nuget install` drops it
+      # in a predictable path we can echo into GITHUB_ENV for
+      # build-msi.ps1 / signtool to find.
+      - name: Install Azure Trusted Signing client
+        shell: pwsh
+        run: |
+          $nugetDir = "${{ runner.temp }}/ats-nuget"
+          New-Item -ItemType Directory -Path $nugetDir -Force | Out-Null
+          nuget install Microsoft.Trusted.Signing.Client `
+            -Version 1.0.53 `
+            -OutputDirectory $nugetDir `
+            -ExcludeVersion
+          $dlib = Join-Path $nugetDir `
+            "Microsoft.Trusted.Signing.Client/bin/x64/Azure.CodeSigning.Dlib.dll"
+          if (-not (Test-Path $dlib)) {
+            throw "expected dlib at $dlib after NuGet install"
+          }
+          "TRACE_ATS_DLIB=$dlib" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build signed MSI + portable ZIP
+        shell: pwsh
+        env:
+          AZURE_TENANT_ID:         ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID:         ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET:     ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TS_ENDPOINT:       ${{ secrets.AZURE_TS_ENDPOINT }}
+          AZURE_TS_ACCOUNT_NAME:   ${{ secrets.AZURE_TS_ACCOUNT_NAME }}
+          AZURE_TS_PROFILE_NAME:   ${{ secrets.AZURE_TS_PROFILE_NAME }}
+          # TRACE_ATS_DLIB was exported by the previous step via GITHUB_ENV.
+        run: ./installer/build-msi.ps1 -Arch ${{ matrix.arch }}
+
+      - name: Upload matrix artifact
+        # Each matrix leg uploads its pair into the same artifact name
+        # via unique suffixes; the publish job downloads the lot.
+        uses: actions/upload-artifact@v4
+        with:
+          name: trace-release-${{ matrix.arch }}
+          path: |
+            clients/trace-windows/installer/out/Trace-*-${{ matrix.arch }}.msi
+            clients/trace-windows/installer/out/Trace-*-${{ matrix.arch }}-portable.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build-release
+    # Run only if at least one matrix leg succeeded. `fail-fast: false`
+    # on the matrix means a partial set is possible; the publish step
+    # globs whatever landed and attaches all of it.
+    if: always() && needs.build-release.result != 'cancelled'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: trace-release-*
+          merge-multiple: true
+          path: ./release-artifacts
+
+      - name: Derive release version from tag
+        id: ver
+        # GITHUB_REF_NAME is injected by the runner — safe to expand in
+        # shell. Using the interpolation form `${{ github.ref_name }}`
+        # here would be the classic command-injection footgun, hence
+        # the env-var form.
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Trace v${{ steps.ver.outputs.version }}"
+          tag_name: ${{ github.ref_name }}
+          # Pre-release auto-detect: any tag with a `-` in it (e.g.
+          # v0.1.0-rc1) is treated as prerelease.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: ./release-artifacts/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
