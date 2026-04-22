@@ -16,7 +16,7 @@ use iced::widget::{container, text_editor};
 use iced::{Length, Pixels};
 use trace_core::CapturePalette;
 
-use crate::app::Message;
+use crate::app::{paste_key_binding, Message};
 use crate::fonts::LORA_FONT;
 use crate::theme::{capture_editor_style, panel_container_style};
 
@@ -39,6 +39,12 @@ pub fn editor<'a>(
         .font(LORA_FONT)
         .size(Pixels(EDITOR_FONT_SIZE))
         .on_action(Message::EditorAction)
+        // Ctrl+V (Cmd+V on macOS) is intercepted here so the app can route
+        // paste through [`crate::clipboard::ClipboardProbe`] (image-first,
+        // text-fallback). Every other key press delegates to iced's
+        // default binding, so typing / selection / copy / cut / select-all
+        // keep their built-in behaviour.
+        .key_binding(paste_key_binding)
         .height(Length::Fill)
         .style(capture_editor_style(palette));
 

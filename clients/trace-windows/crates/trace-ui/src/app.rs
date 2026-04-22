@@ -38,16 +38,18 @@ use chrono::Utc;
 use iced::event::{self as iced_event};
 use iced::keyboard::key::Named;
 use iced::keyboard::{Event as KeyboardEvent, Key, Modifiers};
+use iced::widget::text_editor::{Binding, Edit, KeyPress};
 use iced::widget::{column, container, stack, text_editor, Space};
 use iced::window::Event as WindowEvent;
 use iced::{time, window, Event, Subscription, Task};
 use iced::{Element, Length, Size, Theme};
 use trace_core::{
-    AppSettings, DailyNoteWriter, FileWriter, NoteSection, SaveMode, ThreadConfig, ThreadWriter,
-    TraceTheme, WriteMode,
+    AppSettings, ClipboardImageWriter, DailyNoteWriter, FileWriter, NoteSection, SaveMode,
+    ThreadConfig, ThreadWriter, TraceTheme, WriteMode,
 };
 use uuid::Uuid;
 
+use crate::clipboard::ClipboardProbe;
 use crate::platform::PlatformHandler;
 use crate::theme::{panel_container_style, separator_container_style, to_iced_theme};
 use crate::widgets;
@@ -104,6 +106,15 @@ pub enum Message {
     /// Pin button tap — toggles [`CaptureApp::pinned`] and notifies the
     /// platform handler so the window's topmost bit stays in sync.
     PinToggled,
+    /// Ctrl+V / Cmd+V intercepted by the text editor's
+    /// [`iced::widget::text_editor::Binding::Custom`] hook. The update arm
+    /// routes through [`CaptureApp::clipboard_probe`]: image data on the
+    /// clipboard becomes a PNG write under the vault's daily assets tree
+    /// plus a Markdown-link insert in the editor; otherwise the handler
+    /// falls through to a plain-text paste. Matches Mac
+    /// `CaptureTextEditor.paste(_:)` (image first, text fallback, beep on
+    /// failure).
+    PasteRequested,
     /// Settings button tap. Opens the settings window via
     /// [`iced::window::open`] if one isn't already visible, otherwise focuses
     /// the existing window via [`iced::window::gain_focus`]. The window id is
@@ -274,6 +285,12 @@ pub struct CaptureApp {
     /// survives any `Clone` of the handler across iced's internal task
     /// plumbing.
     pub platform_handler: Option<Arc<dyn PlatformHandler + Send + Sync>>,
+    /// Optional clipboard façade consumed by the [`Message::PasteRequested`]
+    /// handler. `None` in unit tests that exercise other code paths; `Some`
+    /// when `trace-app` plugs in its platform-backed probe. Stored as a
+    /// trait object so the iced `update` function can stay free of
+    /// `arboard` / Win32 imports.
+    pub clipboard_probe: Option<Arc<dyn ClipboardProbe>>,
 }
 
 impl CaptureApp {
@@ -320,6 +337,7 @@ impl CaptureApp {
             toast_generation: 0,
             capture_window_id: None,
             platform_handler: None,
+            clipboard_probe: None,
         }
     }
 
@@ -333,6 +351,18 @@ impl CaptureApp {
         handler: Arc<dyn PlatformHandler + Send + Sync>,
     ) -> Self {
         self.platform_handler = Some(handler);
+        self
+    }
+
+    /// Plugs a clipboard probe into an already-constructed [`CaptureApp`].
+    ///
+    /// Mirrors [`CaptureApp::with_platform_handler`]: production wiring in
+    /// `trace-app` passes a `trace-platform`-backed probe so Ctrl+V can
+    /// route clipboard images through [`trace_core::ClipboardImageWriter`].
+    /// Tests that don't exercise paste can skip this builder and get a
+    /// no-op paste handler for free.
+    pub fn with_clipboard_probe(mut self, probe: Arc<dyn ClipboardProbe>) -> Self {
+        self.clipboard_probe = Some(probe);
         self
     }
 
@@ -452,6 +482,10 @@ pub fn update(state: &mut CaptureApp, message: Message) -> Task<Message> {
             if let Some(handler) = state.platform_handler.as_ref() {
                 handler.set_topmost(state.pinned);
             }
+            Task::none()
+        }
+        Message::PasteRequested => {
+            handle_paste_requested(state);
             Task::none()
         }
         Message::SettingsRequested => {
@@ -880,6 +914,109 @@ pub(crate) fn finalize_save_outcome(state: &CaptureApp, outcome: SaveOutcome) ->
         }
         SaveOutcome::WriterError(msg) => Task::done(Message::ToastShow(msg)),
     }
+}
+
+/// User-facing toast shown when [`trace_core::ClipboardImageWriter::write_png`]
+/// fails inside the paste handler (missing vault, unwriteable directory, atomic
+/// rename refused, …). The error diagnostic is interpolated into the `{}`.
+pub const TOAST_IMAGE_PASTE_FAILED: &str = "图片粘贴失败";
+/// User-facing toast shown when the clipboard probe itself fails inside the
+/// paste handler (OS clipboard unavailable, PNG encoding blew up, …). The
+/// error diagnostic is interpolated into the `{}`.
+pub const TOAST_CLIPBOARD_READ_FAILED: &str = "剪贴板读取失败";
+
+/// Synchronously sets the toast pill on `state`, mirroring the
+/// [`Message::ToastShow`] handler body. Split out so the paste handler can
+/// surface a toast inline (without recursing through another `update` pass)
+/// and so unit tests can observe the toast immediately after dispatching a
+/// single message.
+fn set_toast(state: &mut CaptureApp, message: String) {
+    state.toast = Some(message);
+    state.toast_expires_at = Some(Instant::now() + TOAST_AUTO_DISMISS);
+    state.toast_generation = state.toast_generation.wrapping_add(1);
+}
+
+/// Implements [`Message::PasteRequested`].
+///
+/// Contract, mirroring Mac `CaptureTextEditor.paste(_:)`:
+///
+/// 1. If no probe is wired up (unit-test scaffolding or misconfigured host),
+///    the handler is a silent no-op.
+/// 2. Image path: [`ClipboardProbe::read_image_as_png`] returning
+///    `Ok(Some(bytes))` drives a [`ClipboardImageWriter::write_png`] call
+///    against the current [`AppSettings`] snapshot. On success the
+///    returned Markdown link plus a trailing `\n` is pasted into the
+///    editor; on failure a `"图片粘贴失败: {err}"` toast surfaces.
+/// 3. Text fallback: when the image channel reports `Ok(None)`, we fall
+///    through to [`ClipboardProbe::read_text`] and paste the string into
+///    the editor. `Ok(None)` on text is a silent no-op (empty clipboard).
+/// 4. Probe errors on either channel surface as `"剪贴板读取失败: {err}"`.
+fn handle_paste_requested(state: &mut CaptureApp) {
+    let Some(probe) = state.clipboard_probe.as_ref() else {
+        return;
+    };
+
+    match probe.read_image_as_png() {
+        Ok(Some(bytes)) => {
+            let writer = ClipboardImageWriter::new(Arc::clone(&state.settings));
+            match writer.write_png(&bytes, Utc::now()) {
+                Ok(plan) => {
+                    let payload = format!("{}\n", plan.markdown_link);
+                    state
+                        .editor_content
+                        .perform(text_editor::Action::Edit(Edit::Paste(Arc::new(payload))));
+                }
+                Err(err) => {
+                    set_toast(state, format!("{}: {}", TOAST_IMAGE_PASTE_FAILED, err));
+                }
+            }
+            return;
+        }
+        Ok(None) => {
+            // Fall through to text.
+        }
+        Err(err) => {
+            set_toast(state, format!("{}: {}", TOAST_CLIPBOARD_READ_FAILED, err));
+            return;
+        }
+    }
+
+    match probe.read_text() {
+        Ok(Some(text)) => {
+            state
+                .editor_content
+                .perform(text_editor::Action::Edit(Edit::Paste(Arc::new(text))));
+        }
+        Ok(None) => {
+            // Empty clipboard — silent no-op, matching Mac's `NSBeep` only
+            // on write failure.
+        }
+        Err(err) => {
+            set_toast(state, format!("{}: {}", TOAST_CLIPBOARD_READ_FAILED, err));
+        }
+    }
+}
+
+/// Key-binding closure hook for the capture panel's text editor.
+///
+/// Intercepts Ctrl+V (Cmd+V on macOS — `modifiers.command()` already folds
+/// the platform-specific modifier into a single predicate) and routes it to
+/// [`Message::PasteRequested`] so the app can handle image-first, text-
+/// fallback paste through [`ClipboardProbe`]. Every other key press
+/// delegates to [`Binding::from_key_press`] so default typing, navigation,
+/// selection, copy, cut, and select-all remain intact.
+///
+/// Extracted as a free function (rather than inlined into the widget's
+/// `.key_binding(...)` closure) so unit tests can build a [`KeyPress`]
+/// fixture and exercise the routing directly.
+pub fn paste_key_binding(press: KeyPress) -> Option<Binding<Message>> {
+    if press.modifiers.command()
+        && !press.modifiers.alt()
+        && press.key.to_latin(press.physical_key) == Some('v')
+    {
+        return Some(Binding::Custom(Message::PasteRequested));
+    }
+    Binding::from_key_press(press)
 }
 
 /// Drives the `SendNote` / `AppendNote` handlers.
@@ -2051,5 +2188,290 @@ mod tests {
         assert!(app.capture_window_id.is_none());
         apply(&mut app, Message::WindowOpened(window::Id::unique()));
         assert!(app.capture_window_id.is_some());
+    }
+
+    // ---------------------------------------------------------------------
+    // Task 13.3 — paste hook (Message::PasteRequested + paste_key_binding).
+    //
+    // Tests cover the full matrix described in the Mac reference:
+    //   - image present → write PNG + insert Markdown link
+    //   - image absent, text present → paste text
+    //   - empty clipboard → no-op
+    //   - image write failure → toast "图片粘贴失败"
+    //   - no probe wired up → no-op
+    //   - probe error → toast "剪贴板读取失败"
+    //
+    // Plus the key-binding routing: Ctrl/Cmd+V → PasteRequested, other keys
+    // fall through to iced's default binding.
+    // ---------------------------------------------------------------------
+
+    /// Minimal byte sequence the writer treats as a PNG payload. The atomic
+    /// write path does no magic-number validation so any non-empty slice is
+    /// sufficient for these tests — the actual clipboard-to-PNG encode
+    /// pipeline lives in `trace-platform` and is covered by its own suite.
+    const FAKE_PNG: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+
+    #[test]
+    fn paste_requested_with_image_writes_png_and_inserts_markdown() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let probe = Arc::new(
+            crate::clipboard::mock::MockClipboardProbe::new().with_image_png(FAKE_PNG.to_vec()),
+        );
+        let mut app =
+            app_with_vault(&tempdir, sample_threads()).with_clipboard_probe(probe.clone());
+        apply(&mut app, Message::PasteRequested);
+
+        // The writer drops the PNG under
+        // `{vault}/{daily_folder_name}/assets/{yyyy-MM-dd}/trace-*.png`.
+        let daily_folder = tempdir.path().join(&app.settings.daily_folder_name);
+        let assets_root = daily_folder.join("assets");
+        let day_dirs: Vec<_> = std::fs::read_dir(&assets_root)
+            .expect("assets dir should exist after a successful paste")
+            .filter_map(Result::ok)
+            .collect();
+        assert_eq!(
+            day_dirs.len(),
+            1,
+            "expected exactly one {{yyyy-MM-dd}} folder to be created, found {:?}",
+            day_dirs
+        );
+        let png_entries: Vec<_> = std::fs::read_dir(day_dirs[0].path())
+            .expect("day folder should be readable")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with("trace-"))
+            .collect();
+        assert_eq!(
+            png_entries.len(),
+            1,
+            "expected a single trace-*.png under the day folder, found {:?}",
+            png_entries
+        );
+
+        let editor_text = app.editor_text();
+        assert!(
+            editor_text.trim_end_matches('\n').ends_with(".png)"),
+            "editor should end with a Markdown image link ({:?})",
+            editor_text
+        );
+        assert!(
+            editor_text.contains("![image](assets/"),
+            "editor should contain Mac-parity Markdown link prefix ({:?})",
+            editor_text
+        );
+        assert!(
+            editor_text.ends_with('\n'),
+            "payload must end with a newline so the next send starts clean ({:?})",
+            editor_text
+        );
+
+        // Only the image channel was consulted — text fallback is skipped
+        // on a successful image paste.
+        assert_eq!(probe.image_call_count(), 1);
+        assert_eq!(probe.text_call_count(), 0);
+        assert!(app.toast.is_none(), "successful paste must not toast");
+    }
+
+    #[test]
+    fn paste_requested_with_text_fallback_inserts_text() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let probe = Arc::new(crate::clipboard::mock::MockClipboardProbe::new().with_text("hello"));
+        let mut app =
+            app_with_vault(&tempdir, sample_threads()).with_clipboard_probe(probe.clone());
+        apply(&mut app, Message::PasteRequested);
+
+        assert_eq!(app.editor_text(), "hello");
+        assert_eq!(
+            probe.image_call_count(),
+            1,
+            "image channel is consulted first"
+        );
+        assert_eq!(
+            probe.text_call_count(),
+            1,
+            "text channel is consulted as the fallback"
+        );
+        assert!(app.toast.is_none());
+    }
+
+    #[test]
+    fn paste_requested_with_empty_clipboard_is_noop() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let probe = Arc::new(crate::clipboard::mock::MockClipboardProbe::new());
+        let mut app =
+            app_with_vault(&tempdir, sample_threads()).with_clipboard_probe(probe.clone());
+        apply(&mut app, Message::PasteRequested);
+
+        assert_eq!(
+            app.editor_text(),
+            "",
+            "empty clipboard must leave editor untouched"
+        );
+        assert_eq!(probe.image_call_count(), 1);
+        assert_eq!(probe.text_call_count(), 1);
+        assert!(app.toast.is_none());
+    }
+
+    #[test]
+    fn paste_requested_with_image_write_failure_surfaces_toast() {
+        // Point the vault at a blank path so `ClipboardImageWriter::write_png`
+        // returns `InvalidVaultPath`, mirroring the setup used by
+        // `dispatch_save_writer_error_surfaces_message` above.
+        let settings = AppSettings {
+            vault_path: String::new(),
+            ..AppSettings::default()
+        };
+        let mut app = CaptureApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            sample_sections(),
+            sample_threads(),
+            Arc::new(settings),
+        );
+        let probe = Arc::new(
+            crate::clipboard::mock::MockClipboardProbe::new().with_image_png(FAKE_PNG.to_vec()),
+        );
+        app = app.with_clipboard_probe(probe.clone());
+        let before = app.editor_text();
+        apply(&mut app, Message::PasteRequested);
+
+        assert_eq!(
+            app.editor_text(),
+            before,
+            "failed paste must not mutate the editor"
+        );
+        let toast = app
+            .toast
+            .as_deref()
+            .expect("write failure must surface a toast");
+        assert!(
+            toast.contains(TOAST_IMAGE_PASTE_FAILED),
+            "toast {:?} should contain the localised prefix {:?}",
+            toast,
+            TOAST_IMAGE_PASTE_FAILED
+        );
+        // Text fallback must not run after an image-write failure — the
+        // user already has actionable feedback via the toast.
+        assert_eq!(probe.image_call_count(), 1);
+        assert_eq!(probe.text_call_count(), 0);
+    }
+
+    #[test]
+    fn paste_requested_without_probe_is_noop() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        // NOTE: no `.with_clipboard_probe(...)` — mirrors unit tests that
+        // don't wire the probe at all.
+        let mut app = app_with_vault(&tempdir, sample_threads());
+        let before = app.editor_text();
+        apply(&mut app, Message::PasteRequested);
+
+        assert_eq!(app.editor_text(), before);
+        assert!(app.toast.is_none());
+    }
+
+    #[test]
+    fn paste_requested_with_probe_error_surfaces_toast() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let probe = Arc::new(
+            crate::clipboard::mock::MockClipboardProbe::new()
+                .with_image_error("platform refused to open clipboard"),
+        );
+        let mut app =
+            app_with_vault(&tempdir, sample_threads()).with_clipboard_probe(probe.clone());
+        apply(&mut app, Message::PasteRequested);
+
+        let toast = app
+            .toast
+            .as_deref()
+            .expect("probe failure must surface a toast");
+        assert!(
+            toast.contains(TOAST_CLIPBOARD_READ_FAILED),
+            "toast {:?} should contain the localised prefix {:?}",
+            toast,
+            TOAST_CLIPBOARD_READ_FAILED
+        );
+        // Text fallback must be skipped when the image channel errored —
+        // the probe is unreliable; trying again would just double-report.
+        assert_eq!(probe.image_call_count(), 1);
+        assert_eq!(probe.text_call_count(), 0);
+    }
+
+    fn key_press(
+        key: iced::keyboard::Key,
+        modifiers: iced::keyboard::Modifiers,
+        physical: iced::keyboard::key::Physical,
+    ) -> iced::widget::text_editor::KeyPress {
+        use iced::widget::text_editor::{KeyPress, Status};
+        KeyPress {
+            key: key.clone(),
+            modified_key: key,
+            physical_key: physical,
+            modifiers,
+            text: None,
+            status: Status::Focused { is_hovered: false },
+        }
+    }
+
+    #[test]
+    fn paste_key_binding_intercepts_command_v() {
+        use iced::keyboard::key::{Code, Physical};
+        use iced::keyboard::{Key, Modifiers};
+
+        // `Modifiers::COMMAND` is LOGO on macOS and CTRL on other platforms,
+        // matching `modifiers.command()`.
+        let press = key_press(
+            Key::Character("v".into()),
+            Modifiers::COMMAND,
+            Physical::Code(Code::KeyV),
+        );
+        let binding = paste_key_binding(press);
+        match binding {
+            Some(Binding::Custom(Message::PasteRequested)) => {}
+            other => panic!(
+                "Ctrl/Cmd+V should map to Binding::Custom(PasteRequested), got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn paste_key_binding_skips_command_alt_v() {
+        use iced::keyboard::key::{Code, Physical};
+        use iced::keyboard::{Key, Modifiers};
+
+        // iced's built-in paste binding excludes `modifiers.alt()` to avoid
+        // the AltGr collision on European keyboards. Our interceptor must
+        // apply the same guard so those layouts still type literal glyphs
+        // instead of triggering `PasteRequested`.
+        let press = key_press(
+            Key::Character("v".into()),
+            Modifiers::COMMAND | Modifiers::ALT,
+            Physical::Code(Code::KeyV),
+        );
+        let binding = paste_key_binding(press);
+        assert!(
+            !matches!(binding, Some(Binding::Custom(Message::PasteRequested))),
+            "Ctrl+Alt+V (AltGr) must not route to PasteRequested, got {:?}",
+            binding
+        );
+    }
+
+    #[test]
+    fn paste_key_binding_falls_through_for_other_keys() {
+        use iced::keyboard::key::{Code, Physical};
+        use iced::keyboard::{Key, Modifiers};
+
+        // Plain 'a' with no modifiers should either delegate to iced's
+        // default binding (likely `Binding::Insert('a')`) or return `None`,
+        // but must never produce our custom paste message.
+        let press = key_press(
+            Key::Character("a".into()),
+            Modifiers::empty(),
+            Physical::Code(Code::KeyA),
+        );
+        let binding = paste_key_binding(press);
+        assert!(
+            !matches!(binding, Some(Binding::Custom(Message::PasteRequested))),
+            "non-V key must not route to PasteRequested, got {:?}",
+            binding
+        );
     }
 }
