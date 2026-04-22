@@ -3542,6 +3542,7 @@ dependencies = [
  "arboard",
  "png 0.17.16",
  "tempfile",
+ "thiserror 1.0.69",
  "trace-core",
  "uuid",
  "windows 0.58.0",

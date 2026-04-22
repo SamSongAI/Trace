@@ -14,6 +14,10 @@ trace-core = { path = "../trace-core" }
 # parallel writeability check cannot race another probe on the same
 # directory.
 uuid = { workspace = true }
+# `thiserror` keeps `clipboard_image::ClipboardImageError` in line with
+# the `trace-core::TraceError` house style (derive-based variants with
+# `#[error(...)]` attributes instead of hand-rolled `Display` impls).
+thiserror = { workspace = true }
 
 # Cross-platform clipboard reader used by Phase 13 image paste.
 # `image-data` feature enables `Clipboard::get_image()` which returns
@@ -21,7 +25,11 @@ uuid = { workspace = true }
 # we only need raw clipboard I/O, no platform-specific serialization.
 arboard = { version = "3", default-features = false, features = ["image-data"] }
 # Used to encode the RGBA frame arboard returns into PNG bytes, which
-# `trace_core::ClipboardImageWriter::write_png` consumes as-is.
+# `trace_core::ClipboardImageWriter::write_png` consumes as-is. Also
+# used by the `clipboard_image` unit tests to decode the bytes we just
+# wrote and assert round-trip fidelity — cargo reuses this `[dependencies]`
+# crate for `#[cfg(test)]` builds, so no `[dev-dependencies]` mirror is
+# needed.
 png = "0.17"
 
 # `windows` is only declared on Windows targets so the workspace remains
@@ -43,6 +51,3 @@ windows = { workspace = true, features = [
 
 [dev-dependencies]
 tempfile = "3"
-# Mirror the prod encoder so clipboard_image round-trip tests can decode
-# the PNG bytes we just wrote and assert pixel-for-pixel equality.
-png = "0.17"

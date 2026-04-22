@@ -25,51 +25,42 @@
 //! `cargo check --workspace` pass on any dev host, mirroring how
 //! [`crate::vault_validation`] is built.
 
-use std::fmt;
+use thiserror::Error;
 
 /// Errors surfaced by the clipboard-read + PNG-encode pipeline. Each
 /// variant names the phase that failed so the UI layer (Task 13.3) can
 /// decide whether to fall through to the native paste path, warn the
 /// user, or silently log.
-#[derive(Debug)]
+///
+/// Built on `thiserror::Error` to stay in line with
+/// [`trace_core::TraceError`] — the message strings on each `#[error(...)]`
+/// line are the wire format consumed by the
+/// `clipboard_image_error_display_includes_phase` test and by log scrapers
+/// that triage on substring.
+#[derive(Debug, Error)]
 pub enum ClipboardImageError {
     /// `arboard::Clipboard::new()` failed. On Windows this typically
     /// means `OpenClipboard` returned an error (another process is
     /// holding the clipboard open, COM initialisation lost, etc.).
     /// On macOS it means the `NSPasteboard` handle could not be
     /// acquired — vanishingly rare outside of sandbox misconfigurations.
+    #[error("clipboard unavailable: {0}")]
     ClipboardUnavailable(String),
     /// The clipboard opened cleanly but the `get_image()` call failed
     /// for a reason *other* than "no image on the clipboard". That
     /// specific case is handled by returning `Ok(None)` from
     /// [`read_clipboard_image_as_png`]; everything else — serialisation
     /// errors, allocator failures, unknown formats — lands here.
+    #[error("clipboard read failed: {0}")]
     ClipboardReadFailed(String),
     /// RGBA → PNG encoding failed. Common triggers: width/height of
     /// zero, `rgba.len()` not equal to `width * height * 4`, dimension
     /// overflow in the size calculation, or a libpng-level error bubbling
     /// up from the [`png`] crate. The message is the original diagnostic
     /// verbatim where possible.
+    #[error("png encoding failed: {0}")]
     PngEncodingFailed(String),
 }
-
-impl fmt::Display for ClipboardImageError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ClipboardUnavailable(msg) => {
-                write!(f, "clipboard unavailable: {msg}")
-            }
-            Self::ClipboardReadFailed(msg) => {
-                write!(f, "clipboard read failed: {msg}")
-            }
-            Self::PngEncodingFailed(msg) => {
-                write!(f, "png encoding failed: {msg}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for ClipboardImageError {}
 
 /// Reads the current clipboard and, if it holds image data, returns a
 /// fully-formed PNG byte buffer. The output is ready for
@@ -305,20 +296,40 @@ mod tests {
 
     #[test]
     fn encode_rgba_as_png_rejects_dimension_overflow() {
-        // u32::MAX × u32::MAX overflows long before we hit the × 4.
-        // We pass an empty slice because the test only exercises the
-        // size calculation — we deliberately do NOT allocate a
-        // 64-exabyte buffer just to satisfy the length check.
-        let err = encode_rgba_as_png(u32::MAX, u32::MAX, &[])
-            .expect_err("overflow must error");
-        match err {
-            ClipboardImageError::PngEncodingFailed(msg) => {
-                assert!(
-                    msg.contains("overflow"),
-                    "overflow message should mention overflow, got: {msg}"
-                );
+        // Two independent cases, one per link in the `checked_mul` chain
+        // at `encode_rgba_as_png`:
+        //
+        //   1. `width.checked_mul(height)` — tripped by u32::MAX × u32::MAX.
+        //   2. `pixels.checked_mul(4)`    — tripped by (u32::MAX, 1): the
+        //      first mul succeeds with u32::MAX, only the × 4 stage overflows.
+        //
+        // Covering both stops a future refactor that accidentally drops
+        // one link (e.g. collapsing the chain into a single `as u64`
+        // compare) from silently shipping.
+        //
+        // We pass empty slices because this test only exercises the
+        // size calculation — we deliberately do NOT allocate multi-GiB
+        // buffers just to satisfy the length check.
+        let cases = [
+            // (width, height, label)
+            (u32::MAX, u32::MAX, "width*height overflow"),
+            (u32::MAX, 1, "width*height*4 overflow (second link)"),
+        ];
+
+        for (width, height, label) in cases {
+            let err = encode_rgba_as_png(width, height, &[])
+                .expect_err(&format!("{label} must error"));
+            match err {
+                ClipboardImageError::PngEncodingFailed(msg) => {
+                    assert!(
+                        msg.contains("overflow"),
+                        "{label}: message should mention overflow, got: {msg}"
+                    );
+                }
+                other => panic!(
+                    "{label}: expected PngEncodingFailed, got {other:?}"
+                ),
             }
-            other => panic!("expected PngEncodingFailed, got {other:?}"),
         }
     }
 
