@@ -1006,12 +1006,21 @@ fn handle_paste_requested(state: &mut CaptureApp) {
 /// delegates to [`Binding::from_key_press`] so default typing, navigation,
 /// selection, copy, cut, and select-all remain intact.
 ///
+/// The `!alt()` guard matches iced's built-in paste binding and avoids the
+/// AltGr collision on European keyboards. The `!shift()` guard narrows the
+/// interception to plain Ctrl/Cmd+V — Ctrl+Shift+V is a common "paste
+/// without formatting" gesture in other app shells on Windows, and Mac's
+/// own `handlePastedImage` only fires on plain Cmd+V. Owning that chord
+/// silently would surprise users; we fall through to iced's default so
+/// shells that expose it keep their own semantics.
+///
 /// Extracted as a free function (rather than inlined into the widget's
 /// `.key_binding(...)` closure) so unit tests can build a [`KeyPress`]
 /// fixture and exercise the routing directly.
 pub fn paste_key_binding(press: KeyPress) -> Option<Binding<Message>> {
     if press.modifiers.command()
         && !press.modifiers.alt()
+        && !press.modifiers.shift()
         && press.key.to_latin(press.physical_key) == Some('v')
     {
         return Some(Binding::Custom(Message::PasteRequested));
@@ -2471,6 +2480,29 @@ mod tests {
         assert!(
             !matches!(binding, Some(Binding::Custom(Message::PasteRequested))),
             "non-V key must not route to PasteRequested, got {:?}",
+            binding
+        );
+    }
+
+    #[test]
+    fn paste_key_binding_skips_command_shift_v() {
+        use iced::keyboard::key::{Code, Physical};
+        use iced::keyboard::{Key, Modifiers};
+
+        // Ctrl+Shift+V is a common "paste without formatting" gesture in
+        // other Windows shells, and Mac's `handlePastedImage` only fires on
+        // plain Cmd+V. Owning the shift variant silently would surprise
+        // users of those shells, so our interceptor must let it fall
+        // through to iced's default binding.
+        let press = key_press(
+            Key::Character("v".into()),
+            Modifiers::COMMAND | Modifiers::SHIFT,
+            Physical::Code(Code::KeyV),
+        );
+        let binding = paste_key_binding(press);
+        assert!(
+            !matches!(binding, Some(Binding::Custom(Message::PasteRequested))),
+            "Ctrl/Cmd+Shift+V must not route to PasteRequested, got {:?}",
             binding
         );
     }

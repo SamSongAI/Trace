@@ -147,4 +147,26 @@ mod tests {
             binding
         );
     }
+
+    #[test]
+    fn paste_key_binding_skips_command_shift_v() {
+        // Mirrors `app.rs::tests::paste_key_binding_skips_command_shift_v`.
+        // Ctrl+Shift+V is "paste without formatting" in other Windows
+        // shells; the widget's `.key_binding(paste_key_binding)` wire must
+        // defer to iced's default so we don't silently own that chord.
+        use iced::keyboard::key::{Code, Physical};
+        use iced::keyboard::{Key, Modifiers};
+
+        let press = key_press(
+            Key::Character("v".into()),
+            Modifiers::COMMAND | Modifiers::SHIFT,
+            Physical::Code(Code::KeyV),
+        );
+        let binding = paste_key_binding(press);
+        assert!(
+            !matches!(binding, Some(Binding::Custom(Message::PasteRequested))),
+            "Ctrl/Cmd+Shift+V must not route to PasteRequested, got {:?}",
+            binding
+        );
+    }
 }
