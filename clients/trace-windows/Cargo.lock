@@ -3322,6 +3322,7 @@ dependencies = [
  "tempfile",
  "trace-core",
  "trace-platform",
+ "tracing",
  "uuid",
 ]
 

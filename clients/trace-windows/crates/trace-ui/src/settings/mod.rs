@@ -32,6 +32,7 @@ mod threads;
 pub mod tiles;
 pub mod widgets;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use iced::event::{self as iced_event};
@@ -446,20 +447,63 @@ pub struct SettingsApp {
     /// Shadow of [`AppSettings::launch_at_login`], driving the System card's
     /// "Launch at Login" toggle (sub-task 8a). Seeded from the persisted
     /// `bool` in [`Self::new`] and mutated in-place by
-    /// [`SettingsMessage::LaunchAtLoginToggled`]. Persistence + registry
-    /// integration are deferred to sub-tasks 8b and 8c.
+    /// [`SettingsMessage::LaunchAtLoginToggled`]. Persistence is wired in
+    /// sub-task 8b (through [`persist_working`]); the Windows autostart
+    /// registry integration is deferred to sub-task 8c.
     pub launch_at_login_shadow: bool,
+    /// Writable working copy of the settings. Each shadow-field message
+    /// handler mirrors its corresponding mutation here and then calls
+    /// [`persist_working`] — the Rust analog of Mac's `@Published` +
+    /// `didSet { UserDefaults.set(...) }` pair. Sub-task 8c flips the
+    /// surrounding `Arc<AppSettings>` handle to `Arc<RwLock<AppSettings>>` so
+    /// the CaptureApp sees the edits too; for 8b the working copy stays local
+    /// to the settings window because the Mac reference doesn't notify the
+    /// capture panel on every keystroke either.
+    pub working: AppSettings,
+    /// Destination the working copy is serialised to after every edit.
+    /// `None` skips the write so UI-only tests (and any future call site that
+    /// deliberately wants an ephemeral settings buffer) do not touch the
+    /// filesystem. The legacy [`Self::new`] constructor defaults this to
+    /// `None` to keep the existing test harness and `trace-app` wiring
+    /// bit-for-bit identical.
+    pub save_path: Option<PathBuf>,
 }
 
 impl SettingsApp {
     /// Builds a fresh [`SettingsApp`] from a resolved [`TraceTheme`] and a
-    /// shared [`AppSettings`] handle.
+    /// shared [`AppSettings`] handle, without a disk-backed working copy.
+    ///
+    /// Thin wrapper around [`Self::new_with_save_path`] with `save_path: None`
+    /// — kept on the public surface so every existing call site (the
+    /// `trace-app` wiring in `main.rs` and the in-module tests) keeps
+    /// compiling unchanged. Sub-task 8b persistence lands exclusively through
+    /// the `*_with_save_path` constructor so the test suite can stay
+    /// filesystem-free by default.
+    pub fn new(theme: TraceTheme, settings: Arc<AppSettings>) -> Self {
+        Self::new_with_save_path(theme, settings, None)
+    }
+
+    /// Builds a fresh [`SettingsApp`] and optionally arms the write-through
+    /// persistence pipeline by supplying a `save_path`.
     ///
     /// `settings.language` is copied into the local `language` field so the
     /// settings window can render immediately without waiting for the first
-    /// message dispatch. Callers must keep the `Arc<AppSettings>` in sync if
-    /// other windows mutate the underlying settings.
-    pub fn new(theme: TraceTheme, settings: Arc<AppSettings>) -> Self {
+    /// message dispatch. When `save_path` is `Some`, every shadow-field
+    /// mutation handled by [`settings_update`] first commits to
+    /// [`Self::working`] and then calls [`persist_working`] — the Rust analog
+    /// of Mac `AppSettings`' `@Published` + `didSet { UserDefaults.set(...) }`
+    /// pair. A `None` skips the write so UI-only call sites (unit tests,
+    /// transient previews) keep their filesystem-free behaviour.
+    ///
+    /// Callers must still keep the `Arc<AppSettings>` in sync if other
+    /// windows mutate the underlying settings; sub-task 8c introduces an
+    /// `RwLock` wrapper for the cross-window synchronisation that Mac gets
+    /// for free from `@ObservedObject`.
+    pub fn new_with_save_path(
+        theme: TraceTheme,
+        settings: Arc<AppSettings>,
+        save_path: Option<PathBuf>,
+    ) -> Self {
         let iced_theme = to_iced_theme(&theme);
         let language = settings.language;
         let theme_preset = settings.app_theme_preset;
@@ -507,6 +551,12 @@ impl SettingsApp {
         // System card reads the user's last choice on first paint. Sub-task
         // 8a is UI-only — the shadow never writes back to the `Arc` here.
         let launch_at_login_shadow = settings.launch_at_login;
+        // Clone the full `AppSettings` into the local working copy. Every
+        // shadow-field message in `settings_update` commits the matching
+        // field onto this struct before calling `persist_working`, so the
+        // on-disk JSON stays a byte-for-byte reflection of the user's most
+        // recent edit — no debounce, no batching.
+        let working = (*settings).clone();
         Self {
             theme,
             iced_theme,
@@ -530,6 +580,8 @@ impl SettingsApp {
             recording_target: None,
             shortcut_recorder_message: None,
             launch_at_login_shadow,
+            working,
+            save_path,
         }
     }
 
@@ -566,6 +618,28 @@ impl SettingsApp {
     }
 }
 
+/// Serialises the current [`SettingsApp::working`] copy to
+/// [`SettingsApp::save_path`], logging but otherwise swallowing any failure.
+///
+/// Mirrors the UI-non-blocking contract of Mac `AppSettings`' `@Published` +
+/// `didSet { UserDefaults.set(...) }` pair: a save failure is surfaced to
+/// `tracing::warn!` (Windows analog of `NSLog`) and never bubbles up into
+/// the view tree. The Mac reference's `updateLaunchAtLogin()` uses the same
+/// `NSLog` fallback for the same class of errors — a non-writable settings
+/// directory must not block the user from continuing to type.
+///
+/// `save_path = None` intentionally skips the disk write so UI-only tests
+/// (and any future call site that wants an ephemeral settings buffer) do
+/// not touch the filesystem.
+fn persist_working(state: &SettingsApp) {
+    let Some(path) = state.save_path.as_deref() else {
+        return;
+    };
+    if let Err(error) = state.working.save(path) {
+        tracing::warn!(%error, path = %path.display(), "failed to persist settings");
+    }
+}
+
 /// Mutates the supplied [`SettingsApp`] in response to a [`SettingsMessage`]
 /// and returns an [`iced::Task`] describing any follow-up effect.
 ///
@@ -576,10 +650,20 @@ impl SettingsApp {
 /// [`rfd::AsyncFileDialog::pick_folder`] so the picker runs outside the iced
 /// view thread. The picker's `Option<String>` flows back through
 /// [`SettingsMessage::VaultBrowseChose`] / [`SettingsMessage::InboxVaultBrowseChose`].
+///
+/// Sub-task 8b layers write-through persistence on top: every branch that
+/// mutates a shadow field corresponding to a persisted [`AppSettings`]
+/// property also commits the change into [`SettingsApp::working`] and calls
+/// [`persist_working`]. Pure-UI branches (recorder arming, focus, Browse
+/// requests, picker cancellations) stay out of the persistence path so the
+/// on-disk JSON only changes when the user's intent lands on a real field
+/// edit.
 pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Task<SettingsMessage> {
     match message {
         SettingsMessage::LanguageChanged(lang) => {
             state.language = lang;
+            state.working.language = lang;
+            persist_working(state);
             Task::none()
         }
         SettingsMessage::ThemePresetChanged(preset) => {
@@ -589,23 +673,33 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
             // only needs to remember the preset and hand off to the helper.
             state.theme_preset = preset;
             state.set_theme(TraceTheme::for_preset(preset));
+            state.working.app_theme_preset = preset;
+            persist_working(state);
             Task::none()
         }
         SettingsMessage::WriteModeChanged(mode) => {
-            // The write-mode shadow field feeds the view layer. Sub-task 8
-            // will wire the actual persistence.
             state.write_mode = mode;
+            state.working.note_write_mode = mode;
+            persist_working(state);
             Task::none()
         }
         SettingsMessage::VaultPathChanged(path) => {
             state.vault_path = path;
             state.vault_path_issue = trace_platform::validate_vault_path(&state.vault_path);
+            // Persist the trimmed path so trailing whitespace from a paste
+            // never lands on disk, matching Mac `AppSettings.vaultPath`'s
+            // `trimmingCharacters(.whitespacesAndNewlines)` normalization on
+            // write.
+            state.working.vault_path = state.vault_path.trim().to_string();
+            persist_working(state);
             Task::none()
         }
         SettingsMessage::BrowseVaultRequested => pick_folder_task(SettingsMessage::VaultBrowseChose),
         SettingsMessage::VaultBrowseChose(Some(path)) => {
             state.vault_path = path;
             state.vault_path_issue = trace_platform::validate_vault_path(&state.vault_path);
+            state.working.vault_path = state.vault_path.trim().to_string();
+            persist_working(state);
             Task::none()
         }
         // User cancelled the picker — leave the current path and cached issue
@@ -615,6 +709,8 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
             state.inbox_vault_path = path;
             state.inbox_vault_path_issue =
                 trace_platform::validate_vault_path(&state.inbox_vault_path);
+            state.working.inbox_vault_path = state.inbox_vault_path.trim().to_string();
+            persist_working(state);
             Task::none()
         }
         SettingsMessage::BrowseInboxVaultRequested => {
@@ -624,30 +720,45 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
             state.inbox_vault_path = path;
             state.inbox_vault_path_issue =
                 trace_platform::validate_vault_path(&state.inbox_vault_path);
+            state.working.inbox_vault_path = state.inbox_vault_path.trim().to_string();
+            persist_working(state);
             Task::none()
         }
         SettingsMessage::InboxVaultBrowseChose(None) => Task::none(),
         SettingsMessage::DailyFolderNameChanged(name) => {
             state.daily_folder_name = name;
+            state.working.daily_folder_name = state.daily_folder_name.trim().to_string();
+            persist_working(state);
             Task::none()
         }
         SettingsMessage::DailyFileDateFormatChanged(format) => {
             state.daily_file_date_format = format;
+            // Persist as the raw ICU string the rest of the stack reads —
+            // matches Mac `AppSettings.dailyFileDateFormat` which stores the
+            // picker selection as a plain string rather than the typed
+            // enum variant.
+            state.working.daily_file_date_format = format.raw_value().to_string();
+            persist_working(state);
             Task::none()
         }
         SettingsMessage::DailyEntryThemePresetChanged(theme) => {
             state.daily_entry_theme_preset = theme;
+            state.working.daily_entry_theme_preset = theme;
+            persist_working(state);
             Task::none()
         }
         SettingsMessage::SectionTitleChanged(index, value) => {
             // Defensive `get_mut`: iced should never route a stale index to
             // this branch, but if a `SectionRemoved` shrinks the vec before a
             // still-inflight keystroke arrives we must drop it rather than
-            // panic. Sub-task 8 will trim/normalize on write-back to
-            // `AppSettings`; the shadow itself stays a faithful reflection
-            // of the textfield.
+            // panic. The shadow itself stays a faithful reflection of the
+            // textfield — we only run `normalize()` on the working copy so
+            // the on-disk JSON lands in its canonical shape even when the
+            // user's current keystroke leaves the shadow mid-heading.
             if let Some(slot) = state.section_titles.get_mut(index) {
                 *slot = value;
+                commit_section_titles(state);
+                persist_working(state);
             }
             Task::none()
         }
@@ -660,6 +771,8 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
                 state
                     .section_titles
                     .push(NoteSection::default_title_for(next_index));
+                commit_section_titles(state);
+                persist_working(state);
             }
             Task::none()
         }
@@ -671,12 +784,16 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
                 && index < state.section_titles.len()
             {
                 state.section_titles.remove(index);
+                commit_section_titles(state);
+                persist_working(state);
             }
             Task::none()
         }
         SettingsMessage::ThreadNameChanged(id, value) => {
             if let Some(thread) = state.thread_configs.iter_mut().find(|t| t.id == id) {
                 thread.name = value;
+                commit_thread_configs(state);
+                persist_working(state);
             }
             Task::none()
         }
@@ -688,6 +805,8 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
             if let Some(thread) = state.thread_configs.iter_mut().find(|t| t.id == id) {
                 let (_, filename) = split_target_file(&thread.target_file);
                 thread.target_file = join_folder_and_filename(&folder, &filename);
+                commit_thread_configs(state);
+                persist_working(state);
             }
             Task::none()
         }
@@ -695,6 +814,8 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
             if let Some(thread) = state.thread_configs.iter_mut().find(|t| t.id == id) {
                 let (folder, _) = split_target_file(&thread.target_file);
                 thread.target_file = join_folder_and_filename(&folder, &filename);
+                commit_thread_configs(state);
+                persist_working(state);
             }
             Task::none()
         }
@@ -706,7 +827,9 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
             // accepting a sibling `vault-backup` folder as "inside the vault".
             let vault_path = state.vault_path.clone();
             let folder_for_target = normalize_thread_folder_to_vault(&vault_path, &path);
-            if let Some(thread) = state.thread_configs.iter_mut().find(|t| t.id == id) {
+            let mutated = if let Some(thread) =
+                state.thread_configs.iter_mut().find(|t| t.id == id)
+            {
                 let (_, existing_filename) = split_target_file(&thread.target_file);
                 // Mac defaults an empty filename to `"Threads.md"` when the
                 // folder picker lands a value; we do the same so the user is
@@ -718,6 +841,13 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
                 };
                 thread.target_file =
                     join_folder_and_filename(&folder_for_target, &filename);
+                true
+            } else {
+                false
+            };
+            if mutated {
+                commit_thread_configs(state);
+                persist_working(state);
             }
             Task::none()
         }
@@ -736,12 +866,16 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
                 state
                     .thread_configs
                     .push(ThreadConfig::new(name, target_file, None, next_order));
+                commit_thread_configs(state);
+                persist_working(state);
             }
             Task::none()
         }
         SettingsMessage::ThreadRemoved(id) => {
             if state.thread_configs.len() > ThreadConfig::MINIMUM_COUNT {
                 state.thread_configs.retain(|t| t.id != id);
+                commit_thread_configs(state);
+                persist_working(state);
             }
             Task::none()
         }
@@ -825,19 +959,71 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
             }
 
             // All checks pass — commit the candidate into the shadow, disarm
-            // the recorder, and clear any stale message. Write-back to
-            // [`AppSettings`] lands in sub-task 8.
+            // the recorder, clear any stale message, and persist the
+            // `(vkey, modifiers)` pair for the right target. Split the
+            // `ShortcutSpec` back into the two `u32` fields that
+            // `AppSettings` serialises so the on-disk JSON stays
+            // byte-compatible with the Mac format.
             state.set_shortcut(target, candidate);
+            commit_shortcut(&mut state.working, target, candidate);
             state.recording_target = None;
             state.shortcut_recorder_message = None;
+            persist_working(state);
             Task::none()
         }
         SettingsMessage::LaunchAtLoginToggled(value) => {
-            // Shadow-only: sub-task 8a does not touch the persisted
-            // `AppSettings.launch_at_login` flag or the Windows autostart
-            // registry entry. Those land in sub-tasks 8b / 8c respectively.
+            // Sub-task 8b: persist the flag on every toggle so the Mac-parity
+            // "no-debounce" contract holds. Sub-task 8c will additionally
+            // route this through `trace_platform::autostart` so the Windows
+            // registry Run key stays in sync with the JSON.
             state.launch_at_login_shadow = value;
+            state.working.launch_at_login = value;
+            persist_working(state);
             Task::none()
+        }
+    }
+}
+
+/// Commits the shadow `section_titles` onto the working copy and runs
+/// [`AppSettings::normalize`] so the on-disk JSON always holds the canonical
+/// shape (dedup-by-slot, CR/LF swapped for spaces, leading `#` markers
+/// stripped, trimmed, filled up to the minimum count). Split out so the
+/// three Section-editing message arms share one code path and the invariant
+/// "disk copy is always normalized" is locally obvious.
+fn commit_section_titles(state: &mut SettingsApp) {
+    state.working.section_titles = state.section_titles.clone();
+    state.working.normalize();
+}
+
+/// Commits the shadow `thread_configs` onto the working copy. Threads are
+/// not subject to `normalize()` — the normalize pipeline only touches
+/// section titles and panel-shortcut collisions — so this helper is a thin
+/// clone; centralised so every thread-editing branch reads the same way.
+fn commit_thread_configs(state: &mut SettingsApp) {
+    state.working.thread_configs = state.thread_configs.clone();
+}
+
+/// Splits a [`ShortcutSpec`] back into the pair of `u32` fields that
+/// [`AppSettings`] stores for the given `target`, then copies them onto
+/// `working`. Mirror of [`SettingsApp::set_shortcut`] on the persistence
+/// side so the `RecordingCaptured` success branch stays a single line.
+fn commit_shortcut(working: &mut AppSettings, target: ShortcutTarget, spec: ShortcutSpec) {
+    match target {
+        ShortcutTarget::Create => {
+            working.hot_key_code = spec.key_code;
+            working.hot_key_modifiers = spec.modifiers;
+        }
+        ShortcutTarget::Send => {
+            working.send_note_key_code = spec.key_code;
+            working.send_note_modifiers = spec.modifiers;
+        }
+        ShortcutTarget::Append => {
+            working.append_note_key_code = spec.key_code;
+            working.append_note_modifiers = spec.modifiers;
+        }
+        ShortcutTarget::ToggleMode => {
+            working.mode_toggle_key_code = spec.key_code;
+            working.mode_toggle_modifiers = spec.modifiers;
         }
     }
 }
@@ -3201,5 +3387,216 @@ mod tests {
             let _element: Element<'_, SettingsMessage> = build_cards(&app);
             let _view: Element<'_, SettingsMessage> = settings_view(&app);
         }
+    }
+
+    // --- Sub-task 8b: working-copy write-through persistence --------------
+
+    /// Helper that spins up a [`SettingsApp`] tied to `save_path` inside the
+    /// supplied [`tempfile::TempDir`]. Keeps each test focused on the
+    /// message-dispatch → reload-from-disk round-trip without re-typing the
+    /// four-argument construction boilerplate.
+    fn app_with_save_path(
+        dir: &tempfile::TempDir,
+        filename: &str,
+    ) -> (SettingsApp, std::path::PathBuf) {
+        let path = dir.path().join(filename);
+        let app = SettingsApp::new_with_save_path(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(AppSettings::default()),
+            Some(path.clone()),
+        );
+        (app, path)
+    }
+
+    #[test]
+    fn new_with_save_path_seeds_working_copy_from_arc_snapshot() {
+        // `working` must start as a full clone of the input `AppSettings` so
+        // the write-through path carries the user's previous preferences
+        // forward on the first edit rather than serializing a half-default
+        // struct.
+        let persisted = AppSettings {
+            vault_path: "C:/old-vault".into(),
+            language: Language::Ja,
+            launch_at_login: true,
+            ..AppSettings::default()
+        };
+        let app = SettingsApp::new_with_save_path(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(persisted),
+            None,
+        );
+        assert_eq!(app.working.vault_path, "C:/old-vault");
+        assert_eq!(app.working.language, Language::Ja);
+        assert!(app.working.launch_at_login);
+        assert!(app.save_path.is_none());
+    }
+
+    #[test]
+    fn editing_vault_path_writes_to_disk() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (mut app, path) = app_with_save_path(&tmp, "settings.json");
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::VaultPathChanged("/new/path".into()),
+        );
+        let loaded = AppSettings::load(&path).expect("load persisted settings");
+        assert_eq!(loaded.vault_path, "/new/path");
+    }
+
+    #[test]
+    fn editing_inbox_vault_path_persists_on_shadow_edit() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (mut app, path) = app_with_save_path(&tmp, "settings.json");
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::InboxVaultPathChanged("/inbox/path".into()),
+        );
+        let loaded = AppSettings::load(&path).expect("load persisted settings");
+        assert_eq!(loaded.inbox_vault_path, "/inbox/path");
+    }
+
+    #[test]
+    fn editing_daily_folder_name_persists_on_shadow_edit() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (mut app, path) = app_with_save_path(&tmp, "settings.json");
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::DailyFolderNameChanged("Journal".into()),
+        );
+        let loaded = AppSettings::load(&path).expect("load persisted settings");
+        assert_eq!(loaded.daily_folder_name, "Journal");
+    }
+
+    #[test]
+    fn editing_section_title_runs_normalize_before_save() {
+        // `normalize()` trims whitespace, strips leading `#` markers, and
+        // replaces CR/LF with spaces. Drop an in-progress keystroke that
+        // violates the invariants and prove the persisted copy lands in the
+        // canonical shape — not the raw shadow.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (mut app, path) = app_with_save_path(&tmp, "settings.json");
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::SectionTitleChanged(0, "## Raw\nInput  ".into()),
+        );
+        let loaded = AppSettings::load(&path).expect("load persisted settings");
+        // Post-normalize: heading marker stripped, CR/LF swapped for space,
+        // trailing whitespace trimmed. The exact shape is owned by
+        // `normalize_section_title` — we assert the resulting title contains
+        // no `#` marker and no newline.
+        let title = &loaded.section_titles[0];
+        assert!(
+            !title.starts_with('#'),
+            "leading heading marker must be stripped: {title:?}",
+        );
+        assert!(
+            !title.contains('\n'),
+            "newline must be replaced with space: {title:?}",
+        );
+        assert_eq!(title.trim(), title.as_str(), "whitespace must be trimmed");
+    }
+
+    #[test]
+    fn launch_at_login_toggled_message_persists_flag() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (mut app, path) = app_with_save_path(&tmp, "settings.json");
+        let _ = settings_update(&mut app, SettingsMessage::LaunchAtLoginToggled(true));
+        let loaded = AppSettings::load(&path).expect("load persisted settings");
+        assert!(loaded.launch_at_login);
+
+        let _ = settings_update(&mut app, SettingsMessage::LaunchAtLoginToggled(false));
+        let loaded = AppSettings::load(&path).expect("load persisted settings");
+        assert!(!loaded.launch_at_login);
+    }
+
+    #[test]
+    fn save_path_none_skips_writeback() {
+        // Unit-test harness (`new(theme, settings)` and the existing suite)
+        // must stay filesystem-free so tests don't accidentally race a
+        // settings.json. Dispatch a mutating message through a `None`-save-path
+        // app and confirm no files are created in the working directory and
+        // no panic is raised.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut app = SettingsApp::new_with_save_path(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(AppSettings::default()),
+            None,
+        );
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::VaultPathChanged("/nope".into()),
+        );
+        // Nothing should have materialised in the temp dir — we never gave the
+        // app a pointer to it.
+        let entries: Vec<_> = std::fs::read_dir(tmp.path())
+            .expect("read_dir tempdir")
+            .collect();
+        assert!(entries.is_empty(), "tempdir must stay empty");
+    }
+
+    #[test]
+    fn hotkey_recorded_persists_vkey_and_modifiers_split() {
+        // Sub-task 8b must split a captured `ShortcutSpec` back into the pair
+        // of `u32` fields that `AppSettings` persists. Arm the recorder for
+        // the global Create hotkey, dispatch a `RecordingCaptured` with a
+        // modifier + digit combo (which is accepted on Create), then reload
+        // the on-disk settings and verify both fields round-trip.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (mut app, path) = app_with_save_path(&tmp, "settings.json");
+        app.recording_target = Some(ShortcutTarget::Create);
+
+        // VK_1 (0x31) + MOD_CONTROL (0x0002). `is_reserved_section_switch`
+        // only matters for panel targets; Create accepts Ctrl+digit.
+        const VK_1: u32 = 0x31;
+        const MOD_CTRL: u32 = 0x0002;
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::RecordingCaptured {
+                key_code: VK_1,
+                modifiers: MOD_CTRL,
+            },
+        );
+        let loaded = AppSettings::load(&path).expect("load persisted settings");
+        assert_eq!(loaded.hot_key_code, VK_1);
+        assert_eq!(loaded.hot_key_modifiers, MOD_CTRL);
+    }
+
+    #[test]
+    fn persist_failure_does_not_panic() {
+        // Point `save_path` at a path whose parent directory does not exist.
+        // `AppSettings::save` will fail (the parent is not auto-created by the
+        // atomic writer); the update branch must swallow the error through
+        // `tracing::warn!` without panicking or surfacing anything to the UI.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let bogus_path = tmp.path().join("missing-dir").join("settings.json");
+        let mut app = SettingsApp::new_with_save_path(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(AppSettings::default()),
+            Some(bogus_path),
+        );
+        // Would panic if `persist_working` bubbled the save error. The message
+        // itself still needs to land on the working copy regardless.
+        let _ = settings_update(
+            &mut app,
+            SettingsMessage::LanguageChanged(Language::Ja),
+        );
+        assert_eq!(app.working.language, Language::Ja);
+    }
+
+    #[test]
+    fn new_legacy_constructor_defaults_save_path_to_none() {
+        // Backwards compatibility: the existing `new(theme, settings)` call
+        // sites across the codebase must keep compiling and must NOT touch
+        // the filesystem. Smoke-check that the shim leaves `save_path` unset
+        // and still clones the full `AppSettings` into `working`.
+        let app = SettingsApp::new(
+            TraceTheme::for_preset(ThemePreset::Dark),
+            Arc::new(AppSettings {
+                vault_path: "C:/pre-existing".into(),
+                ..AppSettings::default()
+            }),
+        );
+        assert!(app.save_path.is_none());
+        assert_eq!(app.working.vault_path, "C:/pre-existing");
     }
 }

@@ -23,6 +23,11 @@ chrono = { workspace = true }
 # Native folder picker for the Storage card's Browse buttons. Driven via
 # `iced::Task::perform` so the picker runs outside the iced view thread.
 rfd = { workspace = true }
+# Structured logging for the settings window's write-through persistence path.
+# Used by `settings::persist_working` to surface disk-write failures without
+# panicking or interrupting the UI — mirrors Mac `AppSettings.updateLaunchAtLogin`'s
+# `NSLog(...)` fallback for the same class of errors.
+tracing = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
