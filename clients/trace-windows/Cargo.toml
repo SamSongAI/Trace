@@ -35,6 +35,11 @@ iced = { version = "~0.14", features = ["tokio"] }
 # 开箱即用,避免 xdg-portal 拖入 D-Bus/ashpd 依赖膨胀 Windows 二进制。
 rfd = { version = "0.15", default-features = false, features = ["tokio"] }
 
+# Structured logging for the settings window's write-through persistence path.
+# Consumed by `trace-ui::settings::persist_working` to surface disk-write
+# failures without panicking or interrupting the UI.
+tracing = "0.1"
+
 # Windows platform dependencies
 windows = "0.58"
 

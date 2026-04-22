@@ -990,6 +990,12 @@ pub fn settings_update(state: &mut SettingsApp, message: SettingsMessage) -> Tas
 /// stripped, trimmed, filled up to the minimum count). Split out so the
 /// three Section-editing message arms share one code path and the invariant
 /// "disk copy is always normalized" is locally obvious.
+///
+/// Note: `normalize()` also contains a shortcut-collision self-heal that may
+/// reset `working.append_note_*` to its default when it matches `send_note_*`.
+/// Under normal UI flow this branch cannot trigger because the recording
+/// conflict-check prevents duplicate shortcuts at the shadow level; this
+/// comment exists so future callers are aware of the side-effect.
 fn commit_section_titles(state: &mut SettingsApp) {
     state.working.section_titles = state.section_titles.clone();
     state.working.normalize();
@@ -3359,8 +3365,8 @@ mod tests {
 
         let _ = settings_update(&mut app, SettingsMessage::LaunchAtLoginToggled(true));
         assert!(app.launch_at_login_shadow);
-        // Persistence is deferred to sub-task 8b — the shared Arc must stay
-        // untouched.
+        // The shared `Arc<AppSettings>` must stay untouched — only
+        // `working.launch_at_login` (the write-through buffer) reflects the toggle.
         assert!(!app.settings.launch_at_login);
 
         let _ = settings_update(&mut app, SettingsMessage::LaunchAtLoginToggled(false));

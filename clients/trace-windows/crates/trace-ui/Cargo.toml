@@ -27,7 +27,7 @@ rfd = { workspace = true }
 # Used by `settings::persist_working` to surface disk-write failures without
 # panicking or interrupting the UI — mirrors Mac `AppSettings.updateLaunchAtLogin`'s
 # `NSLog(...)` fallback for the same class of errors.
-tracing = "0.1"
+tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
