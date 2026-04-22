@@ -261,6 +261,55 @@ Invoke-TrustedSign -Path $MsiPath
 
 $size = (Get-Item $MsiPath).Length
 Write-Information ("produced {0} ({1:N0} bytes)" -f $MsiPath, $size)
-# Emit the MSI path on stdout so CI scripts can capture it with
-# `$msi = pwsh build-msi.ps1` or equivalent.
+
+# --- portable zip ----------------------------------------------------------
+# Alongside the MSI we ship a "portable" zip: trace-app.exe plus the
+# upstream LICENSE, nothing else. Use case is users who cannot or will
+# not run an installer (IT-locked boxes, forensic sandboxes, side-by-side
+# version tests). The exe is the same signed binary WiX embedded into
+# the MSI, so Smart App Control and Defender see a consistent signature
+# across both distribution formats.
+#
+# Staging dir: Compress-Archive preserves relative paths, so without a
+# flat staging dir the zip would contain `target\<triple>\release\trace-app.exe`
+# instead of just `trace-app.exe`. Copy into a fresh temp dir first, then
+# zip its contents.
+#
+# Compress-Archive ships with pwsh 7 on every platform, so both the CI
+# windows-latest runner and a local macOS dry-run exercise the same
+# packaging path (the mac run can't sign, but packaging still runs).
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $InstallerRoot)
+$LicensePath = Join-Path $RepoRoot 'LICENSE'
+if (-not (Test-Path $LicensePath)) {
+    throw "portable zip: LICENSE missing at $LicensePath"
+}
+
+$ZipName = "Trace-$Version-$Arch-portable.zip"
+$ZipPath = Join-Path $OutDir $ZipName
+$Staging = Join-Path ([System.IO.Path]::GetTempPath()) "trace-portable-$([guid]::NewGuid())"
+$null = New-Item -ItemType Directory -Path $Staging -Force
+try {
+    Copy-Item -Path $BinPath -Destination $Staging -Force
+    Copy-Item -Path $LicensePath -Destination $Staging -Force
+    if (Test-Path $ZipPath) { Remove-Item -Path $ZipPath -Force }
+    Compress-Archive `
+        -Path (Join-Path $Staging '*') `
+        -DestinationPath $ZipPath `
+        -CompressionLevel Optimal
+} finally {
+    Remove-Item -Path $Staging -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+if (-not (Test-Path $ZipPath)) {
+    throw "Compress-Archive claimed success but $ZipPath is missing"
+}
+$zipSize = (Get-Item $ZipPath).Length
+Write-Information ("produced {0} ({1:N0} bytes)" -f $ZipPath, $zipSize)
+
+# Emit artifact paths on stdout, one per line, so CI can capture them:
+#   $lines = pwsh build-msi.ps1 -Arch x64
+#   $msi   = $lines | Where-Object { $_ -like '*.msi' }
+#   $zip   = $lines | Where-Object { $_ -like '*.zip' }
+# Keep MSI first for back-compat with any caller that only grabs $lines[0].
 Write-Host $MsiPath
+Write-Host $ZipPath
