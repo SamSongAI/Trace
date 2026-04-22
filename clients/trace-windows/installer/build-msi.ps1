@@ -20,8 +20,9 @@
     defaults to the workspace-level version in Cargo.toml.
 
 .PARAMETER Arch
-    Target architecture. Currently only `x64` is supported. `arm64`
-    will be wired in Phase 15 along with the release matrix.
+    Target architecture. One of `x64` (x86_64-pc-windows-msvc) or
+    `arm64` (aarch64-pc-windows-msvc). The release workflow builds
+    both; local dev boxes default to `x64` unless told otherwise.
 
 .PARAMETER OutDir
     Destination directory for the MSI. Defaults to
@@ -34,7 +35,7 @@
 [CmdletBinding()]
 param(
     [string]$Version = '',
-    [ValidateSet('x64')]
+    [ValidateSet('x64', 'arm64')]
     [string]$Arch = 'x64',
     [string]$OutDir = ''
 )
@@ -76,8 +77,12 @@ if (-not $Version) {
 }
 
 # --- target triple ----------------------------------------------------------
+# Keep these two arms in sync with the `[ValidateSet()]` on $Arch above.
+# `wix build -arch <Arch>` accepts `x64` / `arm64` directly, so the WiX
+# invocation below does not branch further.
 $TargetTriple = switch ($Arch) {
-    'x64' { 'x86_64-pc-windows-msvc' }
+    'x64'   { 'x86_64-pc-windows-msvc' }
+    'arm64' { 'aarch64-pc-windows-msvc' }
     default { throw "unsupported arch: $Arch" }
 }
 
