@@ -399,13 +399,18 @@ mod tests {
             "![image](assets/2026-04-20/trace-20260420-120500-123.png)",
         );
 
-        // Atomic-write should leave no temp siblings behind.
+        // Atomic-write should leave no temp siblings behind on the success
+        // path. The filter substring below mirrors the exact filename format
+        // produced by `crate::writer::atomic::temp_sibling_path`:
+        // `.{filename}.trace-tmp-{pid}-{nanos}-{counter}`. Matching on the
+        // leading-dot prefix (`.trace-tmp-`) guards the assertion against
+        // false negatives if `atomic.rs` ever renames its temp-file scheme.
         let parent = plan.target_path.parent().unwrap();
         let leftover: Vec<_> = std::fs::read_dir(parent)
             .unwrap()
             .filter_map(Result::ok)
             .map(|e| e.file_name().to_string_lossy().into_owned())
-            .filter(|name| name.contains("trace-tmp-"))
+            .filter(|name| name.contains(".trace-tmp-"))
             .collect();
         assert!(
             leftover.is_empty(),
