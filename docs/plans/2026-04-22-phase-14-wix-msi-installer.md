@@ -47,31 +47,40 @@ Output: clients/trace-windows/installer/assets/trace.ico
 Sizes:  16, 24, 32, 48, 64, 128, 256 — covers taskbar, Start menu,
         tile, jumbo shell thumbnail across DPI scaling factors.
 
-The 32x32 source is upscaled using nearest-neighbour for sizes <= 32
-(keeps the pixel-art outline crisp) and Lanczos for sizes > 32
-(smooth gradients for large icon views).
+Implementation note: Pillow's ICO writer takes a single base image and
+downsamples it internally via the `sizes=` parameter; `append_images=`
+is silently ignored for this format. We therefore upscale the 32×32
+source to 256×256 with Lanczos once, then let Pillow produce the seven
+frames from that single base. The 32→256 upscale is lossy, but the
+source asset is already 32×32 by product design (Phase 0–11), and
+shell thumbnails rarely exceed 64×64 in practice.
 """
 from pathlib import Path
 from PIL import Image
 
-REPO_ROOT = Path(__file__).resolve().parents[3]  # .../trace-windows
+REPO_ROOT = Path(__file__).resolve().parents[2]  # .../installer -> trace-windows
 SRC = REPO_ROOT / "assets" / "trace-32.png"
 OUT = REPO_ROOT / "installer" / "assets" / "trace.ico"
 
-SIZES = [16, 24, 32, 48, 64, 128, 256]
+SIZES = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
 
 
 def main() -> None:
+    # Explicit existence check before PIL: PIL's own error ("cannot identify
+    # image file") is ambiguous (corrupt file vs. missing file) and dumps a
+    # full traceback that buries the actual cause in CI output. A plain
+    # SystemExit keeps the error surface consistent with the size check below.
+    if not SRC.exists():
+        raise SystemExit(f"source PNG not found: {SRC}")
     base = Image.open(SRC).convert("RGBA")
     if base.size != (32, 32):
         raise SystemExit(f"expected 32x32 source, got {base.size}")
-    frames = []
-    for size in SIZES:
-        resample = Image.NEAREST if size <= 32 else Image.LANCZOS
-        frames.append(base.resize((size, size), resample))
+    # Upscale once to the largest target so Pillow's internal downsampler
+    # always shrinks (higher fidelity than repeated upscales).
+    base_256 = base.resize((256, 256), Image.LANCZOS)
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    frames[0].save(OUT, format="ICO", sizes=[(s, s) for s in SIZES], append_images=frames[1:])
-    print(f"wrote {OUT} with {len(SIZES)} frames: {SIZES}")
+    base_256.save(OUT, format="ICO", sizes=SIZES)
+    print(f"wrote {OUT} with {len(SIZES)} frames: {[s[0] for s in SIZES]}")
 
 
 if __name__ == "__main__":
@@ -102,11 +111,17 @@ cd /Users/apple/Desktop/ContextOS/Projects/Trace/clients/trace-windows
 git add installer/scripts/build-ico.py installer/assets/trace.ico
 git commit -m "feat(installer): add multi-resolution trace.ico from PNG source
 
-Generated via installer/scripts/build-ico.py (Pillow-based). Sizes
-16/24/32/48/64/128/256 cover every shell surface: taskbar, Start menu
-tile, control-panel ARP icon, jumbo shell thumbnail. Nearest-neighbour
-upscale below 33px preserves the pixel-art silhouette; Lanczos above
-for smooth high-DPI rendering."
+Generated via installer/scripts/build-ico.py (Pillow-based) from
+assets/trace-32.png. Seven frames - 16, 24, 32, 48, 64, 128, 256 -
+cover every Windows shell surface: taskbar, Start menu tile, ARP
+list, jumbo shell thumbnail across DPI factors.
+
+Implementation quirk documented in the script: Pillow's ICO writer
+takes a single base image and downsamples internally via sizes=;
+append_images= is silently ignored for this format. The script
+upscales the 32x32 source to 256x256 once with Lanczos so every
+subsequent derivation is a downsample (higher fidelity than repeated
+upscales from the native 32x32)."
 ```
 
 ---
