@@ -39,6 +39,11 @@ rfd = { version = "0.15", default-features = false, features = ["tokio"] }
 # Consumed by `trace-ui::settings::persist_working` to surface disk-write
 # failures without panicking or interrupting the UI.
 tracing = "0.1"
+# Subscriber that actually surfaces the `tracing::warn!` calls in startup
+# code paths (settings persistence, autostart). Kept minimal — `fmt` +
+# `env-filter` — so the dev-console output honours `RUST_LOG` without
+# pulling in JSON / OpenTelemetry features. Consumed only by `trace-app`.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
 
 # Windows platform dependencies
 windows = "0.58"

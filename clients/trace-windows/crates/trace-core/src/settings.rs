@@ -503,16 +503,31 @@ impl AppSettings {
     /// file does not exist (first-launch behaviour) and propagates I/O or
     /// parse errors otherwise.
     ///
+    /// A missing file returns `Ok(Self::default())` — first-launch is not an
+    /// error. Only unexpected I/O failures (permission denied, broken
+    /// symlink, etc.) and JSON parse failures surface as `Err`, so callers
+    /// can reserve their `warn!`/`error!` path for genuine problems.
+    ///
+    /// The implementation issues a single [`std::fs::read_to_string`] call
+    /// and inspects its error kind, rather than doing a separate
+    /// [`std::path::Path::exists`] probe first. That collapses the
+    /// exists-then-read TOCTOU window (where the file could be created or
+    /// removed between the two syscalls) and matches the
+    /// `try-then-interpret-error` idiom recommended by `std::io` itself.
+    ///
     /// Callers typically invoke [`Self::normalize`] after loading — this
     /// method deliberately does **not** normalize implicitly so tests and
     /// migration tools can observe the raw on-disk shape.
     pub fn load(path: &Path) -> Result<Self, TraceError> {
-        if !path.exists() {
-            return Ok(Self::default());
+        match std::fs::read_to_string(path) {
+            Ok(contents) => {
+                let settings =
+                    serde_json::from_str(&contents).map_err(TraceError::SerializationFailed)?;
+                Ok(settings)
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(err) => Err(TraceError::Io(err)),
         }
-        let contents = std::fs::read_to_string(path)?;
-        let settings = serde_json::from_str(&contents)?;
-        Ok(settings)
     }
 
     /// Serializes to pretty-printed JSON and writes atomically via
@@ -1285,6 +1300,100 @@ mod tests {
         std::fs::write(&path, "not json at all").unwrap();
         let err = AppSettings::load(&path).unwrap_err();
         assert!(matches!(err, TraceError::SerializationFailed(_)));
+    }
+
+    #[test]
+    fn load_returns_default_when_file_missing_without_error() {
+        // Contract guard: first-launch (no file on disk) must resolve as
+        // `Ok(AppSettings::default())`. This regression-tests the TOCTOU fix
+        // — the previous implementation used `path.exists()` + `read_to_string`
+        // in two syscalls; we now funnel through a single
+        // `read_to_string` + `ErrorKind::NotFound` check.
+        //
+        // Full-struct equality is not available (`AppSettings` is not
+        // `PartialEq`, and two calls to `AppSettings::default()` generate
+        // fresh thread-config UUIDs), so we assert against a representative
+        // cross-section of the default state: every top-level flavour of
+        // field — strings, enums, vectors, numerics, thread-config shape —
+        // is spot-checked so a silent divergence in any of them still fails
+        // this test.
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("does_not_exist_yet.json");
+        assert!(!path.exists(), "precondition: path must be absent");
+        let result = AppSettings::load(&path);
+        assert!(
+            result.is_ok(),
+            "missing file must not be treated as an error, got: {:?}",
+            result.err()
+        );
+        let loaded = result.unwrap();
+        let default = AppSettings::default();
+        assert_eq!(loaded.language, default.language);
+        assert_eq!(loaded.vault_path, default.vault_path);
+        assert_eq!(loaded.inbox_vault_path, default.inbox_vault_path);
+        assert_eq!(loaded.daily_folder_name, default.daily_folder_name);
+        assert_eq!(loaded.daily_file_date_format, default.daily_file_date_format);
+        assert_eq!(
+            loaded.daily_entry_theme_preset,
+            default.daily_entry_theme_preset
+        );
+        assert_eq!(
+            loaded.markdown_entry_separator_style,
+            default.markdown_entry_separator_style
+        );
+        assert_eq!(loaded.section_titles, default.section_titles);
+        assert_eq!(
+            loaded.section_titles_order_version,
+            default.section_titles_order_version
+        );
+        assert_eq!(loaded.note_write_mode, default.note_write_mode);
+        assert_eq!(loaded.inbox_folder_name, default.inbox_folder_name);
+        assert_eq!(loaded.app_theme_preset, default.app_theme_preset);
+        assert_eq!(loaded.launch_at_login, default.launch_at_login);
+        // Thread configs carry random UUIDs so only the structural shape
+        // is stable across `default()` invocations.
+        assert_eq!(
+            loaded.thread_configs.len(),
+            default.thread_configs.len(),
+            "default thread-config count should be preserved"
+        );
+        let loaded_thread_names: Vec<&str> = loaded
+            .thread_configs
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        let default_thread_names: Vec<&str> = default
+            .thread_configs
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        assert_eq!(loaded_thread_names, default_thread_names);
+    }
+
+    #[test]
+    fn load_propagates_io_error_for_unreadable_path() {
+        // Pointing `load` at a directory forces `std::fs::read_to_string` to
+        // fail with an I/O error whose kind is **not** `NotFound`, so the
+        // `NotFound`-bypass branch is exercised against its boundary. On
+        // Linux the kind is `IsADirectory`; on macOS / Windows it surfaces
+        // as `Other` / `PermissionDenied` depending on the platform. The
+        // test only asserts "some `Err`" plus the `TraceError::Io` variant
+        // so it remains portable across every host we build on.
+        //
+        // This is the practical proxy for the spec's
+        // "permission-denied / broken-symlink" case — constructing those
+        // cross-platform inside a unit test is unreliable, but any
+        // non-`NotFound` I/O failure exercises the same code path (the new
+        // `Err(err) if err.kind() == NotFound` guard) and keeps the JSON
+        // parse branch out of the picture.
+        let dir = TempDir::new().unwrap();
+        // `dir.path()` itself is an existing directory — `read_to_string`
+        // on it returns an I/O error on every supported platform.
+        let err = AppSettings::load(dir.path()).unwrap_err();
+        assert!(
+            matches!(err, TraceError::Io(_)),
+            "directory-as-file should surface as TraceError::Io, got: {err:?}"
+        );
     }
 
     #[test]

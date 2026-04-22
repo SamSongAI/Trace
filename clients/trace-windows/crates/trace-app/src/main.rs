@@ -147,7 +147,7 @@ fn load_settings_with_save_path() -> (Arc<AppSettings>, Option<PathBuf>) {
         }
     }
 
-    let settings = match AppSettings::load(&path) {
+    let mut settings = match AppSettings::load(&path) {
         Ok(loaded) => loaded,
         Err(err) => {
             tracing::warn!(
@@ -157,6 +157,16 @@ fn load_settings_with_save_path() -> (Arc<AppSettings>, Option<PathBuf>) {
             AppSettings::default()
         }
     };
+
+    // `AppSettings::load` documents that callers typically invoke
+    // `normalize` after loading so the on-disk shape is migrated /
+    // clamped before downstream code reads it (section-title cleanup,
+    // order-version migration, panel-shortcut collision reset, …).
+    // Running it here means every consumer of the daemon-shared
+    // `Arc<AppSettings>` — capture panel, settings window, writer trait
+    // impls — starts from a normalised snapshot, so we don't need to
+    // sprinkle `normalize` calls at each read site.
+    settings.normalize();
 
     (Arc::new(settings), Some(path))
 }
@@ -268,6 +278,28 @@ fn subscription(state: &TraceApp) -> Subscription<Message> {
 }
 
 fn main() -> iced::Result {
+    // Initialise a tracing subscriber so the `tracing::warn!` calls in
+    // settings persistence / autostart code paths actually surface to the
+    // developer console. On release builds without a console window the
+    // writes still succeed (they go to the parent console if one is
+    // attached and are a NOP otherwise), so this never blocks start-up.
+    // File logging is deferred to a later phase — for now `RUST_LOG` is
+    // the override knob, with `warn` as the default so production noise
+    // stays minimal.
+    //
+    // `try_init()` (rather than `init()`) keeps `main` reentrant-safe:
+    // if something upstream — an integration harness, a future
+    // `#[test]` helper that spins up the daemon, a hypothetical second
+    // entry point — has already installed a global subscriber, we log
+    // into it instead of panicking. The `let _ =` discards the
+    // `Result`; a pre-existing subscriber is fine for our purposes.
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+        )
+        .try_init();
+
     iced::daemon(TraceApp::new, update, view)
         .title(title)
         .theme(theme)

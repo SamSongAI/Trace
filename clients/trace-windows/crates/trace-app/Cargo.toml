@@ -27,3 +27,7 @@ trace-platform = { path = "../trace-platform" }
 # Startup path warns (but does not abort) on settings-load / create-dir
 # failures; `tracing::warn!` is the standard channel for those events.
 tracing = { workspace = true }
+# Installs a `fmt` subscriber at `main()` so the `tracing::warn!` calls
+# emitted by settings persistence and autostart code paths actually reach
+# the developer console. Default filter is `warn`; `RUST_LOG` overrides.
+tracing-subscriber = { workspace = true }

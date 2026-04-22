@@ -259,7 +259,10 @@ use std::path::PathBuf;
 /// the diagnostic [`AppPathsError`] for call-sites that only care about
 /// the happy path). Consumers needing to distinguish "env missing" from
 /// "SHGetKnownFolderPath failed" should call
-/// [`try_roaming_app_data_dir`] instead.
+/// [`try_roaming_app_data_dir`] instead. Callers that only want the
+/// settings JSON path should prefer [`settings_file_path`] — it resolves
+/// the full path in one call, so the `"settings.json"` leaf is not
+/// duplicated across this crate and its consumers.
 ///
 /// * Windows: Roaming AppData directory joined with `"Trace"`
 ///   (i.e. `%APPDATA%\Trace`).
@@ -276,8 +279,14 @@ pub fn app_data_dir() -> Option<PathBuf> {
 /// See [`app_data_dir`] for the `None` semantics. This is the spec-aligned
 /// entry point; [`try_settings_file_path`] is the diagnostic-preserving
 /// counterpart used by startup code.
+///
+/// The implementation is intentionally a thin `.ok()` wrapper around
+/// [`try_settings_file_path`] — routing through the same underlying helper
+/// means the `"settings.json"` filename is appended in one place, so a
+/// future rename cannot leave the `Option` variant returning a different
+/// path from its `Result` sibling.
 pub fn settings_file_path() -> Option<PathBuf> {
-    app_data_dir().map(|dir| dir.join("settings.json"))
+    try_settings_file_path().ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -364,6 +373,22 @@ mod tests {
             "path should end with 'settings.json', got: {}",
             path.display()
         );
+    }
+
+    #[test]
+    fn settings_file_path_matches_try_settings_file_path_on_success() {
+        // Diverged-implementation guard: the `Option` wrapper must be a
+        // pure `.ok()` projection of the `Result` variant, so the two
+        // entry points can never drift on filename, directory, or
+        // platform branch. Flipping the wrapper back to the old
+        // "re-join `settings.json` on top of `app_data_dir`" shape would
+        // either double the filename or mutate the directory and fail
+        // this assertion.
+        let option_path = settings_file_path()
+            .expect("settings_file_path should resolve on a standard dev environment");
+        let try_path = try_settings_file_path()
+            .expect("try_settings_file_path should succeed on a standard dev environment");
+        assert_eq!(option_path, try_path);
     }
 
     #[test]
