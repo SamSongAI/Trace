@@ -53,6 +53,15 @@ fn medium_font() -> Font {
     }
 }
 
+/// Assembles the `"Trace v<crate-version>"` caption shown on the version
+/// row. Extracted as a free function so the renderer **and** the unit test
+/// both call the same code path — otherwise a test that re-runs
+/// `format!("Trace v{}", trace_core::VERSION)` inline would be a tautology
+/// against itself and miss a refactor that drops the brand prefix.
+fn version_caption_text() -> String {
+    format!("Trace v{}", trace_core::VERSION)
+}
+
 /// Builds the System card element.
 ///
 /// The card contains two rows stacked vertically:
@@ -83,7 +92,7 @@ pub(super) fn system_card<'a>(
         .align_y(iced::alignment::Vertical::Center)
         .width(Length::Fill);
 
-    let version_caption = text(format!("Trace v{}", trace_core::VERSION))
+    let version_caption = text(version_caption_text())
         .size(Pixels(VERSION_LABEL_FONT_SIZE))
         .color(trace_color_to_iced(palette.muted_text))
         .font(medium_font());
@@ -143,20 +152,31 @@ mod tests {
     }
 
     #[test]
-    fn version_string_contains_trace_prefix_and_crate_version() {
-        // Pin the format contract: the version caption is always
-        // `"Trace v<crate-version>"` where the crate-version portion comes
-        // from `env!("CARGO_PKG_VERSION")` via `trace_core::VERSION`. iced
-        // 0.14 gives no direct introspection hook, so the strongest pin we
-        // can make is asserting `trace_core::VERSION` is non-empty and
-        // composing the same string the card builds.
+    fn version_caption_text_pins_brand_prefix_and_crate_version() {
+        // `version_caption_text` is the single source of truth the renderer
+        // hands to `text(...)`. A refactor that drops the `"Trace "` prefix,
+        // replaces the `v` with `V`, or skips `trace_core::VERSION` would
+        // mutate the helper and immediately fail this assert.
         let version = trace_core::VERSION;
-        assert!(!version.is_empty(), "VERSION must be populated at build time");
-        let rendered = format!("Trace v{version}");
-        assert!(rendered.starts_with("Trace v"));
-        assert!(rendered.ends_with(version));
-        // Guard against a future refactor that drops the leading "Trace"
-        // brand prefix or the space.
-        assert_eq!(&rendered[..7], "Trace v");
+        assert!(
+            !version.is_empty(),
+            "VERSION must be populated at build time"
+        );
+        assert_eq!(version_caption_text(), format!("Trace v{version}"));
+    }
+
+    #[test]
+    fn layout_constants_match_mac_reference() {
+        // Pin the three layout numbers to the Mac reference so an accidental
+        // edit surfaces at test time instead of at first paint. Values come
+        // from `SettingsView.swift:527-547`:
+        //   - 13pt medium toggle label
+        //   - 11pt medium version caption
+        //   - VStack(spacing: 12) between the two body rows
+        // Mirrors the same pinning pattern already in `shortcuts.rs`,
+        // `threads.rs`, and `widgets.rs`.
+        assert_eq!(TOGGLE_LABEL_FONT_SIZE, 13.0);
+        assert_eq!(VERSION_LABEL_FONT_SIZE, 11.0);
+        assert_eq!(SYSTEM_CARD_ROW_SPACING, 12.0);
     }
 }
