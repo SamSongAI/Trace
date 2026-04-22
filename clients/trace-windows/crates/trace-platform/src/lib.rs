@@ -7,22 +7,9 @@
 //!
 //! ## Modules
 //!
-//! - [`global_hotkey`] — Win32 `RegisterHotKey` integration that wakes the
-//!   capture panel. The error type is cross-platform so higher layers can
-//!   compile on any host; the [`global_hotkey::GlobalHotkey`] handle itself
-//!   is only available on `#[cfg(windows)]`.
-//! - [`system_tray`] — Win32 `Shell_NotifyIconW` tray icon with a localized
-//!   three-item context menu (New Note / Open Settings / Quit). Mirrors the
-//!   macOS `NSStatusItem` menu set up in `AppDelegate.setupStatusItem()`.
-//!   As with `global_hotkey`, the error and event enums are cross-platform
-//!   and the [`system_tray::SystemTray`] handle is Windows-only.
-//! - [`window`] — Synchronous Win32 helpers for the capture panel: topmost
-//!   / tool-window styles, foreground activation (with the
-//!   `AttachThreadInput` fallback), previous-foreground capture & restore,
-//!   and monitor-work-area enumeration. The pure monitor math
-//!   ([`window::ScreenRect`], [`window::place_on_best_monitor`]) is
-//!   cross-platform and testable on any host; the HWND-taking functions
-//!   are Windows-only.
+//! The list is alphabetised so new modules slot in against the
+//! `pub mod` declaration order below without reshuffling prose.
+//!
 //! - [`app_paths`] — Resolves the Windows known folders
 //!   `FOLDERID_RoamingAppData` and `FOLDERID_LocalAppData` to
 //!   `%APPDATA%\Trace` and `%LOCALAPPDATA%\Trace` respectively, creating
@@ -37,12 +24,6 @@
 //!   [`app_paths::log_dir`] and the Win32-only
 //!   [`app_paths::try_local_app_data_dir`] remain Windows-only; the
 //!   error type [`app_paths::AppPathsError`] is cross-platform.
-//! - [`single_instance`] — Named-mutex based single-instance enforcement.
-//!   macOS gets this from the bundle identifier; on Windows we must
-//!   create a `Local\` scoped mutex at startup and exit if another copy
-//!   is already running. The error type and the [`single_instance::SingleInstance`]
-//!   outcome are cross-platform; [`single_instance::acquire`] and the
-//!   guard type are Windows-only.
 //! - [`autostart`] — Launch-at-login integration via the
 //!   `HKCU\...\CurrentVersion\Run` registry key. User-scope (no
 //!   elevation), mirrors the macOS `SMAppService.launchAtLogin` toggle.
@@ -58,11 +39,33 @@
 //!   points ([`clipboard_image::read_clipboard_image_as_png`] /
 //!   [`clipboard_image::encode_rgba_as_png`]) are cross-platform, so the
 //!   paste shortcut also works on macOS dev builds.
+//! - [`global_hotkey`] — Win32 `RegisterHotKey` integration that wakes the
+//!   capture panel. The error type is cross-platform so higher layers can
+//!   compile on any host; the [`global_hotkey::GlobalHotkey`] handle itself
+//!   is only available on `#[cfg(windows)]`.
+//! - [`single_instance`] — Named-mutex based single-instance enforcement.
+//!   macOS gets this from the bundle identifier; on Windows we must
+//!   create a `Local\` scoped mutex at startup and exit if another copy
+//!   is already running. The error type and the [`single_instance::SingleInstance`]
+//!   outcome are cross-platform; [`single_instance::acquire`] and the
+//!   guard type are Windows-only.
+//! - [`system_tray`] — Win32 `Shell_NotifyIconW` tray icon with a localized
+//!   three-item context menu (New Note / Open Settings / Quit). Mirrors the
+//!   macOS `NSStatusItem` menu set up in `AppDelegate.setupStatusItem()`.
+//!   As with `global_hotkey`, the error and event enums are cross-platform
+//!   and the [`system_tray::SystemTray`] handle is Windows-only.
 //! - [`vault_validation`] — Cross-platform vault-path classification.
 //!   Layers `std::fs::metadata` + a write-probe on top of the
 //!   [`trace_core::VaultPathValidationIssue::is_blank`] helper so the
 //!   settings UI can distinguish Empty / DoesNotExist / NotDirectory /
 //!   NotWritable without reaching into the filesystem itself.
+//! - [`window`] — Synchronous Win32 helpers for the capture panel: topmost
+//!   / tool-window styles, foreground activation (with the
+//!   `AttachThreadInput` fallback), previous-foreground capture & restore,
+//!   and monitor-work-area enumeration. The pure monitor math
+//!   ([`window::ScreenRect`], [`window::place_on_best_monitor`]) is
+//!   cross-platform and testable on any host; the HWND-taking functions
+//!   are Windows-only.
 
 #![cfg_attr(not(windows), allow(dead_code))]
 
