@@ -33,10 +33,11 @@
 //! Platform-specific wiring (tray icon, global hotkeys, Win32 topmost bit)
 //! lands in later phases; Phase 12 only needs the multi-window shell.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use iced::{window, Element, Subscription, Task, Theme};
-use trace_core::{AppSettings, NoteSection, ThemePreset, ThreadConfig, TraceTheme};
+use trace_core::{AppSettings, NoteSection, ThreadConfig, TraceTheme};
 use trace_ui::app::{self as capture_app, CaptureApp};
 use trace_ui::settings::{self as settings_app, SettingsApp};
 
@@ -64,14 +65,31 @@ struct TraceApp {
     /// Theme snapshot used to seed a fresh `SettingsApp`. Kept in sync with
     /// [`CaptureApp::theme`] so both windows render under the same preset.
     theme: TraceTheme,
+    /// Disk destination for settings persistence, resolved once at startup
+    /// via [`trace_platform::app_paths::settings_file_path`]. `None` only
+    /// when the platform layer could not resolve a user-data directory
+    /// (e.g. neither `APPDATA` nor `HOME` is set) — in that case the app
+    /// still runs but acts as an ephemeral buffer: the lazy `SettingsApp`
+    /// receives `None` and skips the write-through path, matching the
+    /// pre-8c.1 behaviour so a broken environment cannot block launch.
+    settings_save_path: Option<PathBuf>,
 }
 
 impl TraceApp {
     fn new() -> (Self, Task<Message>) {
-        // Seed defaults. Later phases read these from
-        // `trace-platform`-resolved `AppSettings` on startup.
-        let theme = TraceTheme::for_preset(ThemePreset::Dark);
-        let shared_settings = Arc::new(AppSettings::default());
+        // Resolve the canonical settings location for the user-data
+        // directory, then try to load an existing JSON file. Any failure —
+        // unresolvable path, `create_dir_all` refusal, file missing, JSON
+        // corruption — falls back to `AppSettings::default()` with a
+        // `tracing::warn!` so the user still gets a working app instead of
+        // an inscrutable crash. Writing the default back to disk is the
+        // next user action's job (via `SettingsApp`'s write-through path);
+        // we deliberately do not persist a fresh default here because that
+        // would overwrite a malformed file the user might want to recover
+        // by hand.
+        let (shared_settings, settings_save_path) = load_settings_with_save_path();
+
+        let theme = TraceTheme::for_preset(shared_settings.app_theme_preset);
         let sections = default_sections();
         let threads: Vec<ThreadConfig> = Vec::new();
 
@@ -83,10 +101,57 @@ impl TraceApp {
                 settings: None,
                 shared_settings,
                 theme,
+                settings_save_path,
             },
             Task::none(),
         )
     }
+}
+
+/// Resolves the settings file path from the platform layer, attempts to
+/// load an existing JSON, and returns a ready-to-use `(Arc<AppSettings>,
+/// Option<PathBuf>)` pair.
+///
+/// The path is returned even when `load` failed (corrupt JSON, transient
+/// I/O error) so the write-through pipeline can still overwrite it on the
+/// next edit. The path is `None` only when the platform layer gave up —
+/// the app then runs without persistence, preserving the pre-8c.1
+/// behaviour that kept a broken user-data directory from blocking launch.
+fn load_settings_with_save_path() -> (Arc<AppSettings>, Option<PathBuf>) {
+    let path = match trace_platform::app_paths::settings_file_path() {
+        Ok(p) => p,
+        Err(err) => {
+            tracing::warn!(
+                "could not resolve settings file path ({err}); starting with defaults, no persistence"
+            );
+            return (Arc::new(AppSettings::default()), None);
+        }
+    };
+
+    // `settings_file_path` creates the parent directory on both platforms,
+    // but guard with `create_dir_all` again so a later change (e.g. moving
+    // the helper to pure path math) cannot silently break startup.
+    if let Some(parent) = path.parent() {
+        if let Err(err) = std::fs::create_dir_all(parent) {
+            tracing::warn!(
+                "could not create settings parent directory {:?}: {err}; continuing without persistence guarantee",
+                parent
+            );
+        }
+    }
+
+    let settings = match AppSettings::load(&path) {
+        Ok(loaded) => loaded,
+        Err(err) => {
+            tracing::warn!(
+                "could not load settings from {:?}: {err}; falling back to defaults",
+                path
+            );
+            AppSettings::default()
+        }
+    };
+
+    (Arc::new(settings), Some(path))
 }
 
 /// Seeds the capture panel with the default dimension sections. Later
@@ -106,9 +171,10 @@ fn update(state: &mut TraceApp, message: Message) -> Task<Message> {
             // `settings_window_id` cache stays in sync.
             if let capture_app::Message::SettingsWindowOpened(_) = &capture_message {
                 if state.settings.is_none() {
-                    state.settings = Some(SettingsApp::new(
+                    state.settings = Some(SettingsApp::new_with_save_path(
                         state.theme,
                         Arc::clone(&state.shared_settings),
+                        state.settings_save_path.clone(),
                     ));
                 }
             }

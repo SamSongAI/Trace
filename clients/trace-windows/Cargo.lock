@@ -3288,6 +3288,7 @@ dependencies = [
  "trace-core",
  "trace-platform",
  "trace-ui",
+ "tracing",
 ]
 
 [[package]]

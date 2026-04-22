@@ -17,7 +17,13 @@ trace-core = { path = "../trace-core" }
 trace-ui = { path = "../trace-ui" }
 iced = { workspace = true }
 
-# `trace-platform` only pulls in real Windows APIs on Windows targets, so we
-# only link it on Windows too. On macOS/Linux the binary compiles as a no-op.
-[target.'cfg(windows)'.dependencies]
+# Needed on every target: `app_paths::settings_file_path` is the prod-startup
+# entry point used by `main.rs` to locate `settings.json`. The crate itself
+# gates its heavy Windows APIs behind `#[cfg(windows)]`, and exposes a
+# `$HOME/.config/trace` fallback on macOS/Linux so developer machines can
+# exercise the same startup path without a Windows host.
 trace-platform = { path = "../trace-platform" }
+
+# Startup path warns (but does not abort) on settings-load / create-dir
+# failures; `tracing::warn!` is the standard channel for those events.
+tracing = { workspace = true }

@@ -169,12 +169,102 @@ mod imp {
 pub use imp::{local_app_data_dir, log_dir, roaming_app_data_dir, settings_file_path};
 
 // ---------------------------------------------------------------------------
+// Non-Windows fallback
+//
+// Developer machines (macOS / Linux) need a place to rehearse the production
+// startup path without a Windows host. We mirror the XDG convention —
+// `$HOME/.config/trace/settings.json` — because it's what most Linux tools
+// (and macOS tools that follow XDG, including our own `trace` CLI helpers)
+// expect. The lowercase `trace` matches the POSIX-style naming used by the
+// rest of the trace-core crate, while the Windows path keeps the capitalised
+// `Trace` folder that mirrors the installer's program-files branding.
+//
+// Only `settings_file_path` is exposed here — the roaming/local split and
+// `log_dir` are Windows-only concepts that do not have a meaningful XDG
+// analogue at this layer. If a later non-Windows feature needs a cache or
+// log directory we can grow the module then, not now.
+// ---------------------------------------------------------------------------
+
+#[cfg(not(windows))]
+mod imp_fallback {
+    use super::AppPathsError;
+    use std::path::PathBuf;
+
+    /// Sub-directory appended to the XDG config base.
+    const APP_SUBDIR: &str = "trace";
+
+    /// Returns `$HOME/.config/trace/settings.json`, creating the parent
+    /// directory if absent.
+    ///
+    /// The underlying I/O is intentionally forgiving: when `$HOME` is unset
+    /// we return [`AppPathsError::KnownFolderResolution`] with the Windows
+    /// HRESULT for `E_FAIL` so callers that only pattern-match variant names
+    /// keep working on every platform. `create_dir_all` failures surface as
+    /// [`AppPathsError::CreateDirectory`], exactly like the Windows path.
+    pub fn settings_file_path() -> Result<PathBuf, AppPathsError> {
+        let home = std::env::var_os("HOME")
+            .ok_or(AppPathsError::KnownFolderResolution { hresult: 0x8000_4005_u32 as i32 })?;
+        let mut dir = PathBuf::from(home);
+        dir.push(".config");
+        dir.push(APP_SUBDIR);
+
+        std::fs::create_dir_all(&dir).map_err(|e| AppPathsError::CreateDirectory {
+            io_kind: e.kind(),
+        })?;
+
+        dir.push("settings.json");
+        Ok(dir)
+    }
+}
+
+#[cfg(not(windows))]
+pub use imp_fallback::settings_file_path;
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- Cross-platform tests ----------------------------------------------
+    //
+    // `settings_file_path` is available on every target (Windows uses the
+    // known-folder API; other targets fall back to `$HOME/.config/trace`) so
+    // developer machines can exercise the production startup path in
+    // `trace-app` without needing a Windows host. The assertions below touch
+    // only the *shape* of the returned path — no environment variables are
+    // mutated, so these tests run safely in parallel with the rest of the
+    // suite.
+
+    #[test]
+    fn settings_file_path_ends_with_settings_json_on_any_platform() {
+        let path = settings_file_path().expect("settings_file_path should succeed");
+        assert_eq!(
+            path.file_name().and_then(|n| n.to_str()),
+            Some("settings.json"),
+            "path should end with 'settings.json', got: {}",
+            path.display()
+        );
+    }
+
+    #[test]
+    fn settings_file_path_parent_basename_matches_expected_brand() {
+        let path = settings_file_path().expect("settings_file_path should succeed");
+        let parent_name = path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .map(|s| s.to_string())
+            .expect("path should have a parent directory with a name");
+        let expected = if cfg!(windows) { "Trace" } else { "trace" };
+        assert_eq!(
+            parent_name, expected,
+            "parent directory name should be {expected:?}, got: {}",
+            path.display()
+        );
+    }
 
     #[test]
     fn app_paths_error_display_includes_error_code_or_kind() {
