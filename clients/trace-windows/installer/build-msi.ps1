@@ -42,6 +42,15 @@ param(
 $ErrorActionPreference = 'Stop'
 $InformationPreference = 'Continue'
 
+# $PSScriptRoot is only populated when the script is invoked as a file.
+# Dot-sourcing (. ./build-msi.ps1) or pasting the body into an interactive
+# session leaves it null, at which point every Join-Path below would silently
+# build wrong paths (e.g. "\assets" resolved against the caller's cwd).
+# Fail loud instead.
+if (-not $PSScriptRoot) {
+    throw "build-msi.ps1 must be invoked as a file (e.g. `pwsh installer/build-msi.ps1`), not dot-sourced."
+}
+
 $InstallerRoot = $PSScriptRoot
 $WorkspaceRoot = Split-Path -Parent $InstallerRoot
 $AssetsDir = Join-Path $InstallerRoot 'assets'
