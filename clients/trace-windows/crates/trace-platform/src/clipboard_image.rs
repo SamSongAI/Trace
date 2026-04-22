@@ -69,17 +69,31 @@ pub enum ClipboardImageError {
 ///
 /// Return semantics:
 ///
-/// * `Ok(None)` — the clipboard opened successfully but does not hold
-///   image data (user copied text, files, nothing at all, or an image
-///   format `arboard` does not recognise). The caller in Task 13.3
-///   should fall back to the platform's native paste behaviour.
+/// * `Ok(None)` — either the clipboard opened successfully but does not
+///   hold image data (user copied text, files, nothing at all, or an
+///   image format `arboard` does not recognise), OR the clipboard was
+///   momentarily held open by another process on Windows
+///   (`arboard::Error::ClipboardOccupied`). The Win32 clipboard is a
+///   globally serialised resource — password managers and clipboard
+///   history tools legitimately lock it for short windows — so we treat
+///   "occupied" as a transient "no image available right now" rather
+///   than a real error. The caller in Task 13.3 should fall back to the
+///   platform's native paste behaviour in both sub-cases.
 /// * `Ok(Some(bytes))` — `bytes` is a complete PNG file (magic header
 ///   + IHDR + IDAT + IEND) containing the clipboard's pixels.
 /// * `Err(_)` — a platform-layer failure. The UI should surface this
 ///   as a warning; silently falling through would be confusing.
 pub fn read_clipboard_image_as_png() -> Result<Option<Vec<u8>>, ClipboardImageError> {
-    let mut clipboard = arboard::Clipboard::new()
-        .map_err(|e| ClipboardImageError::ClipboardUnavailable(e.to_string()))?;
+    let mut clipboard = match arboard::Clipboard::new() {
+        Ok(cb) => cb,
+        // See the function-level docs: Win32 ClipboardOccupied is a
+        // transient serialisation conflict with another process holding
+        // the clipboard open, not a real failure. Map it to Ok(None) so
+        // the UI falls through to its native / text path instead of
+        // surfacing a spurious "剪贴板读取失败" toast.
+        Err(arboard::Error::ClipboardOccupied) => return Ok(None),
+        Err(e) => return Err(ClipboardImageError::ClipboardUnavailable(e.to_string())),
+    };
 
     let image = match clipboard.get_image() {
         Ok(img) => img,
@@ -87,6 +101,11 @@ pub fn read_clipboard_image_as_png() -> Result<Option<Vec<u8>>, ClipboardImageEr
         // empty clipboard. Map it to Ok(None) so the UI can fall through
         // to the native paste path without treating it as an error.
         Err(arboard::Error::ContentNotAvailable) => return Ok(None),
+        // `ClipboardOccupied` can also surface here per the `arboard`
+        // crate docs — the handle from `new()` succeeded but another
+        // process reacquired the lock before `get_image()` ran. Same
+        // transient-no-op mapping as above.
+        Err(arboard::Error::ClipboardOccupied) => return Ok(None),
         Err(e) => {
             return Err(ClipboardImageError::ClipboardReadFailed(e.to_string()));
         }
@@ -96,12 +115,10 @@ pub fn read_clipboard_image_as_png() -> Result<Option<Vec<u8>>, ClipboardImageEr
     // `width` and `height` as `usize`. On 64-bit targets those can
     // exceed u32, so we reject oversized frames up front rather than
     // letting the png crate panic inside the encoder.
-    let width = u32::try_from(image.width).map_err(|_| {
-        ClipboardImageError::PngEncodingFailed("width exceeds u32".into())
-    })?;
-    let height = u32::try_from(image.height).map_err(|_| {
-        ClipboardImageError::PngEncodingFailed("height exceeds u32".into())
-    })?;
+    let width = u32::try_from(image.width)
+        .map_err(|_| ClipboardImageError::PngEncodingFailed("width exceeds u32".into()))?;
+    let height = u32::try_from(image.height)
+        .map_err(|_| ClipboardImageError::PngEncodingFailed("height exceeds u32".into()))?;
 
     let bytes = encode_rgba_as_png(width, height, &image.bytes)?;
     Ok(Some(bytes))
@@ -147,9 +164,7 @@ pub fn encode_rgba_as_png(
         .checked_mul(height)
         .and_then(|pixels| pixels.checked_mul(4))
         .ok_or_else(|| {
-            ClipboardImageError::PngEncodingFailed(
-                "frame dimensions overflow".into(),
-            )
+            ClipboardImageError::PngEncodingFailed("frame dimensions overflow".into())
         })?;
 
     if rgba.len() as u64 != u64::from(expected) {
@@ -186,9 +201,7 @@ mod tests {
     /// (ISO/IEC 15948:2003 §5.2). Every valid PNG begins with these
     /// exact bytes; the test suite uses it as a byte-level smoke check
     /// that the encoder produced a real PNG, not some arbitrary blob.
-    const PNG_SIGNATURE: [u8; 8] = [
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
-    ];
+    const PNG_SIGNATURE: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
     #[test]
     fn encode_rgba_as_png_emits_valid_png_magic_header() {
@@ -221,8 +234,7 @@ mod tests {
             0x01, 0x23, 0x45, 0x67,  0x89, 0xAB, 0xCD, 0xEF,
         ];
 
-        let encoded = encode_rgba_as_png(width, height, &rgba)
-            .expect("encode 2x3 distinct pixels");
+        let encoded = encode_rgba_as_png(width, height, &rgba).expect("encode 2x3 distinct pixels");
 
         let decoder = png::Decoder::new(encoded.as_slice());
         let mut reader = decoder.read_info().expect("decode info");
@@ -237,7 +249,8 @@ mod tests {
         let decoded = &buf[..frame.buffer_size()];
 
         assert_eq!(
-            decoded, &rgba[..],
+            decoded,
+            &rgba[..],
             "decoded pixels must equal the original RGBA buffer"
         );
     }
@@ -250,8 +263,7 @@ mod tests {
         let long = vec![0u8; 17];
 
         for buffer in [short, long] {
-            let err = encode_rgba_as_png(2, 2, &buffer)
-                .expect_err("mismatch must error");
+            let err = encode_rgba_as_png(2, 2, &buffer).expect_err("mismatch must error");
             match err {
                 ClipboardImageError::PngEncodingFailed(msg) => {
                     assert!(
@@ -268,8 +280,7 @@ mod tests {
     fn encode_rgba_as_png_rejects_zero_dimensions() {
         // Width = 0 with a 4-byte buffer (what the caller might naively
         // supply for a 1×1 image where they forgot to set the width).
-        let err_w = encode_rgba_as_png(0, 1, &[0u8; 4])
-            .expect_err("zero width must error");
+        let err_w = encode_rgba_as_png(0, 1, &[0u8; 4]).expect_err("zero width must error");
         match err_w {
             ClipboardImageError::PngEncodingFailed(msg) => {
                 assert!(
@@ -281,8 +292,7 @@ mod tests {
         }
 
         // Symmetric check for height = 0.
-        let err_h = encode_rgba_as_png(1, 0, &[0u8; 4])
-            .expect_err("zero height must error");
+        let err_h = encode_rgba_as_png(1, 0, &[0u8; 4]).expect_err("zero height must error");
         match err_h {
             ClipboardImageError::PngEncodingFailed(msg) => {
                 assert!(
@@ -317,8 +327,8 @@ mod tests {
         ];
 
         for (width, height, label) in cases {
-            let err = encode_rgba_as_png(width, height, &[])
-                .expect_err(&format!("{label} must error"));
+            let err =
+                encode_rgba_as_png(width, height, &[]).expect_err(&format!("{label} must error"));
             match err {
                 ClipboardImageError::PngEncodingFailed(msg) => {
                     assert!(
@@ -326,9 +336,7 @@ mod tests {
                         "{label}: message should mention overflow, got: {msg}"
                     );
                 }
-                other => panic!(
-                    "{label}: expected PngEncodingFailed, got {other:?}"
-                ),
+                other => panic!("{label}: expected PngEncodingFailed, got {other:?}"),
             }
         }
     }
@@ -337,14 +345,9 @@ mod tests {
     fn clipboard_image_error_display_includes_phase() {
         // Each variant's Display must mention its phase so `grep`-based
         // log triage can tell unavailable/read/encode apart at a glance.
-        let unavailable = ClipboardImageError::ClipboardUnavailable(
-            "handle busy".into(),
-        );
-        let read = ClipboardImageError::ClipboardReadFailed(
-            "format error".into(),
-        );
-        let encode =
-            ClipboardImageError::PngEncodingFailed("bad header".into());
+        let unavailable = ClipboardImageError::ClipboardUnavailable("handle busy".into());
+        let read = ClipboardImageError::ClipboardReadFailed("format error".into());
+        let encode = ClipboardImageError::PngEncodingFailed("bad header".into());
 
         assert!(
             unavailable.to_string().contains("clipboard"),

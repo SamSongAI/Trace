@@ -113,6 +113,14 @@ impl LaunchAtLoginSink for AutostartSink {
 /// `ContentNotAvailable → Ok(None)` mapping so the UI layer can
 /// distinguish an empty clipboard from a real read failure.
 ///
+/// Both sides also map `arboard::Error::ClipboardOccupied` — raised when
+/// another process on Windows holds the clipboard open (password
+/// managers, clipboard history tools, synced remote-desktop sessions) —
+/// to `Ok(None)` rather than a `ReadFailed` error. The Win32 clipboard
+/// is a globally serialised resource, so brief contention is expected
+/// and would otherwise fire a spurious "剪贴板读取失败" /
+/// "图片粘贴失败" toast on a healthy machine.
+///
 /// The probe is stateless — each call opens a fresh clipboard handle —
 /// which matches [`trace_platform::clipboard_image`]'s internal idiom and
 /// means the wrapper is `Send + Sync` without interior mutability.
@@ -125,9 +133,25 @@ impl ClipboardProbe for TracePlatformClipboardProbe {
             .map_err(|e| ClipboardProbeError::ReadFailed(e.to_string()))
     }
 
+    /// Reads plain text from the platform clipboard.
+    ///
+    /// Returns `Ok(None)` when the clipboard is empty, holds non-text
+    /// content (`ContentNotAvailable`), or is momentarily locked by
+    /// another process on Windows (`ClipboardOccupied`). Both cases are
+    /// "nothing to paste right now" from the user's perspective — the
+    /// latter can fire regularly on healthy machines running password
+    /// managers or clipboard history tools, so surfacing it as an error
+    /// would produce false-positive toasts.
     fn read_text(&self) -> Result<Option<String>, ClipboardProbeError> {
-        let mut clipboard = arboard::Clipboard::new()
-            .map_err(|e| ClipboardProbeError::ReadFailed(e.to_string()))?;
+        let mut clipboard = match arboard::Clipboard::new() {
+            Ok(cb) => cb,
+            // See the method doc: Win32 ClipboardOccupied is transient
+            // cross-process contention, not a real failure. Map it to
+            // Ok(None) so the UI falls through to its empty-clipboard
+            // branch instead of toasting.
+            Err(arboard::Error::ClipboardOccupied) => return Ok(None),
+            Err(e) => return Err(ClipboardProbeError::ReadFailed(e.to_string())),
+        };
         match clipboard.get_text() {
             Ok(text) => Ok(Some(text)),
             // `ContentNotAvailable` is the "normal" miss: user copied an
@@ -135,6 +159,11 @@ impl ClipboardProbe for TracePlatformClipboardProbe {
             // UI falls through to its empty-clipboard branch instead of
             // toasting.
             Err(arboard::Error::ContentNotAvailable) => Ok(None),
+            // `get_text()` can also surface ClipboardOccupied per the
+            // arboard docs — the handle opened cleanly but another
+            // process reacquired the lock before the read ran. Same
+            // transient-no-op mapping as the `new()` arm above.
+            Err(arboard::Error::ClipboardOccupied) => Ok(None),
             Err(e) => Err(ClipboardProbeError::ReadFailed(e.to_string())),
         }
     }
