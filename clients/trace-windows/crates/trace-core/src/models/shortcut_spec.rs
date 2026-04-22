@@ -29,9 +29,11 @@ pub const MOD_SHIFT: u32 = 0x0004;
 pub const MOD_WIN: u32 = 0x0008;
 /// Reserved modifier used to detect the `Ctrl+1`..`Ctrl+9` panel-section
 /// switch shortcut. On Mac this is `⌘` (command); on Windows the command-key
-/// conventions for section switching collapse to `Ctrl`. Exposed as a
-/// symbolic constant so the UI layer does not re-state the mapping.
-pub const RESERVED_SECTION_MOD: u32 = MOD_CONTROL;
+/// conventions for section switching collapse to `Ctrl`. Kept crate-private
+/// because every consumer (the recorder validation ladder and the
+/// `is_reserved_section_switch` predicate) lives inside `trace-core`; the UI
+/// layer talks to the predicate, not the raw bitmask.
+const RESERVED_SECTION_MOD: u32 = MOD_CONTROL;
 
 const ALL_MODIFIERS: u32 = MOD_ALT | MOD_CONTROL | MOD_SHIFT | MOD_WIN;
 
