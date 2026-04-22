@@ -1,0 +1,10 @@
+# Build output from build-msi.ps1
+out/
+
+# wix build intermediates if run directly from installer/wix/
+*.msi
+*.wixpdb
+*.wixobj
+
+# Cargo target noise if someone runs `wix build` from here by mistake
+target/
