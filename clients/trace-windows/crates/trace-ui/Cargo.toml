@@ -28,6 +28,9 @@ rfd = { workspace = true }
 # panicking or interrupting the UI — mirrors Mac `AppSettings.updateLaunchAtLogin`'s
 # `NSLog(...)` fallback for the same class of errors.
 tracing = { workspace = true }
+# Keeps the `ClipboardProbeError` variants in the same derive-based style as
+# `trace-core::TraceError` and `trace-platform::ClipboardImageError`.
+thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
