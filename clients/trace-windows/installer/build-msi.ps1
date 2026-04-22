@@ -278,7 +278,12 @@ Write-Information ("produced {0} ({1:N0} bytes)" -f $MsiPath, $size)
 # Compress-Archive ships with pwsh 7 on every platform, so both the CI
 # windows-latest runner and a local macOS dry-run exercise the same
 # packaging path (the mac run can't sign, but packaging still runs).
-$RepoRoot = Split-Path -Parent (Split-Path -Parent $InstallerRoot)
+#
+# Three directory hops to reach the repo root from $InstallerRoot:
+#   installer/ -> trace-windows/ -> clients/ -> <repo root>
+# $WorkspaceRoot already sits at clients/trace-windows/, so two more
+# Split-Path -Parent calls land us at the repo root where LICENSE lives.
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $WorkspaceRoot)
 $LicensePath = Join-Path $RepoRoot 'LICENSE'
 if (-not (Test-Path $LicensePath)) {
     throw "portable zip: LICENSE missing at $LicensePath"
