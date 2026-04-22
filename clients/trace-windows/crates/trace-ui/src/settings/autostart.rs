@@ -55,8 +55,8 @@ mod tests {
     /// Kept here (rather than in `mod.rs`'s `tests` block) so a future
     /// autostart-specific test file can reuse it if needed.
     #[derive(Default)]
-    pub(crate) struct RecordingSink {
-        pub calls: Mutex<Vec<bool>>,
+    struct RecordingSink {
+        calls: Mutex<Vec<bool>>,
     }
 
     impl LaunchAtLoginSink for RecordingSink {

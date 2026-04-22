@@ -3680,12 +3680,11 @@ mod tests {
         // produces. Each UI toggle must produce exactly one sink call with
         // the same polarity as the shadow field.
         let sink = Arc::new(RecordingSink::default());
-        let sink_trait: Arc<dyn LaunchAtLoginSink> = sink.clone();
         let mut app = SettingsApp::new_with_dependencies(
             TraceTheme::for_preset(ThemePreset::Dark),
             Arc::new(AppSettings::default()),
             None,
-            sink_trait,
+            Arc::clone(&sink) as Arc<dyn LaunchAtLoginSink>,
         );
 
         let _ = settings_update(&mut app, SettingsMessage::LaunchAtLoginToggled(true));
@@ -3706,14 +3705,13 @@ mod tests {
         // shadow + the on-disk JSON reflect the new flag *and* the sink was
         // called once with the matching value.
         let sink = Arc::new(RecordingSink::default());
-        let sink_trait: Arc<dyn LaunchAtLoginSink> = sink.clone();
         let tmp = tempfile::tempdir().expect("tempdir");
         let path = tmp.path().join("settings.json");
         let mut app = SettingsApp::new_with_dependencies(
             TraceTheme::for_preset(ThemePreset::Dark),
             Arc::new(AppSettings::default()),
             Some(path.clone()),
-            sink_trait,
+            Arc::clone(&sink) as Arc<dyn LaunchAtLoginSink>,
         );
 
         let _ = settings_update(&mut app, SettingsMessage::LaunchAtLoginToggled(true));
