@@ -25,7 +25,7 @@ defaults:
 
 jobs:
   build-release:
-    name: build ${{ matrix.arch }} MSI + portable
+    name: build ${{ matrix.arch }} installer .exe
     runs-on: windows-latest
     strategy:
       # Keep going even if one arch blows up; we'd rather publish a
@@ -102,7 +102,7 @@ jobs:
           }
           "TRACE_ATS_DLIB=$dlib" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: Build signed MSI + portable ZIP
+      - name: Build signed installer .exe
         shell: pwsh
         env:
           AZURE_TENANT_ID:         ${{ secrets.AZURE_TENANT_ID }}
@@ -115,19 +115,24 @@ jobs:
         run: ./installer/build-msi.ps1 -Arch ${{ matrix.arch }}
 
       - name: Upload matrix artifact
-        # Each matrix leg uploads its pair into the same artifact name
-        # via unique suffixes; the publish job downloads the lot.
+        # Each matrix leg uploads its one file into the arch-specific
+        # artifact name; the publish job downloads the lot.
         uses: actions/upload-artifact@v4
         with:
           name: trace-release-${{ matrix.arch }}
-          # Primary artifact is the WiX Burn Bundle (Setup.exe). MSI + ZIP
-          # stay as secondary formats. Glob is deliberately narrow —
-          # `Trace-Setup-*-<arch>.exe` — so any leftover engine-*.exe from
-          # a failed reattach would never be mistaken for a release file.
-          path: |
-            clients/trace-windows/installer/out/Trace-Setup-*-${{ matrix.arch }}.exe
-            clients/trace-windows/installer/out/Trace-*-${{ matrix.arch }}.msi
-            clients/trace-windows/installer/out/Trace-*-${{ matrix.arch }}-portable.zip
+          # Phase 17: the WiX Burn Bundle (Trace-<ver>-<arch>.exe) is the
+          # sole release artifact. MSI still gets built + signed in
+          # installer/out/ as a Bundle-embedding intermediate, but is
+          # deliberately excluded from the glob because it duplicates
+          # what's already inside Setup.exe and confuses non-technical
+          # users facing a download list with two installers. Portable
+          # zip was dropped entirely (audience <5%, IT-locked-box users
+          # are not Trace's target demographic).
+          #
+          # The `-${{ matrix.arch }}.exe` suffix keeps the glob narrow:
+          # it rejects any stray engine-*.exe from a failed reattach and
+          # prevents x64 and arm64 artifacts from cross-contaminating.
+          path: clients/trace-windows/installer/out/Trace-*-${{ matrix.arch }}.exe
           if-no-files-found: error
           retention-days: 14
 
