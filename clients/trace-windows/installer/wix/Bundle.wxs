@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Trace Windows client Bundle (Phase 16) — WiX v4 Burn bootstrapper.
+
+  Build (delegated by build-msi.ps1, not run by hand):
+    wix build -arch x64 ^
+      -d Version=0.1.0 ^
+      -d AssetsDir=..\assets ^
+      -d MsiPath=..\out\Trace-0.1.0-x64.msi ^
+      -ext WixToolset.Bal.wixext ^
+      -o ..\out\Trace-Setup-0.1.0-x64.exe Bundle.wxs
+
+  ===========================================================================
+  UpgradeCode is FIXED for the lifetime of this Bundle, and DISTINCT from
+  the MSI's UpgradeCode (4F0FC3A3-C718-4DD4-BB01-0351E9960E8C). Burn treats
+  a Bundle as its own installer identity — share UpgradeCodes and Windows
+  Installer can't tell whether a given upgrade applies to the MSI or the
+  Bundle, leading to orphaned ARP entries and broken major-upgrade chains.
+
+  Generated 2026-04-23 — DO NOT EDIT the GUID below.
+  ===========================================================================
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+  <Bundle
+      Name="Trace"
+      Manufacturer="Sam Song"
+      Version="$(Version)"
+      UpgradeCode="B98D8477-7730-4BC5-B177-8E00DC5C7DD0"
+      IconSourceFile="$(AssetsDir)\trace.ico"
+      AboutUrl="https://github.com/SamSong1997/Trace"
+      HelpUrl="https://github.com/SamSong1997/Trace">
+
+    <!--
+      BootstrapperApplication: WixStandardBootstrapperApplication is the
+      zero-code BA ship-built with Bal. HyperlinkLicense variant gives us
+      a Welcome page with inline EULA link, plus a progress page and an
+      exit page — no WPF, no C#, just XML config.
+
+      LicenseFile is rendered via the same RTF we already generate for
+      the MSI EULA, so the bundle EULA and MSI EULA are one document.
+      LogoFile reuses the MSI's ICO so the Burn shell matches the ARP
+      icon and the MSI's WixUI_InstallDir title bar.
+
+      SuppressOptionsUI: we do not offer a "change install directory"
+      button. Users who want to customise paths run the MSI directly
+      (msiexec /i Trace-*.msi TARGETDIR=...). Keeping the Bundle UX
+      one-click matches the mainstream Windows installer feel.
+
+      SuppressRepair: mirrors Product.wxs's ARPNOREPAIR=1. The Bundle
+      and the MSI agree that there is no repair code path to run.
+    -->
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication
+          Theme="hyperlinkLicense"
+          LicenseFile="$(AssetsDir)\LICENSE.rtf"
+          LogoFile="$(AssetsDir)\trace.ico"
+          SuppressOptionsUI="yes"
+          SuppressRepair="yes" />
+    </BootstrapperApplication>
+
+    <!--
+      Chain: the MSI is the one and only package.
+
+      Visible="no" stops the MSI from registering its own ARP entry, so
+      the user sees exactly one "Trace" row in Programs and Features —
+      the Bundle's entry, versioned the same as the MSI since both read
+      $(Version) from the same build-msi.ps1 invocation.
+
+      Compressed="yes" embeds the MSI inside Setup.exe so the Bundle is
+      a single self-contained file. Without this Burn would try to
+      stream the MSI from the same directory Setup.exe was launched
+      from, which breaks when users download just the .exe.
+
+      Cache="keep" holds the MSI in %ProgramData%\Package Cache\ after
+      install so the Bundle's uninstall path does not need to re-fetch.
+
+      DisplayInternalUI="no" silences the MSI's WixUI_InstallDir chrome
+      while the Bundle runs — the Burn progress page is the sole UI.
+
+      Vital="yes" propagates MSI install failure up to the Bundle so
+      the Burn UI reflects it (default, stated for clarity).
+    -->
+    <Chain>
+      <MsiPackage
+          Id="TraceMsi"
+          SourceFile="$(MsiPath)"
+          Visible="no"
+          Cache="keep"
+          Compressed="yes"
+          DisplayInternalUI="no"
+          Vital="yes" />
+    </Chain>
+  </Bundle>
+</Wix>
