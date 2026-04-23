@@ -116,8 +116,8 @@ Trace 写入本地 `.md` 文件，天然适配 Obsidian。关键是让 Trace 的
 
 按机器架构选对应安装器：
 
-- **Intel / AMD 桌面机**（绝大多数用户）：`Trace-0.2.2-x64.exe`
-- **ARM 笔记本**（Surface Pro X 等）：`Trace-0.2.2-arm64.exe`
+- **Intel / AMD 桌面机**（绝大多数用户）：`Trace-0.2.3-x64.exe`
+- **ARM 笔记本**（Surface Pro X 等）：`Trace-0.2.3-arm64.exe`
 
 1. 双击安装器。Windows SmartScreen 会弹蓝色警告「Windows 已保护你的电脑」——这是因为当前版本未代码签名。点击「更多信息」→「仍要运行」即可继续（后续计划通过 SignPath Foundation 提供签名版本）
 2. 在引导器中同意许可协议，点击 Install，安装器会写入 `C:\Program Files\Trace\` 并弹一次 UAC 请求管理员权限
