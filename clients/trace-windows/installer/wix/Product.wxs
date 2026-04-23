@@ -50,14 +50,19 @@
       图标 + ARP (Add/Remove Programs) 元数据。ARPPRODUCTICON 指向一个
       先前声明的 <Icon Id="...ico">（WiX v4 要求 Id 以 .ico 结尾），其余
       ARP* 属性填充控制面板「程序与功能」条目的 publisher / help link /
-      contact / 禁用修复与修改（我们没有独立 repair CA，就关掉）。
+      contact / 禁用修复（我们没有独立 repair CA，就关掉）。
+
+      ARPNOMODIFY 故意不在此处声明：WixUI_InstallDir（来自
+      WixToolset.UI.wixext）的 wixlib 已经自带 `<Property Id="ARPNOMODIFY"
+      Value="1" />`，再写一次会触发 WIX0091 `Duplicate symbol
+      'Property:ARPNOMODIFY'` 编译错。UI 扩展侧的声明足以关掉「程序与
+      功能」里的 Modify 按钮；我们只保留 UI 扩展不碰的 ARPNOREPAIR。
     -->
     <Icon Id="TraceIcon.ico" SourceFile="$(AssetsDir)\trace.ico" />
     <Property Id="ARPPRODUCTICON" Value="TraceIcon.ico" />
     <Property Id="ARPHELPLINK" Value="https://github.com/SamSong1997/Trace" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/SamSong1997/Trace" />
     <Property Id="ARPCONTACT" Value="samsong199705@gmail.com" />
-    <Property Id="ARPNOMODIFY" Value="1" />
     <Property Id="ARPNOREPAIR" Value="1" />
 
     <MediaTemplate EmbedCab="yes" />
