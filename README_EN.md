@@ -112,8 +112,8 @@ Requires macOS 13+.
 
 Pick the installer for your CPU architecture:
 
-- **Intel / AMD desktop** (most users): `Trace-0.2.0-x64.exe`
-- **ARM laptop** (e.g. Surface Pro X): `Trace-0.2.0-arm64.exe`
+- **Intel / AMD desktop** (most users): `Trace-0.2.2-x64.exe`
+- **ARM laptop** (e.g. Surface Pro X): `Trace-0.2.2-arm64.exe`
 
 1. Double-click the installer. Windows SmartScreen will show a blue "Windows protected your PC" warning — the current build is unsigned. Click "More info" → "Run anyway" to proceed (signed builds via SignPath Foundation are planned)
 2. Accept the license in the bootstrapper, click Install. The installer writes to `C:\Program Files\Trace\` and prompts once for UAC
