@@ -277,7 +277,7 @@ Write-Information ("produced {0} ({1:N0} bytes)" -f $MsiPath, $size)
 $SetupName = "Trace-Setup-$Version-$Arch.exe"
 $SetupPath = Join-Path $OutDir $SetupName
 
-Write-Information "wix build -> $SetupPath"
+Write-Information "wix build Bundle -> $SetupPath"
 Push-Location $WixDir
 try {
     wix build `

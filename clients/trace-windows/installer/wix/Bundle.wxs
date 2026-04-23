@@ -47,8 +47,14 @@
       (msiexec /i Trace-*.msi TARGETDIR=...). Keeping the Bundle UX
       one-click matches the mainstream Windows installer feel.
 
-      SuppressRepair: mirrors Product.wxs's ARPNOREPAIR=1. The Bundle
-      and the MSI agree that there is no repair code path to run.
+      SuppressRepair: hides the Repair button inside the Burn UI itself
+      — a different UI surface from the ARP entry's Repair button that
+      Product.wxs's ARPNOREPAIR=1 targets. (The MSI's ARP entry is
+      hidden by Visible="no" above, so ARPNOREPAIR is moot at the
+      Bundle level; we set it in Product.wxs anyway to cover the
+      hypothetical case of someone installing Trace-*.msi directly.)
+      Net effect: neither the Burn shell nor any MSI ARP row ever
+      offers a Repair option to the user.
     -->
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication

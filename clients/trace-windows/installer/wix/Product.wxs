@@ -16,6 +16,10 @@
   make every future release look like a separate product and break the
   MajorUpgrade path (double-install instead of in-place upgrade).
 
+  See Bundle.wxs for the Bundle-level UpgradeCode (Phase 16); the two
+  UpgradeCodes are intentionally distinct so Burn and Windows Installer
+  track the outer bootstrapper and the inner MSI as separate identities.
+
   Generated 2026-04-22 — DO NOT EDIT the GUID below.
   ===========================================================================
 -->

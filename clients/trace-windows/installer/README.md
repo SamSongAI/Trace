@@ -120,9 +120,12 @@ issue。
 ### 升级（0.1.0 → 0.2.0，哪怕 0.2.0 只是 bump 版本）
 
 - [ ] 先装 0.1.0 → 在设置里改几个值（vault 路径、热键） → 关闭
-- [ ] 双击 Trace-0.2.0-x64.msi → 安装流程（无需先卸载）
+- [ ] 双击 `Trace-Setup-0.2.0-x64.exe` → Burn UI 走完（无需先卸载）
+- [ ] 备用路径：双击 `Trace-0.2.0-x64.msi` 也应能完成升级（次级产物，
+      给 msiexec / 批量部署场景用；两条路径都要在 VM 里各测一次）
 - [ ] 安装完成后打开 Trace → 设置保留（vault 路径、热键、笔记库等）
-- [ ] 控制面板里只显示 0.2.0 条目（0.1.0 被 MajorUpgrade 卸掉）
+- [ ] 控制面板里只显示 0.2.0 条目（旧 Bundle 由 Burn 的 related-bundle
+      detection 自动卸载；内部 MSI 由 Product.wxs 的 MajorUpgrade 替换）
 - [ ] `%APPDATA%\Trace\` 内的 notes / settings 原封不动
 
 ### 多用户自修复回归（perMachine + HKMU 关键检查）
