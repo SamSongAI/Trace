@@ -17,7 +17,8 @@ installer/
 │   ├── build-ico.py           # 从 assets/trace-32.png 合成多尺寸 ICO
 │   └── build-license-rtf.py   # 从仓库根 LICENSE 生成 RTF
 └── wix/
-    └── Product.wxs            # WiX v4 产品声明
+    ├── Product.wxs            # WiX v4 MSI 产品声明
+    └── Bundle.wxs             # WiX v4 Burn Bundle 声明（Phase 16）
 ```
 
 Release 发布通过仓库根的 `.github/workflows/trace-windows-release.yml`
@@ -31,8 +32,11 @@ Release 发布通过仓库根的 `.github/workflows/trace-windows-release.yml`
 2. .NET 8 SDK
 3. WiX v4 global tool：`dotnet tool install --global wix --version 4.0.5`
 4. WiX UI 扩展：`wix extension add -g WixToolset.UI.wixext/4.0.5`
-5. PowerShell 7+（Windows 10 自带的 `powershell.exe` 是 5.1，不行）
-6. Python 3.11+ 与 Pillow 10.x：`pip install Pillow==10.*`
+5. WiX Bal 扩展：`wix extension add -g WixToolset.Bal.wixext/4.0.5`
+   （Bundle.wxs 引用 `bal:WixStandardBootstrapperApplication`，未装此扩展
+   `wix build Bundle.wxs` 会直接报 `Unknown element`。）
+6. PowerShell 7+（Windows 10 自带的 `powershell.exe` 是 5.1，不行）
+7. Python 3.11+ 与 Pillow 10.x：`pip install Pillow==10.*`
    （**每次构建都会跑**，用来再生成 `trace.ico` 和 `LICENSE.rtf`；Python 解释器在 Windows 下必须以 `python` 命令可用）
 
 构建：
@@ -40,7 +44,10 @@ Release 发布通过仓库根的 `.github/workflows/trace-windows-release.yml`
 ```powershell
 cd clients\trace-windows
 pwsh installer\build-msi.ps1
-# 产出：installer\out\Trace-<version>-x64.msi
+# 产出三个文件（Phase 16 起）：
+#   installer\out\Trace-Setup-<version>-x64.exe   ← 主产物（双击即装）
+#   installer\out\Trace-<version>-x64.msi         ← 供 msiexec / 批量部署
+#   installer\out\Trace-<version>-x64-portable.zip
 ```
 
 版本号自动从 `Cargo.toml` 的 `[workspace.package] version` 取；如需覆盖：
@@ -78,6 +85,12 @@ python3 clients/trace-windows/installer/scripts/build-license-rtf.py
   反复 self-repair。
 - **ARPNOMODIFY / ARPNOREPAIR**：没有 Modify / Repair 自定义操作，直接
   关掉两个按钮，避免用户点了什么也不发生。
+- **Bundle UpgradeCode 与 MSI UpgradeCode 完全独立**：Bundle 是
+  `B98D8477-7730-4BC5-B177-8E00DC5C7DD0`，MSI 是
+  `4F0FC3A3-C718-4DD4-BB01-0351E9960E8C`。Burn 把 Bundle 视为
+  Windows Installer 层面的独立身份，共用 UpgradeCode 会让 MajorUpgrade
+  分不清该升级哪一个，产出孤儿 ARP 条目。Chain 里 `MsiPackage Visible="no"`
+  保证用户只在"程序与功能"里看到一条 Trace 条目（Bundle 的条目）。
 
 ## 手动验收 Checklist（Windows 11 VM）
 
@@ -86,15 +99,16 @@ issue。
 
 ### 首次安装
 
-- [ ] 双击 `Trace-0.1.0-x64.msi` → 弹出 WixUI_InstallDir 欢迎页
-- [ ] 下一步 → EULA 页显示 MIT 许可证全文（英文）
-- [ ] 勾选"我接受"→ 下一步可用
-- [ ] 安装路径默认 `C:\Program Files\Trace\` → 下一步
-- [ ] 点击"安装"→ UAC 提示 → 批准
-- [ ] 安装完成页显示 → 点击"完成"
+- [ ] 双击 `Trace-Setup-0.1.0-x64.exe` → 弹出 Trace 欢迎页（WiX Burn
+      的 WixStandardBootstrapperApplication/HyperlinkLicense 主题，
+      显示 "Trace" 标题 + 图标 + License 超链接）
+- [ ] 点 "License" 超链接 → 弹出的 RTF 里是 MIT 许可证全文（英文）
+- [ ] 点 "Install" → UAC 提示 → 批准
+- [ ] 安装进度条走完 → 完成页 → 点 "Close"
 - [ ] 开始菜单搜索"Trace"能找到快捷方式
 - [ ] 桌面出现 Trace 图标（若安装时未反勾"桌面快捷方式"特性）
 - [ ] 控制面板 → 程序和功能 → Trace 条目显示：
+  - [ ] 条目名 "Trace"，且只有一条（内部 MSI 被 Bundle 的 `Visible="no"` 藏掉）
   - [ ] 图标正确（多尺寸 .ico，256 渲染清晰）
   - [ ] 发布者 "Sam Song"
   - [ ] 版本 "0.1.0"
@@ -135,6 +149,8 @@ issue。
 
 ### 签名产物（仅 Release workflow 产物）
 
+- [ ] `signtool verify /pa /all Trace-Setup-<ver>-x64.exe` 返回
+      Successfully verified（外壳 + 内部 Burn engine 都带签名）
 - [ ] `signtool verify /pa /all Trace-<ver>-x64.msi` 返回 Successfully
       verified
 - [ ] MSI 属性对话框 → 数字签名 → 看到 Sam Song 签名 + ACS 时间戳
@@ -193,9 +209,11 @@ git push origin v0.2.0
 # 3. 观察 Actions 页面，等待 trace-windows-release workflow 结束
 #    （x64 + arm64 两条腿独立，一条失败另一条仍会发布）
 
-# 4. 打开 Releases 页面核对：
+# 4. 打开 Releases 页面核对（6 个文件：x64 / arm64 各 3 个）：
+#    Trace-Setup-0.2.0-x64.exe       ← 主产物（双击即装）
 #    Trace-0.2.0-x64.msi
 #    Trace-0.2.0-x64-portable.zip
+#    Trace-Setup-0.2.0-arm64.exe     ← 主产物（双击即装）
 #    Trace-0.2.0-arm64.msi
 #    Trace-0.2.0-arm64-portable.zip
 ```
@@ -208,6 +226,7 @@ git push origin v0.2.0
 
 ```powershell
 # signtool 在 "Windows Kits\10\bin\<ver>\x64\signtool.exe" 下
+signtool verify /pa /all Trace-Setup-0.2.0-x64.exe
 signtool verify /pa /all Trace-0.2.0-x64.msi
 signtool verify /pa /all trace-app.exe   # 从 MSI 解出或从 ZIP 解出
 ```
