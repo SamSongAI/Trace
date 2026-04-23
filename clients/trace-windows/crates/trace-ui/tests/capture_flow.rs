@@ -160,7 +160,14 @@ fn dimension_mode_send_writes_file_clears_editor_and_view_still_renders() {
 }
 
 #[test]
-fn mode_cycle_rotates_dimension_thread_file_dimension() {
+fn mode_cycle_rotates_dimension_thread_only() {
+    // v0.2.3 Windows UX: the user-facing write-mode cycle is Daily ↔ Thread
+    // only — `WriteMode::File` (Document mode) is hidden in this port even
+    // though it still exists in the enum for JSON backwards-compatibility.
+    // `CycleModeForward` therefore must walk a two-stop loop; if it ever
+    // hits `File` the hidden variant has leaked back into the visible
+    // cycle. See `WriteMode::next` for the matching invariant on the
+    // trace-core side.
     let mut app = CaptureApp::new(
         TraceTheme::for_preset(ThemePreset::Dark),
         sample_sections(),
@@ -171,9 +178,14 @@ fn mode_cycle_rotates_dimension_thread_file_dimension() {
     apply(&mut app, Message::CycleModeForward);
     assert_eq!(app.write_mode, WriteMode::Thread);
     apply(&mut app, Message::CycleModeForward);
-    assert_eq!(app.write_mode, WriteMode::File);
+    assert_eq!(
+        app.write_mode,
+        WriteMode::Dimension,
+        "cycle must skip hidden File mode and return to Dimension",
+    );
+    // Extra lap to prove the loop stays two-stop and never leaks File.
     apply(&mut app, Message::CycleModeForward);
-    assert_eq!(app.write_mode, WriteMode::Dimension);
+    assert_eq!(app.write_mode, WriteMode::Thread);
 }
 
 #[test]

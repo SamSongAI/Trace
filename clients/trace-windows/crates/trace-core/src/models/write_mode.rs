@@ -13,19 +13,38 @@ pub enum WriteMode {
 }
 
 impl WriteMode {
+    /// Cycles through the user-facing write modes.
+    ///
+    /// The Windows port intentionally hides [`Self::File`] (Document mode)
+    /// per v0.2.3 UX direction: the Mac reference keeps all three, but
+    /// this build ships only Daily + Thread. [`Self::File`] stays in the
+    /// enum so existing `settings.json` payloads that persisted
+    /// `note_write_mode: "file"` still deserialize without errors;
+    /// [`crate::AppSettings::normalize`] coerces any persisted File back
+    /// to [`Self::Dimension`] on load so runtime state never reaches the
+    /// `File` arm once the user has re-saved their settings.
+    ///
+    /// If the enum happens to hold `File` (e.g. a user just restored an
+    /// old JSON and hasn't triggered normalize yet), `next()` still
+    /// folds it back into the visible cycle instead of perpetuating a
+    /// hidden state.
     pub fn next(self) -> Self {
         match self {
             Self::Dimension => Self::Thread,
-            Self::Thread => Self::File,
+            Self::Thread => Self::Dimension,
+            // Fold legacy File state back into the visible cycle.
             Self::File => Self::Dimension,
         }
     }
 
+    /// Inverse of [`Self::next`]. Same rationale for the `File` arm —
+    /// the legacy variant is folded into the active two-mode cycle.
     pub fn previous(self) -> Self {
         match self {
-            Self::Dimension => Self::File,
+            Self::Dimension => Self::Thread,
             Self::Thread => Self::Dimension,
-            Self::File => Self::Thread,
+            // Fold legacy File state back into the visible cycle.
+            Self::File => Self::Dimension,
         }
     }
 
@@ -112,16 +131,46 @@ mod tests {
     }
 
     #[test]
-    fn next_cycles_dimension_thread_file() {
+    fn next_cycles_dimension_and_thread_only() {
+        // v0.2.3 Windows UX: Document (File) mode is hidden, so the
+        // user-facing cycle is two-stop. `next()` walks Dimension →
+        // Thread → Dimension and folds any stray File state back into
+        // Dimension.
         assert_eq!(WriteMode::Dimension.next(), WriteMode::Thread);
-        assert_eq!(WriteMode::Thread.next(), WriteMode::File);
-        assert_eq!(WriteMode::File.next(), WriteMode::Dimension);
+        assert_eq!(WriteMode::Thread.next(), WriteMode::Dimension);
+        assert_eq!(
+            WriteMode::File.next(),
+            WriteMode::Dimension,
+            "legacy File state folds back into the visible cycle",
+        );
     }
 
     #[test]
-    fn previous_is_inverse_of_next() {
-        for mode in [WriteMode::Dimension, WriteMode::Thread, WriteMode::File] {
-            assert_eq!(mode.next().previous(), mode);
+    fn previous_cycles_dimension_and_thread_only() {
+        // Mirror of `next_cycles_dimension_and_thread_only`: with only
+        // two visible modes, `previous()` is structurally identical to
+        // `next()` on the visible variants. `File` is also folded back
+        // into Dimension so neither direction exposes the hidden state.
+        assert_eq!(WriteMode::Dimension.previous(), WriteMode::Thread);
+        assert_eq!(WriteMode::Thread.previous(), WriteMode::Dimension);
+        assert_eq!(
+            WriteMode::File.previous(),
+            WriteMode::Dimension,
+            "legacy File state folds back into the visible cycle",
+        );
+    }
+
+    #[test]
+    fn next_and_previous_never_emit_file() {
+        // Invariant lock: neither cycle direction is allowed to
+        // re-surface the hidden `File` mode for any starting state.
+        for start in [WriteMode::Dimension, WriteMode::Thread, WriteMode::File] {
+            assert_ne!(start.next(), WriteMode::File, "next({start:?}) leaked File");
+            assert_ne!(
+                start.previous(),
+                WriteMode::File,
+                "previous({start:?}) leaked File",
+            );
         }
     }
 

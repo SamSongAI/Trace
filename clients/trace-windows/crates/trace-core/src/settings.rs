@@ -352,6 +352,14 @@ impl AppSettings {
     ///
     /// Mirrors the constructor-time logic in Swift `AppSettings.init(...)`
     /// plus `normalizePanelShortcutCollisionsIfNeeded`.
+    ///
+    /// v0.2.3 adds a one-way migration for the hidden `WriteMode::File`
+    /// variant: any persisted `note_write_mode: "file"` is coerced to
+    /// `Dimension` on load so the runtime never lands in a mode the UI
+    /// no longer exposes. The `File` enum variant itself is kept for
+    /// JSON backward-compat (older builds that persisted `"file"` must
+    /// still deserialize without error); normalize is the single
+    /// chokepoint that erases the state.
     pub fn normalize(&mut self) {
         let migrated_order =
             migrate_section_titles_order(&self.section_titles, self.section_titles_order_version);
@@ -368,6 +376,17 @@ impl AppSettings {
         {
             self.append_note_key_code = DEFAULT_APPEND_NOTE_VKEY;
             self.append_note_modifiers = DEFAULT_APPEND_NOTE_MODIFIERS;
+        }
+
+        // One-way migration: Document / File mode is hidden in the
+        // Windows UI from v0.2.3 onwards. A legacy JSON that still
+        // carries `note_write_mode: "file"` (perhaps from an earlier
+        // install, a manual edit, or a roamed settings folder) would
+        // otherwise leave the user in a mode that has no visible tile
+        // and no way to cycle out. Coerce it to the default Dimension
+        // (Daily) mode so they land on a familiar screen.
+        if self.note_write_mode == WriteMode::File {
+            self.note_write_mode = WriteMode::Dimension;
         }
     }
 
@@ -1115,6 +1134,44 @@ mod tests {
         settings.normalize();
         assert_eq!(settings.append_note_key_code, 0x42);
         assert_eq!(settings.append_note_modifiers, 0x0003);
+    }
+
+    // -------------------------------------------------------------------
+    // 8b. Hidden-write-mode migration (Windows port: File is UI-hidden)
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn normalize_coerces_persisted_file_write_mode_to_dimension() {
+        // v0.2.3 Windows UX hides `WriteMode::File`. A JSON that still
+        // carries `note_write_mode: "file"` (from an older build or a
+        // hand-edited settings file) would otherwise leave the user in
+        // a state with no tile to switch away from. `normalize()` is
+        // the single chokepoint that coerces the hidden state back to
+        // the default visible mode.
+        let mut settings = AppSettings::default();
+        settings.note_write_mode = WriteMode::File;
+        settings.normalize();
+        assert_eq!(
+            settings.note_write_mode,
+            WriteMode::Dimension,
+            "persisted File mode must migrate to Dimension on normalize",
+        );
+    }
+
+    #[test]
+    fn normalize_leaves_visible_write_modes_alone() {
+        // The migration is one-way and must not touch the two
+        // user-facing modes. Any user who explicitly chose Dimension or
+        // Thread expects that choice to survive the next load.
+        for mode in [WriteMode::Dimension, WriteMode::Thread] {
+            let mut settings = AppSettings::default();
+            settings.note_write_mode = mode;
+            settings.normalize();
+            assert_eq!(
+                settings.note_write_mode, mode,
+                "normalize must preserve the user-facing mode {mode:?}",
+            );
+        }
     }
 
     // -------------------------------------------------------------------

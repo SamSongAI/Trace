@@ -13,7 +13,7 @@
 //! will swap in bitmap icons if the glyph coverage is insufficient on
 //! Windows defaults.
 
-use iced::widget::{button, container, row, text, Space};
+use iced::widget::{button, container, mouse_area, row, text, Space};
 use iced::{Length, Pixels};
 use trace_core::CapturePalette;
 
@@ -54,12 +54,30 @@ pub fn header<'a>(palette: CapturePalette, pinned: bool) -> iced::Element<'a, Me
     .spacing(8)
     .align_y(iced::Alignment::Center);
 
-    container(layout)
+    let chrome = container(layout)
         .padding([0, 16])
         .width(Length::Fill)
         .height(Length::Fixed(HEADER_HEIGHT))
         .align_y(iced::alignment::Vertical::Center)
-        .style(chrome_container_style(palette))
+        .style(chrome_container_style(palette));
+
+    // Wrap the whole header in a `mouse_area` so a left-press on empty
+    // chrome initiates the OS-level window drag loop. The Pin and
+    // Settings buttons inside `layout` capture their own press events
+    // first (iced propagates events child → parent and `mouse_area`
+    // short-circuits via `shell.is_event_captured()`), so clicking a
+    // button still fires its own `on_press` instead of starting a drag.
+    //
+    // Why this is needed: the capture panel is created with
+    // `decorations: false` — Windows gives it no native title bar for
+    // the user to grab, so without this wrapper there is literally no
+    // way to move the window (reported in v0.2.2 as
+    // "产品界面也无法拖动"). The 36 px header is the one conventional
+    // spot to put a drag handle, matching the Mac port's use of
+    // `NSWindow.isMovableByWindowBackground = true` over the header
+    // area.
+    mouse_area(chrome)
+        .on_press(Message::WindowDragRequested)
         .into()
 }
 

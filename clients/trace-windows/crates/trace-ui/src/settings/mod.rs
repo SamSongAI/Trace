@@ -1459,7 +1459,14 @@ fn storage_card<'a>(
 ) -> Element<'a, SettingsMessage> {
     let lang = state.language;
 
-    let modes = [WriteMode::Dimension, WriteMode::Thread, WriteMode::File];
+    // v0.2.3 Windows UX: only Daily (Dimension) + Thread are exposed.
+    // `WriteMode::File` (Document) is kept in `trace-core` for JSON
+    // backward-compat — `AppSettings::normalize` coerces any persisted
+    // File mode back to Dimension on load — but the settings card no
+    // longer lets the user switch to it. The tile row is therefore a
+    // fixed two-element array; the Document tile and its associated
+    // inbox vault row are dropped.
+    let modes = [WriteMode::Dimension, WriteMode::Thread];
     let tiles_row = row(modes.iter().map(|mode| {
         tiles::write_mode_tile(
             palette,
@@ -1513,15 +1520,14 @@ fn storage_card<'a>(
             ));
         }
         WriteMode::File => {
-            // Same caching contract as the Dimension vault row above.
-            body_rows.push(storage::inbox_vault_path_row(
-                palette,
-                lang,
-                &state.inbox_vault_path,
-                state.inbox_vault_path_issue,
-                SettingsMessage::InboxVaultPathChanged,
-                SettingsMessage::BrowseInboxVaultRequested,
-            ));
+            // Defensive no-op: v0.2.3 hides `WriteMode::File` from the
+            // Windows UI, and [`crate::AppSettings::normalize`] coerces
+            // any persisted File state back to Dimension on load, so
+            // this arm is practically unreachable. Match exhaustiveness
+            // forces the case to exist — we intentionally render
+            // nothing rather than surface the Document-mode Inbox
+            // vault row against a state the user can no longer
+            // configure.
         }
         WriteMode::Thread => {
             // No extra rows — thread configs live in their own card in later

@@ -178,6 +178,18 @@ pub enum Message {
     /// `iced::window::Event::Opened` translated to a domain message so
     /// [`CaptureApp`] can capture the window id for the close task.
     WindowOpened(window::Id),
+    /// Header mouse-press on a non-interactive region. Issues an
+    /// [`iced::window::drag`] task against [`CaptureApp::capture_window_id`]
+    /// so the OS takes over the drag loop (Windows: `DefWindowProc` with
+    /// `WM_NCLBUTTONDOWN`+`HTCAPTION`). Without a custom drag zone the
+    /// borderless capture panel (`decorations: false`) has no way for the
+    /// user to move it — v0.2.2 regression "产品界面也无法拖动".
+    ///
+    /// The header's pin and settings buttons capture their own press
+    /// events first, so the mouse_area wrapper only triggers when the
+    /// user clicks empty chrome (brand area, spacer). Silent no-op when
+    /// `capture_window_id` has not been recorded yet.
+    WindowDragRequested,
     /// New [`AppSettings`] snapshot broadcast from the settings window.
     ///
     /// Emitted by the daemon layer (`trace-app::update`) after every
@@ -610,8 +622,44 @@ pub fn update(state: &mut CaptureApp, message: Message) -> Task<Message> {
                 Task::done(Message::ClosePanel)
             }
         }
+        Message::WindowDragRequested => {
+            // Hand the window move loop to the OS. On Windows iced maps
+            // this through `DefWindowProc(WM_NCLBUTTONDOWN, HTCAPTION)`
+            // which correctly distinguishes click-vs-drag (a plain click
+            // doesn't actually move the window) and terminates on mouse
+            // release, so no follow-up message is needed.
+            if let Some(id) = state.capture_window_id {
+                window::drag(id)
+            } else {
+                // Pre-opened state — nothing to drag yet. Silent no-op
+                // matches the `ClosePanel` pattern for the same condition.
+                Task::none()
+            }
+        }
         Message::WindowOpened(id) => {
-            state.capture_window_id = Some(id);
+            // Idempotent: only record the FIRST window-open event. The
+            // daemon layer threads the capture panel's runtime id into
+            // this message via the `Task<Id>` returned by
+            // `iced::window::open(capture)` at startup — that is the one
+            // authoritative source.
+            //
+            // Guarding with `capture_window_id.is_none()` prevents a later
+            // open event (e.g. a settings window) from hijacking the
+            // capture id. Without the guard, clicking the gear button
+            // would overwrite `capture_window_id` with the settings id,
+            // and the very next `FocusLost → ClosePanel` would close the
+            // settings window instead of the capture panel — the v0.2.2
+            // "设置界面弹出就关闭" bug.
+            //
+            // The accompanying `window::open_events()` subscription has
+            // been removed (see `subscription` below) so in the current
+            // codebase this handler receives at most one event per
+            // app lifetime anyway; the guard is defence-in-depth in case a
+            // future refactor (tray bubble, second capture window) reopens
+            // this foot-gun.
+            if state.capture_window_id.is_none() {
+                state.capture_window_id = Some(id);
+            }
             Task::none()
         }
         Message::ReplaceSettings(new_settings) => {
@@ -690,7 +738,7 @@ pub fn theme(state: &CaptureApp) -> Theme {
 
 /// Aggregate subscription for the capture panel.
 ///
-/// Fans out four independent streams via [`Subscription::batch`]:
+/// Fans out three independent streams via [`Subscription::batch`]:
 ///
 /// 1. The toast auto-dismiss poller — only mounted while
 ///    [`CaptureApp::toast`] is `Some`, otherwise [`Subscription::none`].
@@ -705,13 +753,14 @@ pub fn theme(state: &CaptureApp) -> Theme {
 ///    `listen_with` requires a non-capturing function pointer, all context-
 ///    dependent decisions (e.g. honouring the `pinned` flag before closing)
 ///    are deferred into [`update`].
-/// 3. The window-open listener, which captures the primary [`window::Id`]
-///    so [`Message::ClosePanel`] can emit the correct close task.
-/// 4. The window-close listener, which feeds
+/// 3. The window-close listener, which feeds
 ///    [`Message::SettingsWindowClosed`]. Combined with the id-guarded
 ///    reset in [`update`], this closes the loop on the
 ///    [`Message::SettingsRequested`] guard so the settings window can be
 ///    re-opened after the user dismisses it via the window chrome.
+///
+/// Note: [`window::open_events`] is **not** subscribed — see the inline
+/// comment inside the function body for the v0.2.2 regression history.
 pub fn subscription(state: &CaptureApp) -> Subscription<Message> {
     // Poll at a short interval while a toast is live. Each tick compares
     // `Instant::now()` against `toast_expires_at`, so a mid-cycle
@@ -725,10 +774,25 @@ pub fn subscription(state: &CaptureApp) -> Subscription<Message> {
     };
 
     let events = iced_event::listen_with(decode_event);
-    let opens = window::open_events().map(Message::WindowOpened);
+    // Deliberately NOT subscribing to `window::open_events()` here.
+    //
+    // The subscription fires globally — every window in the daemon
+    // (capture + settings + any future tray bubble) triggers it, and
+    // `open_events()` carries only the `window::Id` payload with no
+    // indication of which window opened. In v0.2.2 this subscription
+    // fired a `Message::WindowOpened(settings_id)` as soon as the user
+    // clicked the gear button, which overwrote `capture_window_id` with
+    // the settings id and caused `FocusLost → ClosePanel` to immediately
+    // close the just-opened settings window.
+    //
+    // The capture panel's own runtime id is now threaded through the
+    // `Task<Id>` returned by `iced::window::open(capture)` at startup —
+    // see `trace-app::TraceApp::new`. That is the single authoritative
+    // source for `Message::WindowOpened`, and the handler additionally
+    // guards against double-assignment for defence in depth.
     let closes = window::close_events().map(Message::SettingsWindowClosed);
 
-    Subscription::batch(vec![toast, events, opens, closes])
+    Subscription::batch(vec![toast, events, closes])
 }
 
 /// `listen_with` callback. Must be a plain `fn` (no captures) — see
@@ -1337,6 +1401,84 @@ mod tests {
     }
 
     #[test]
+    fn window_drag_requested_before_capture_id_is_silent_no_op() {
+        // Guard: if the user somehow triggers a drag before the startup
+        // `Task<Id>` has resolved (iced's open is async), the handler
+        // must not panic and must not attempt to drag a non-existent
+        // window id. Same silent-no-op pattern as `ClosePanel` with
+        // `capture_window_id = None`.
+        let mut app = fresh_app();
+        assert!(app.capture_window_id.is_none());
+        apply(&mut app, Message::WindowDragRequested);
+        // No panic, no state change, no stored id spontaneously appears.
+        assert!(app.capture_window_id.is_none());
+    }
+
+    #[test]
+    fn window_drag_requested_after_capture_id_is_set_does_not_panic() {
+        // Positive path: once the capture panel's runtime id is known,
+        // `WindowDragRequested` produces a `window::drag` task. The
+        // iced test harness can't execute the task, but we can assert
+        // that constructing it doesn't panic and that the app state is
+        // otherwise untouched (the drag is pure side-effect).
+        let mut app = fresh_app();
+        let capture_id = window::Id::unique();
+        apply(&mut app, Message::WindowOpened(capture_id));
+        assert_eq!(app.capture_window_id, Some(capture_id));
+
+        let _task = update(&mut app, Message::WindowDragRequested);
+        // State must be unchanged — drag is purely an iced `Task` side
+        // effect, no shadow bookkeeping in the app.
+        assert_eq!(app.capture_window_id, Some(capture_id));
+    }
+
+    #[test]
+    fn window_opened_after_capture_id_is_recorded_must_not_overwrite_it() {
+        // Regression guard for v0.2.2 Windows bug "设置界面弹出就关闭":
+        //
+        // Before the fix, `Message::WindowOpened(id)` unconditionally
+        // assigned `capture_window_id = Some(id)`. Combined with a
+        // `window::open_events()` subscription that fires for EVERY window
+        // in the daemon (not just the capture panel), clicking the gear
+        // button produced this sequence:
+        //
+        //   1. `SettingsRequested` issues `window::open(settings)` →
+        //      settings_id allocated.
+        //   2. Runtime fires `window::open_events()` → subscription maps
+        //      it to `Message::WindowOpened(settings_id)`.
+        //   3. Handler **overwrites** `capture_window_id` with
+        //      `settings_id`.
+        //   4. Settings window takes focus → capture window fires
+        //      `Unfocused` → `FocusLost` → `ClosePanel` → closes
+        //      `capture_window_id` = `settings_id` → **settings window
+        //      disappears immediately after opening**.
+        //
+        // The handler must ignore subsequent opens once
+        // `capture_window_id` is already set. The daemon layer is the
+        // only authorised source for the initial id (via the `Task<Id>`
+        // returned by `iced::window::open(capture)` at startup); the
+        // subscription-level hook has been removed.
+        let mut app = fresh_app();
+        let capture_id = window::Id::unique();
+        let settings_id = window::Id::unique();
+        assert_ne!(capture_id, settings_id);
+
+        apply(&mut app, Message::WindowOpened(capture_id));
+        assert_eq!(app.capture_window_id, Some(capture_id));
+
+        // A subsequent WindowOpened (e.g. if the daemon-layer somehow
+        // re-emits one, or a future subscription reintroduces the foot-gun)
+        // must NOT hijack the capture id.
+        apply(&mut app, Message::WindowOpened(settings_id));
+        assert_eq!(
+            app.capture_window_id,
+            Some(capture_id),
+            "WindowOpened must be idempotent once capture_window_id is set — \
+             otherwise ClosePanel would close the wrong window",
+        );
+    }
+
+    #[test]
     fn settings_requested_after_close_reopens_window() {
         // End-to-end regression guard: open the settings window, close it,
         // then request it again. The second `SettingsRequested` must take
@@ -1522,15 +1664,26 @@ mod tests {
     // forwarding, and the editor-clears-on-success contract.
 
     #[test]
-    fn cycle_mode_forward_walks_dimension_thread_file_dimension() {
+    fn cycle_mode_forward_walks_dimension_thread_only() {
+        // v0.2.3 Windows UX: `WriteMode::File` (Document mode) is hidden
+        // from the user-facing cycle, so `CycleModeForward` walks a
+        // two-stop loop Daily ↔ Thread. The enum still carries `File` for
+        // JSON backwards compatibility, but neither `next()` nor any UI
+        // action may surface it again. See `WriteMode::next` and
+        // `AppSettings::normalize` for the other two defense layers.
         let mut app = fresh_app();
         assert_eq!(app.write_mode, WriteMode::Dimension);
         apply(&mut app, Message::CycleModeForward);
         assert_eq!(app.write_mode, WriteMode::Thread);
         apply(&mut app, Message::CycleModeForward);
-        assert_eq!(app.write_mode, WriteMode::File);
+        assert_eq!(
+            app.write_mode,
+            WriteMode::Dimension,
+            "cycle must skip hidden File mode and loop back to Dimension",
+        );
+        // Extra lap to prove the loop is stable at two stops.
         apply(&mut app, Message::CycleModeForward);
-        assert_eq!(app.write_mode, WriteMode::Dimension);
+        assert_eq!(app.write_mode, WriteMode::Thread);
     }
 
     #[test]
