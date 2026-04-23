@@ -33,14 +33,27 @@
 
     <!--
       BootstrapperApplication: WixStandardBootstrapperApplication is the
-      zero-code BA ship-built with Bal. HyperlinkLicense variant gives us
-      a Welcome page with inline EULA link, plus a progress page and an
-      exit page — no WPF, no C#, just XML config.
+      zero-code BA ship-built with Bal. rtfLicense theme inlines the full
+      EULA on the Welcome page with an "I Agree" checkbox gating the
+      install button — same ceremony the MSI's WixUI_InstallDir used to
+      run, now surfaced once at the Bundle level because the inner MSI
+      UI is suppressed by default in Burn v4.
 
-      LicenseFile is rendered via the same RTF we already generate for
-      the MSI EULA, so the bundle EULA and MSI EULA are one document.
-      LogoFile reuses the MSI's ICO so the Burn shell matches the ARP
-      icon and the MSI's WixUI_InstallDir title bar.
+      Why not hyperlinkLicense: that theme's wixlib unconditionally
+      references the bind variable `!(wix.WixStdbaLicenseUrl)` inside
+      the stdba theme XML (wixstdba.wxs:49 in 4.0.5). Even when we set
+      LicenseFile and leave LicenseUrl unset, bind-time expansion still
+      requires the variable, producing `error WIX0197: The bind variable
+      !(wix.WixStdbaLicenseUrl) is unknown`. The upstream fix (variable
+      made optional when LicenseFile is present) ships in WiX v5 /
+      4.0.6+; staying on 4.0.5 means the only working variants for a
+      local RTF are rtfLicense and rtfLargeLicense. rtfLicense is the
+      smaller dialog, closer to the install-wizard feel we had before.
+
+      LicenseFile points at the same RTF the MSI already renders, so the
+      Bundle EULA and MSI EULA are one document. LogoFile reuses the
+      MSI's ICO so the Burn shell matches the ARP icon and the MSI's
+      WixUI_InstallDir title bar.
 
       SuppressOptionsUI: we do not offer a "change install directory"
       button. Users who want to customise paths run the MSI directly
@@ -58,7 +71,7 @@
     -->
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication
-          Theme="hyperlinkLicense"
+          Theme="rtfLicense"
           LicenseFile="$(AssetsDir)\LICENSE.rtf"
           LogoFile="$(AssetsDir)\trace.ico"
           SuppressOptionsUI="yes"
