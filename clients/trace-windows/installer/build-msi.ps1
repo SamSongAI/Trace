@@ -262,19 +262,25 @@ Invoke-TrustedSign -Path $MsiPath
 $size = (Get-Item $MsiPath).Length
 Write-Information ("produced {0} ({1:N0} bytes)" -f $MsiPath, $size)
 
-# --- wix build bundle (Trace-Setup-<ver>-<arch>.exe) -----------------------
+# --- wix build bundle (Trace-<ver>-<arch>.exe) -----------------------------
 # WiX Burn Bundle wraps the MSI into a standalone Setup.exe. Users who
-# double-click Trace-Setup-*.exe get the same experience as clicking an
-# MSI (WixStandardBootstrapperApplication/HyperlinkLicense renders the
+# double-click Trace-<ver>-<arch>.exe get the same experience as clicking
+# an MSI (WixStandardBootstrapperApplication/HyperlinkLicense renders the
 # same EULA -> progress -> done flow), except the file extension says
 # ".exe" — which matters because ".msi is also a real installer" is
 # non-obvious to non-technical Windows users.
+#
+# Filename intentionally omits a "-Setup" / "-Installer" suffix: per
+# Phase 17, the bare `Trace-<ver>-<arch>.exe` reads cleanly to both
+# English and Chinese users (who tend to parse "Setup" as "设置文件" /
+# settings-file rather than "installer"). Obsidian / Notion follow the
+# same convention on their Windows downloads.
 #
 # The Bundle references the already-built MSI as an absolute path via
 # the `MsiPath` preprocessor variable. Keeping this indirection (not
 # hard-coding the path in Bundle.wxs) lets us change the $MsiName
 # layout in the future without touching WiX sources.
-$SetupName = "Trace-Setup-$Version-$Arch.exe"
+$SetupName = "Trace-$Version-$Arch.exe"
 $SetupPath = Join-Path $OutDir $SetupName
 
 Write-Information "wix build Bundle -> $SetupPath"
@@ -338,61 +344,15 @@ Invoke-TrustedSign -Path $SetupPath
 $setupSize = (Get-Item $SetupPath).Length
 Write-Information ("produced {0} ({1:N0} bytes)" -f $SetupPath, $setupSize)
 
-# --- portable zip ----------------------------------------------------------
-# Alongside the MSI we ship a "portable" zip: trace-app.exe plus the
-# upstream LICENSE, nothing else. Use case is users who cannot or will
-# not run an installer (IT-locked boxes, forensic sandboxes, side-by-side
-# version tests). The exe is the same signed binary WiX embedded into
-# the MSI, so Smart App Control and Defender see a consistent signature
-# across both distribution formats.
-#
-# Staging dir: Compress-Archive preserves relative paths, so without a
-# flat staging dir the zip would contain `target\<triple>\release\trace-app.exe`
-# instead of just `trace-app.exe`. Copy into a fresh temp dir first, then
-# zip its contents.
-#
-# Compress-Archive ships with pwsh 7 on every platform, so both the CI
-# windows-latest runner and a local macOS dry-run exercise the same
-# packaging path (the mac run can't sign, but packaging still runs).
-#
-# Three directory hops to reach the repo root from $InstallerRoot:
-#   installer/ -> trace-windows/ -> clients/ -> <repo root>
-# $WorkspaceRoot already sits at clients/trace-windows/, so two more
-# Split-Path -Parent calls land us at the repo root where LICENSE lives.
-$RepoRoot = Split-Path -Parent (Split-Path -Parent $WorkspaceRoot)
-$LicensePath = Join-Path $RepoRoot 'LICENSE'
-if (-not (Test-Path $LicensePath)) {
-    throw "portable zip: LICENSE missing at $LicensePath"
-}
-
-$ZipName = "Trace-$Version-$Arch-portable.zip"
-$ZipPath = Join-Path $OutDir $ZipName
-$Staging = Join-Path ([System.IO.Path]::GetTempPath()) "trace-portable-$([guid]::NewGuid())"
-$null = New-Item -ItemType Directory -Path $Staging -Force
-try {
-    Copy-Item -Path $BinPath -Destination $Staging -Force
-    Copy-Item -Path $LicensePath -Destination $Staging -Force
-    if (Test-Path $ZipPath) { Remove-Item -Path $ZipPath -Force }
-    Compress-Archive `
-        -Path (Join-Path $Staging '*') `
-        -DestinationPath $ZipPath `
-        -CompressionLevel Optimal
-} finally {
-    Remove-Item -Path $Staging -Recurse -Force -ErrorAction SilentlyContinue
-}
-
-if (-not (Test-Path $ZipPath)) {
-    throw "Compress-Archive claimed success but $ZipPath is missing"
-}
-$zipSize = (Get-Item $ZipPath).Length
-Write-Information ("produced {0} ({1:N0} bytes)" -f $ZipPath, $zipSize)
-
-# Emit artifact paths on stdout, one per line, so CI can capture them:
+# Emit artifact paths on stdout, one per line, so CI / local callers can
+# capture them:
 #   $lines = pwsh build-msi.ps1 -Arch x64
+#   $setup = $lines | Where-Object { $_ -like '*.exe' }
 #   $msi   = $lines | Where-Object { $_ -like '*.msi' }
-#   $zip   = $lines | Where-Object { $_ -like '*-portable.zip' }
-#   $setup = $lines | Where-Object { $_ -like 'Trace-Setup-*.exe' }
-# Keep MSI first for back-compat with callers that only grab $lines[0].
-Write-Host $MsiPath
-Write-Host $ZipPath
+#
+# Setup.exe is the sole release artifact (Phase 17), so it goes first.
+# MSI stays on line two as a convenience for local signtool-verify runs;
+# the release workflow ignores stdout and globs `Trace-*-<arch>.exe` in
+# installer/out/ directly.
 Write-Host $SetupPath
+Write-Host $MsiPath
