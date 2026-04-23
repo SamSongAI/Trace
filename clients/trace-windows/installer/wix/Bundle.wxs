@@ -8,7 +8,7 @@
       -d AssetsDir=..\assets ^
       -d MsiPath=..\out\Trace-0.1.0-x64.msi ^
       -ext WixToolset.Bal.wixext ^
-      -o ..\out\Trace-Setup-0.1.0-x64.exe Bundle.wxs
+      -o ..\out\Trace-0.1.0-x64.exe Bundle.wxs
 
   ===========================================================================
   UpgradeCode is FIXED for the lifetime of this Bundle, and DISTINCT from
