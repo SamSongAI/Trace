@@ -33,6 +33,35 @@
 //! Platform-specific wiring (tray icon, global hotkeys, Win32 topmost bit)
 //! lands in later phases; Phase 12 only needs the multi-window shell.
 
+// Suppress the default console window on Windows release builds. Rust
+// binaries default to the console subsystem (PE subsystem = 3), so a
+// freshly-installed `trace-app.exe` launched from Explorer or the Start
+// menu pops a blank terminal alongside the iced window. End users read
+// that terminal as "this app is just a console tool, there's no product
+// here" — reported in v0.2.0 as "打开后怎么是个终端啊？！没有任何产品啊".
+//
+// The canonical Rust idiom (see <https://doc.rust-lang.org/reference/
+// runtime.html#the-windows_subsystem-attribute>) keeps a console on
+// debug builds so `cargo run` from a Windows dev machine still shows
+// `tracing::warn!` / `tracing::debug!` output, and flips to the
+// windows subsystem (PE subsystem = 2) only for release so the
+// shipped installer behaves like any other native GUI app.
+//
+// Side effect of the release flip: stdout/stderr are not attached to
+// a console — `tracing_subscriber::fmt()` writes go nowhere unless the
+// user launches from `cmd.exe` and the app calls `AttachConsole` (we
+// don't, yet). The existing `try_init()` + no-op-on-failure comment
+// in `main` is already tolerant of this case; a proper file sink is
+// deferred to the file-logging phase.
+//
+// `cfg_attr(..., target_os = "windows", ...)` keeps the attribute a
+// compile-time no-op on macOS/Linux dev hosts so this crate still
+// `cargo check`s cleanly across the cross-platform workspace.
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
