@@ -262,6 +262,82 @@ Invoke-TrustedSign -Path $MsiPath
 $size = (Get-Item $MsiPath).Length
 Write-Information ("produced {0} ({1:N0} bytes)" -f $MsiPath, $size)
 
+# --- wix build bundle (Trace-Setup-<ver>-<arch>.exe) -----------------------
+# WiX Burn Bundle wraps the MSI into a standalone Setup.exe. Users who
+# double-click Trace-Setup-*.exe get the same experience as clicking an
+# MSI (WixStandardBootstrapperApplication/HyperlinkLicense renders the
+# same EULA -> progress -> done flow), except the file extension says
+# ".exe" — which matters because ".msi is also a real installer" is
+# non-obvious to non-technical Windows users.
+#
+# The Bundle references the already-built MSI as an absolute path via
+# the `MsiPath` preprocessor variable. Keeping this indirection (not
+# hard-coding the path in Bundle.wxs) lets us change the $MsiName
+# layout in the future without touching WiX sources.
+$SetupName = "Trace-Setup-$Version-$Arch.exe"
+$SetupPath = Join-Path $OutDir $SetupName
+
+Write-Information "wix build -> $SetupPath"
+Push-Location $WixDir
+try {
+    wix build `
+        -arch $Arch `
+        -d "Version=$Version" `
+        -d "AssetsDir=$AssetsDir" `
+        -d "MsiPath=$MsiPath" `
+        -ext WixToolset.Bal.wixext `
+        -o $SetupPath `
+        Bundle.wxs
+    if ($LASTEXITCODE -ne 0) { throw "wix build Bundle.wxs failed ($LASTEXITCODE)" }
+} finally {
+    Pop-Location
+}
+
+if (-not (Test-Path $SetupPath)) {
+    throw "wix build claimed success but $SetupPath is missing"
+}
+
+# --- sign Burn engine + Setup.exe (post-Bundle) ----------------------------
+# WiX Burn bootstrappers are two parts: an outer Setup.exe shell and an
+# inner "engine" PE that does the real orchestration. signtool can sign
+# the outer shell directly, but the inner engine needs the Burn-standard
+# detach -> sign -> reattach dance or else SmartScreen / UAC will see
+# half-signed output (outer signed, inner naked).
+#
+# `wix burn detach` extracts the unsigned engine.exe next to Setup.exe,
+# we sign it with the same ATS function used for trace-app.exe and the
+# MSI, then `wix burn reattach` splices the signed engine back into
+# Setup.exe. Finally signtool runs once more to sign the outer shell.
+#
+# If ATS env vars are missing (every local build, every PR build),
+# Invoke-TrustedSign skips both calls — engine and shell stay unsigned
+# but the triple still produces a functional (unsigned) Setup.exe, which
+# local devs can double-click to exercise the Burn UX.
+$EnginePath = Join-Path $OutDir "engine-$Version-$Arch.exe"
+if (Test-Path $EnginePath) { Remove-Item -Path $EnginePath -Force }
+
+Write-Information "wix burn detach -> $EnginePath"
+wix burn detach $SetupPath -engine $EnginePath
+if ($LASTEXITCODE -ne 0) { throw "wix burn detach failed ($LASTEXITCODE)" }
+if (-not (Test-Path $EnginePath)) {
+    throw "wix burn detach claimed success but $EnginePath is missing"
+}
+
+Invoke-TrustedSign -Path $EnginePath
+
+Write-Information "wix burn reattach $SetupPath"
+wix burn reattach $SetupPath -engine $EnginePath -o $SetupPath
+if ($LASTEXITCODE -ne 0) { throw "wix burn reattach failed ($LASTEXITCODE)" }
+
+# Detached engine is disposable once reattach succeeds; delete it so it
+# never leaks into the upload-artifact glob as a pseudo-release file.
+Remove-Item -Path $EnginePath -Force -ErrorAction SilentlyContinue
+
+Invoke-TrustedSign -Path $SetupPath
+
+$setupSize = (Get-Item $SetupPath).Length
+Write-Information ("produced {0} ({1:N0} bytes)" -f $SetupPath, $setupSize)
+
 # --- portable zip ----------------------------------------------------------
 # Alongside the MSI we ship a "portable" zip: trace-app.exe plus the
 # upstream LICENSE, nothing else. Use case is users who cannot or will
@@ -314,7 +390,9 @@ Write-Information ("produced {0} ({1:N0} bytes)" -f $ZipPath, $zipSize)
 # Emit artifact paths on stdout, one per line, so CI can capture them:
 #   $lines = pwsh build-msi.ps1 -Arch x64
 #   $msi   = $lines | Where-Object { $_ -like '*.msi' }
-#   $zip   = $lines | Where-Object { $_ -like '*.zip' }
-# Keep MSI first for back-compat with any caller that only grabs $lines[0].
+#   $zip   = $lines | Where-Object { $_ -like '*-portable.zip' }
+#   $setup = $lines | Where-Object { $_ -like 'Trace-Setup-*.exe' }
+# Keep MSI first for back-compat with callers that only grab $lines[0].
 Write-Host $MsiPath
 Write-Host $ZipPath
+Write-Host $SetupPath
