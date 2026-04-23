@@ -98,7 +98,11 @@ Trace 写入本地 `.md` 文件，天然适配 Obsidian。关键是让 Trace 的
 
 ## 5. 下载安装
 
-从 [GitHub Releases](https://github.com/SamSongAI/Trace/releases/latest) 下载最新的 `Trace.dmg`。
+所有平台的安装包都在 [GitHub Releases](https://github.com/SamSongAI/Trace/releases/latest)。
+
+### macOS
+
+下载 `Trace.dmg`。
 
 1. 打开 DMG 后，你会看到 `Trace.app` 和 `Applications` 图标，把 `Trace.app` 直接拖到 `Applications`
 2. 首次打开时，macOS 可能提示"无法验证开发者"。解决方法：
@@ -107,6 +111,19 @@ Trace 写入本地 `.md` 文件，天然适配 Obsidian。关键是让 Trace 的
 3. 点击右上角 ⚙ 进入设置，配置笔记库路径
 
 系统要求：macOS 13+。
+
+### Windows
+
+按机器架构选对应安装器：
+
+- **Intel / AMD 桌面机**（绝大多数用户）：`Trace-0.2.0-x64.exe`
+- **ARM 笔记本**（Surface Pro X 等）：`Trace-0.2.0-arm64.exe`
+
+1. 双击安装器。Windows SmartScreen 会弹蓝色警告「Windows 已保护你的电脑」——这是因为当前版本未代码签名。点击「更多信息」→「仍要运行」即可继续（后续计划通过 SignPath Foundation 提供签名版本）
+2. 在引导器中同意许可协议，点击 Install，安装器会写入 `C:\Program Files\Trace\` 并弹一次 UAC 请求管理员权限
+3. 安装完成后，开始菜单和桌面都会有 Trace 快捷方式；首次运行后在设置里配置笔记库路径
+
+系统要求：Windows 10 或更新版本。
 
 ## 6. 起源
 

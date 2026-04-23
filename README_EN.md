@@ -94,7 +94,11 @@ If you use Thread mode, you can also point thread files at any Markdown path ins
 
 ## 5. Download
 
-Get the latest `Trace.dmg` from [GitHub Releases](https://github.com/SamSongAI/Trace/releases/latest).
+All platform installers live on [GitHub Releases](https://github.com/SamSongAI/Trace/releases/latest).
+
+### macOS
+
+Grab `Trace.dmg`.
 
 1. Open the DMG. You'll see `Trace.app` and an `Applications` shortcut. Drag `Trace.app` onto `Applications`
 2. On first launch, macOS may show "unverified developer" warning. To fix:
@@ -103,6 +107,19 @@ Get the latest `Trace.dmg` from [GitHub Releases](https://github.com/SamSongAI/T
 3. Click ⚙ in the top-right corner to configure your vault path
 
 Requires macOS 13+.
+
+### Windows
+
+Pick the installer for your CPU architecture:
+
+- **Intel / AMD desktop** (most users): `Trace-0.2.0-x64.exe`
+- **ARM laptop** (e.g. Surface Pro X): `Trace-0.2.0-arm64.exe`
+
+1. Double-click the installer. Windows SmartScreen will show a blue "Windows protected your PC" warning — the current build is unsigned. Click "More info" → "Run anyway" to proceed (signed builds via SignPath Foundation are planned)
+2. Accept the license in the bootstrapper, click Install. The installer writes to `C:\Program Files\Trace\` and prompts once for UAC
+3. Start Menu and Desktop shortcuts are created automatically. On first run, open Settings to configure your vault path
+
+Requires Windows 10 or newer.
 
 ## 6. Origin
 
