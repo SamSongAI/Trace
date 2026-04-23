@@ -2,8 +2,6 @@
 
 Trace 原生 macOS 应用的 Windows 端实现，使用 Rust + [iced](https://github.com/iced-rs/iced) + [windows-rs](https://github.com/microsoft/windows-rs) 构建。当前仓库目录处于 Phase 0（脚手架）阶段，只保证可以编译与跑 core 层测试。
 
-> 旧版 Rust MVP 仍保留在 `clients/trace-win/`，**不要与本目录混用**。
-
 ## Workspace 结构
 
 ```
