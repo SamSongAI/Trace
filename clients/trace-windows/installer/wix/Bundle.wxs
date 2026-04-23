@@ -81,11 +81,14 @@
       Cache="keep" holds the MSI in %ProgramData%\Package Cache\ after
       install so the Bundle's uninstall path does not need to re-fetch.
 
-      DisplayInternalUI="no" silences the MSI's WixUI_InstallDir chrome
-      while the Bundle runs — the Burn progress page is the sole UI.
-
       Vital="yes" propagates MSI install failure up to the Bundle so
       the Burn UI reflects it (default, stated for clarity).
+
+      The MSI's WixUI_InstallDir chrome stays silent by default in
+      WiX v4 Burn — the v3 attribute `DisplayInternalUI="no"` was
+      removed in v4 (it triggers `WIX0004: unexpected attribute`) and
+      the suppress-internal-UI behavior became the implicit default,
+      which is what we want: the Burn progress page is the sole UI.
     -->
     <Chain>
       <MsiPackage
@@ -94,7 +97,6 @@
           Visible="no"
           Cache="keep"
           Compressed="yes"
-          DisplayInternalUI="no"
           Vital="yes" />
     </Chain>
   </Bundle>
