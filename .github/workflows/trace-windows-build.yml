@@ -90,14 +90,20 @@ jobs:
       - name: Build trace-core, trace-platform, trace-ui (release)
         run: cargo build --release -p trace-core -p trace-platform -p trace-ui
 
-  # Produce a full MSI artifact from the release binary. Depends on
+  # Produce the full installer artifact from the release binary. Depends on
   # windows-release-build as a smoke gate - if the workspace does not even
   # compile in release mode there is no point spending time on WiX. The job
   # itself still runs its own cargo build because `build-msi.ps1` targets
   # trace-app specifically and x86_64-pc-windows-msvc explicitly, which the
   # upstream job intentionally excludes.
+  #
+  # Phase 17: `build-msi.ps1` now produces both the MSI (intermediate) and
+  # the WiX Burn Bundle `Trace-<ver>-x64.exe` (release artifact). This CI
+  # job exercises the full pipeline on every push/PR, but only uploads the
+  # MSI as a debug artifact; the signed Bundle is produced exclusively by
+  # trace-windows-release.yml on tag push.
   build-msi:
-    name: build MSI (x64)
+    name: build installer (x64)
     runs-on: windows-latest
     needs: windows-release-build
     steps:
@@ -127,6 +133,14 @@ jobs:
         # `wix build -ext WixToolset.UI.wixext` can find it.
         run: wix extension add -g WixToolset.UI.wixext/4.0.5
 
+      - name: Add WiX Bal extension
+        # Bundle.wxs references bal:WixStandardBootstrapperApplication
+        # (Phase 16), so the Bal extension must be registered before
+        # build-msi.ps1 invokes `wix build Bundle.wxs`. Without this step
+        # the Bundle stage fails with "Unknown element
+        # bal:WixStandardBootstrapperApplication".
+        run: wix extension add -g WixToolset.Bal.wixext/4.0.5
+
       - name: Setup Python (for asset regeneration)
         uses: actions/setup-python@v5
         with:
@@ -135,15 +149,21 @@ jobs:
       - name: Install Pillow
         run: python -m pip install Pillow==10.*
 
-      - name: Build MSI
+      - name: Build installer
         shell: pwsh
         # build-msi.ps1 regenerates trace.ico + LICENSE.rtf, runs
         # `cargo build -p trace-app --release --target x86_64-pc-windows-msvc`,
-        # then invokes `wix build`. All working-directory handling is internal
-        # to the script via $PSScriptRoot.
+        # then invokes `wix build` for both Product.wxs (MSI) and Bundle.wxs
+        # (the Burn `.exe`). All working-directory handling is internal to
+        # the script via $PSScriptRoot. No signing happens here (signing is
+        # release-only, env vars absent = skip path).
         run: ./installer/build-msi.ps1
 
       - name: Upload MSI artifact
+        # Debug artifact: we keep the MSI (not the Bundle) on main/PR so
+        # reviewers can poke at the raw Windows Installer package without
+        # a Burn wrapper getting in the way. The signed Bundle ships from
+        # trace-windows-release.yml on tag push.
         uses: actions/upload-artifact@v4
         with:
           name: trace-msi-x64
