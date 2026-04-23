@@ -260,6 +260,45 @@ impl TraceApp {
         let capture = CaptureApp::new(theme, sections, threads, Arc::clone(&shared_settings))
             .with_clipboard_probe(clipboard_probe);
 
+        // Open the capture panel on startup.
+        //
+        // Why this is needed: `iced::daemon` is a multi-window runtime
+        // that does NOT open any window on its own — it assumes the app
+        // spawns windows on demand, e.g. from a tray-icon click or a
+        // global hotkey. Neither has shipped yet (tray lands in Phase
+        // 14, global hotkey in Phase 15). The only `iced::window::open`
+        // call anywhere in the workspace (see
+        // `trace_ui::app::update` under `Message::SettingsRequested`)
+        // is reached only after the capture panel is already visible
+        // and the user clicks the gear button — a chicken-and-egg
+        // dead-end if the capture panel never opens first.
+        //
+        // v0.2.0 masked this with a console window side-effect: the
+        // binary shipped as PE subsystem "console" (no
+        // `windows_subsystem = "windows"` attribute), so double-clicking
+        // the installed exe at least popped a terminal. With that
+        // attribute now suppressing the console, the app would start
+        // completely invisibly — reported in v0.2.0 as
+        // "打开后怎么是个终端啊？！没有任何产品啊" and then amplified
+        // by the console fix into "double-clicked and nothing happened".
+        //
+        // Eagerly opening the capture panel matches what a user expects
+        // from any native Windows GUI app: double-click the installed
+        // exe, a window appears. The `window::open` task threaded into
+        // the returned `Task<Message>` is what actually tells iced to
+        // create the window — the synchronous `window::Id` return is
+        // reserved for cases where the caller wants to pre-register the
+        // id (e.g. a re-entrant settings click); here the
+        // `window::open_events()` subscription inside
+        // `capture_app::subscription` picks up the id as
+        // `Message::WindowOpened` so the rest of the state machine stays
+        // oblivious to the bootstrap path.
+        let (_initial_capture_id, open_capture_task) =
+            iced::window::open(trace_ui::app::window_settings());
+        let initial_task = open_capture_task
+            .map(capture_app::Message::WindowOpened)
+            .map(Message::Capture);
+
         (
             Self {
                 capture,
@@ -268,7 +307,7 @@ impl TraceApp {
                 theme,
                 settings_save_path,
             },
-            Task::none(),
+            initial_task,
         )
     }
 }

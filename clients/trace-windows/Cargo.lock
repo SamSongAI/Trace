@@ -3513,7 +3513,7 @@ dependencies = [
 
 [[package]]
 name = "trace-app"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "arboard",
  "iced",
@@ -3526,7 +3526,7 @@ dependencies = [
 
 [[package]]
 name = "trace-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "serde",
@@ -3538,7 +3538,7 @@ dependencies = [
 
 [[package]]
 name = "trace-platform"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "arboard",
  "png 0.17.16",
@@ -3551,7 +3551,7 @@ dependencies = [
 
 [[package]]
 name = "trace-ui"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "iced",
