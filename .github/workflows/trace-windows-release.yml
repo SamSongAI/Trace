@@ -67,6 +67,13 @@ jobs:
       - name: Add WiX UI extension
         run: wix extension add -g WixToolset.UI.wixext/4.0.5
 
+      - name: Add WiX Bal extension
+        # Bundle.wxs references bal:WixStandardBootstrapperApplication, so
+        # the WixToolset.Bal.wixext package must be globally registered
+        # with the `wix` tool before build-msi.ps1 invokes
+        # `wix build Bundle.wxs`.
+        run: wix extension add -g WixToolset.Bal.wixext/4.0.5
+
       - name: Setup Python (for asset regeneration)
         uses: actions/setup-python@v5
         with:
@@ -113,7 +120,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: trace-release-${{ matrix.arch }}
+          # Primary artifact is the WiX Burn Bundle (Setup.exe). MSI + ZIP
+          # stay as secondary formats. Glob is deliberately narrow —
+          # `Trace-Setup-*-<arch>.exe` — so any leftover engine-*.exe from
+          # a failed reattach would never be mistaken for a release file.
           path: |
+            clients/trace-windows/installer/out/Trace-Setup-*-${{ matrix.arch }}.exe
             clients/trace-windows/installer/out/Trace-*-${{ matrix.arch }}.msi
             clients/trace-windows/installer/out/Trace-*-${{ matrix.arch }}-portable.zip
           if-no-files-found: error
