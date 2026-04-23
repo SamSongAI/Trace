@@ -705,11 +705,11 @@ mod tests {
     #[test]
     fn l10n_language_system_default_covers_three_langs() {
         assert_eq!(L10n::language_system_default(Language::Zh), "系统默认");
+        assert_eq!(L10n::language_system_default(Language::Ja), "システム既定");
         assert_eq!(
-            L10n::language_system_default(Language::Ja),
-            "システム既定"
+            L10n::language_system_default(Language::En),
+            "System default"
         );
-        assert_eq!(L10n::language_system_default(Language::En), "System default");
         // SystemDefault sentinel falls back to English, matching the rest of
         // the L10n table (see `pick` in this file).
         assert_eq!(

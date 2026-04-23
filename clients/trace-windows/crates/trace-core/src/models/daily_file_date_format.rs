@@ -128,10 +128,19 @@ mod tests {
         // reorder the picker and break a stored `lastUsedSectionIndex`-like
         // remembered choice on any future backed-by-index binding.
         assert_eq!(DailyFileDateFormat::ALL.len(), 5);
-        assert_eq!(DailyFileDateFormat::ALL[0], DailyFileDateFormat::ChineseFull);
-        assert_eq!(DailyFileDateFormat::ALL[1], DailyFileDateFormat::ChineseShort);
+        assert_eq!(
+            DailyFileDateFormat::ALL[0],
+            DailyFileDateFormat::ChineseFull
+        );
+        assert_eq!(
+            DailyFileDateFormat::ALL[1],
+            DailyFileDateFormat::ChineseShort
+        );
         assert_eq!(DailyFileDateFormat::ALL[2], DailyFileDateFormat::IsoDate);
-        assert_eq!(DailyFileDateFormat::ALL[3], DailyFileDateFormat::IsoDateTime);
+        assert_eq!(
+            DailyFileDateFormat::ALL[3],
+            DailyFileDateFormat::IsoDateTime
+        );
         assert_eq!(DailyFileDateFormat::ALL[4], DailyFileDateFormat::SlashDate);
     }
 
@@ -139,10 +148,16 @@ mod tests {
     fn raw_value_matches_mac_icu_strings() {
         // Byte-for-byte parity with the Mac `rawValue` — the persisted JSON
         // travels between Windows and Mac unmodified.
-        assert_eq!(DailyFileDateFormat::ChineseFull.raw_value(), "yyyy M月d日 EEEE");
+        assert_eq!(
+            DailyFileDateFormat::ChineseFull.raw_value(),
+            "yyyy M月d日 EEEE"
+        );
         assert_eq!(DailyFileDateFormat::ChineseShort.raw_value(), "yyyy M月d日");
         assert_eq!(DailyFileDateFormat::IsoDate.raw_value(), "yyyy-MM-dd");
-        assert_eq!(DailyFileDateFormat::IsoDateTime.raw_value(), "yyyy-MM-dd EEEE");
+        assert_eq!(
+            DailyFileDateFormat::IsoDateTime.raw_value(),
+            "yyyy-MM-dd EEEE"
+        );
         assert_eq!(DailyFileDateFormat::SlashDate.raw_value(), "yyyy/MM/dd");
     }
 
@@ -176,10 +191,7 @@ mod tests {
     fn title_contains_raw_value_and_arrow_separator() {
         for preset in DailyFileDateFormat::ALL {
             let title = preset.title();
-            assert!(
-                !title.is_empty(),
-                "{preset:?} title must not be empty"
-            );
+            assert!(!title.is_empty(), "{preset:?} title must not be empty");
             assert!(
                 title.contains("  →  "),
                 "{preset:?} title missing the arrow separator: {title}"

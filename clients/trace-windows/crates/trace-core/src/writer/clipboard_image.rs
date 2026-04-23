@@ -151,10 +151,7 @@ impl<S: ClipboardImageWriterSettings> ClipboardImageWriter<S> {
             .parent()
             .expect("plan.target_path always has a parent (vault-rooted)");
         std::fs::create_dir_all(parent).map_err(|e| {
-            TraceError::AtomicWriteFailed(format!(
-                "create dir {} failed: {e}",
-                parent.display()
-            ))
+            TraceError::AtomicWriteFailed(format!("create dir {} failed: {e}", parent.display()))
         })?;
 
         crate::writer::atomic::write_atomic(&plan.target_path, png_bytes)?;

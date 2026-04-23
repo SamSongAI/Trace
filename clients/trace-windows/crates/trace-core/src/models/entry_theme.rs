@@ -112,7 +112,11 @@ mod tests {
         for lang in [Language::Zh, Language::En, Language::Ja] {
             let titles: Vec<&'static str> = EntryTheme::ALL.iter().map(|t| t.title(lang)).collect();
             for (i, a) in titles.iter().enumerate() {
-                assert!(!a.is_empty(), "variant {:?} title empty", EntryTheme::ALL[i]);
+                assert!(
+                    !a.is_empty(),
+                    "variant {:?} title empty",
+                    EntryTheme::ALL[i]
+                );
                 for b in &titles[i + 1..] {
                     assert_ne!(a, b, "duplicate title under {lang:?}: {a}");
                 }

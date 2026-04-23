@@ -1332,7 +1332,10 @@ mod tests {
         assert_eq!(loaded.vault_path, default.vault_path);
         assert_eq!(loaded.inbox_vault_path, default.inbox_vault_path);
         assert_eq!(loaded.daily_folder_name, default.daily_folder_name);
-        assert_eq!(loaded.daily_file_date_format, default.daily_file_date_format);
+        assert_eq!(
+            loaded.daily_file_date_format,
+            default.daily_file_date_format
+        );
         assert_eq!(
             loaded.daily_entry_theme_preset,
             default.daily_entry_theme_preset
