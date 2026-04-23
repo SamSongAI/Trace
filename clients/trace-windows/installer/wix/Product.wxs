@@ -25,6 +25,16 @@
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <!--
+    Codepage="65001" = UTF-8. Required because the strings below
+    (DowngradeErrorMessage, Shortcut/@Description, SummaryInformation,
+    custom error prompts) contain Chinese characters, which the default
+    MSI code page 1252 (Windows-1252, Western European) cannot represent.
+    Without it WiX errors out with WIX0311 "characters that are not
+    available in the specified database code page '1252'". InstallerVersion
+    500 (= Windows Installer 5.0, Windows 7 SP1+) handles UTF-8 summary
+    streams natively, so this is safe across every supported target OS.
+  -->
   <Package
       Name="Trace"
       Manufacturer="Sam Song"
@@ -32,7 +42,8 @@
       UpgradeCode="4F0FC3A3-C718-4DD4-BB01-0351E9960E8C"
       Compressed="yes"
       Scope="perMachine"
-      InstallerVersion="500">
+      InstallerVersion="500"
+      Codepage="65001">
 
     <SummaryInformation Description="Trace — macOS 风格的系统级快速捕获工具（Windows 版）" />
 
