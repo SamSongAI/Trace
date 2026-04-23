@@ -22,7 +22,12 @@ PRD.md
 Threads.md
 *_PRD.md
 *_local.md
-docs/*.md
+# docs/ holds private planning / design notes (project convention).
+# `docs/**` recursively covers subdirectories like docs/plans/ — the
+# prior `docs/*.md` only matched top-level markdown and leaked
+# docs/plans/*.md and any SVG/PDF into `git status`. Keep the README
+# exception so an opt-in public README can still be tracked.
+docs/**
 !docs/README.md
 
 # === Personal assets ===
