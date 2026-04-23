@@ -41,7 +41,7 @@ jobs:
             triple: aarch64-pc-windows-msvc
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Rust (stable + ${{ matrix.triple }})
         uses: dtolnay/rust-toolchain@stable
@@ -57,7 +57,7 @@ jobs:
           key: release-${{ matrix.arch }}
 
       - name: Setup .NET 8 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.x'
 
@@ -75,7 +75,7 @@ jobs:
         run: wix extension add -g WixToolset.Bal.wixext/4.0.5
 
       - name: Setup Python (for asset regeneration)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -117,7 +117,7 @@ jobs:
       - name: Upload matrix artifact
         # Each matrix leg uploads its one file into the arch-specific
         # artifact name; the publish job downloads the lot.
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: trace-release-${{ matrix.arch }}
           # Phase 17: the WiX Burn Bundle (Trace-<ver>-<arch>.exe) is the
@@ -146,10 +146,10 @@ jobs:
     if: always() && needs.build-release.result != 'cancelled'
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download all release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: trace-release-*
           merge-multiple: true
@@ -165,7 +165,7 @@ jobs:
           echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: "Trace v${{ steps.ver.outputs.version }}"
           tag_name: ${{ github.ref_name }}

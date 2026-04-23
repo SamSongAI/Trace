@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -54,7 +54,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -77,7 +77,7 @@ jobs:
     needs: core-tests
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -108,7 +108,7 @@ jobs:
     needs: windows-release-build
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Rust (stable + x86_64-pc-windows-msvc)
         uses: dtolnay/rust-toolchain@stable
@@ -121,7 +121,7 @@ jobs:
           workspaces: clients/trace-windows -> target
 
       - name: Setup .NET 8 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.x'
 
@@ -142,7 +142,7 @@ jobs:
         run: wix extension add -g WixToolset.Bal.wixext/4.0.5
 
       - name: Setup Python (for asset regeneration)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -164,7 +164,7 @@ jobs:
         # reviewers can poke at the raw Windows Installer package without
         # a Burn wrapper getting in the way. The signed Bundle ships from
         # trace-windows-release.yml on tag push.
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: trace-msi-x64
           path: clients/trace-windows/installer/out/*.msi
