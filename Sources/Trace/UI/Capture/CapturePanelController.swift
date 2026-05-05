@@ -9,6 +9,12 @@ final class CapturePanel: NSPanel {
 }
 
 final class CapturePanelController: NSObject, NSWindowDelegate {
+    static let defaultPanelStyleMask: NSWindow.StyleMask = [
+        .fullSizeContentView,
+        .resizable,
+        .nonactivatingPanel
+    ]
+
     static let defaultPanelCollectionBehavior: NSWindow.CollectionBehavior = [
         .moveToActiveSpace,
         .fullScreenAuxiliary,
@@ -79,7 +85,7 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
         let initialFrame = NSRect(x: 0, y: 0, width: 440, height: 520)
         let panel = CapturePanel(
             contentRect: initialFrame,
-            styleMask: [.fullSizeContentView, .resizable],
+            styleMask: Self.defaultPanelStyleMask,
             backing: .buffered,
             defer: false
         )
@@ -113,7 +119,6 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
     }
 
     private func bringPanelToFront(_ panel: NSPanel) {
-        NSApp.activate(ignoringOtherApps: true)
         panel.orderFrontRegardless()
         panel.makeKeyAndOrderFront(nil)
     }

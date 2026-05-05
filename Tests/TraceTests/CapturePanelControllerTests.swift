@@ -3,6 +3,14 @@ import XCTest
 @testable import Trace
 
 final class CapturePanelControllerTests: XCTestCase {
+    func testDefaultPanelStyleMaskDoesNotActivateTraceWhenPresented() {
+        let styleMask = CapturePanelController.defaultPanelStyleMask
+
+        XCTAssertTrue(styleMask.contains(.fullSizeContentView))
+        XCTAssertTrue(styleMask.contains(.resizable))
+        XCTAssertTrue(styleMask.contains(.nonactivatingPanel))
+    }
+
     func testDefaultPanelCollectionBehaviorSupportsCurrentFullScreenSpace() {
         let behavior = CapturePanelController.defaultPanelCollectionBehavior
 
