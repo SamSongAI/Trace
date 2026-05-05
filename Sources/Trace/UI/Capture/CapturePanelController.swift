@@ -11,7 +11,10 @@ final class CapturePanel: NSPanel {
 final class CapturePanelController: NSObject, NSWindowDelegate {
     static let defaultPanelCollectionBehavior: NSWindow.CollectionBehavior = [
         .moveToActiveSpace,
-        .fullScreenAuxiliary
+        .fullScreenAuxiliary,
+        .canJoinAllApplications,
+        .transient,
+        .ignoresCycle
     ]
 
     private let settings: AppSettings
@@ -43,8 +46,7 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
 
     func presentFromGlobalHotKey() {
         if let panel, panel.isVisible {
-            NSApp.activate(ignoringOtherApps: true)
-            panel.makeKeyAndOrderFront(nil)
+            bringPanelToFront(panel)
             NotificationCenter.default.post(name: .traceFocusInput, object: nil)
             return
         }
@@ -61,8 +63,7 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
         viewModel.selectedThread = settings.defaultThread
         applySavedFrameIfNeeded(on: panel)
 
-        NSApp.activate(ignoringOtherApps: true)
-        panel.makeKeyAndOrderFront(nil)
+        bringPanelToFront(panel)
         NotificationCenter.default.post(name: .traceFocusInput, object: nil)
     }
 
@@ -109,6 +110,12 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
         setupLocalKeyMonitor()
 
         return panel
+    }
+
+    private func bringPanelToFront(_ panel: NSPanel) {
+        NSApp.activate(ignoringOtherApps: true)
+        panel.orderFrontRegardless()
+        panel.makeKeyAndOrderFront(nil)
     }
 
     private func setupLocalKeyMonitor() {

@@ -12,6 +12,9 @@ final class CapturePanelControllerTests: XCTestCase {
         // panel follows the user to their active Space.
         XCTAssertTrue(behavior.contains(.moveToActiveSpace))
         XCTAssertTrue(behavior.contains(.fullScreenAuxiliary))
+        XCTAssertTrue(behavior.contains(.canJoinAllApplications))
+        XCTAssertTrue(behavior.contains(.transient))
+        XCTAssertTrue(behavior.contains(.ignoresCycle))
         XCTAssertFalse(behavior.contains(.canJoinAllSpaces),
                        ".canJoinAllSpaces conflicts with .moveToActiveSpace")
     }
