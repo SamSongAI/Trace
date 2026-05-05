@@ -4,6 +4,8 @@ import Foundation
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    static let defaultActivationPolicy: NSApplication.ActivationPolicy = .accessory
+
     let settings = AppSettings.shared
 
     private lazy var writer = DailyNoteWriter(settings: settings)
@@ -19,7 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hasShownHotKeyRegistrationAlert = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
+        NSApp.setActivationPolicy(Self.defaultActivationPolicy)
         if let icon = BrandAssets.appIcon() {
             NSApp.applicationIconImage = icon
         }

@@ -9,9 +9,17 @@ final class CapturePanel: NSPanel {
 }
 
 final class CapturePanelController: NSObject, NSWindowDelegate {
+    static let defaultPanelStyleMask: NSWindow.StyleMask = [
+        .fullSizeContentView,
+        .resizable
+    ]
+
     static let defaultPanelCollectionBehavior: NSWindow.CollectionBehavior = [
         .moveToActiveSpace,
-        .fullScreenAuxiliary
+        .fullScreenAuxiliary,
+        .canJoinAllApplications,
+        .transient,
+        .ignoresCycle
     ]
 
     private let settings: AppSettings
@@ -43,8 +51,7 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
 
     func presentFromGlobalHotKey() {
         if let panel, panel.isVisible {
-            NSApp.activate(ignoringOtherApps: true)
-            panel.makeKeyAndOrderFront(nil)
+            bringPanelToFront(panel)
             NotificationCenter.default.post(name: .traceFocusInput, object: nil)
             return
         }
@@ -61,8 +68,7 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
         viewModel.selectedThread = settings.defaultThread
         applySavedFrameIfNeeded(on: panel)
 
-        NSApp.activate(ignoringOtherApps: true)
-        panel.makeKeyAndOrderFront(nil)
+        bringPanelToFront(panel)
         NotificationCenter.default.post(name: .traceFocusInput, object: nil)
     }
 
@@ -78,7 +84,7 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
         let initialFrame = NSRect(x: 0, y: 0, width: 440, height: 520)
         let panel = CapturePanel(
             contentRect: initialFrame,
-            styleMask: [.fullSizeContentView, .resizable],
+            styleMask: Self.defaultPanelStyleMask,
             backing: .buffered,
             defer: false
         )
@@ -109,6 +115,12 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
         setupLocalKeyMonitor()
 
         return panel
+    }
+
+    private func bringPanelToFront(_ panel: NSPanel) {
+        NSApp.activate(ignoringOtherApps: true)
+        panel.orderFrontRegardless()
+        panel.makeKeyAndOrderFront(nil)
     }
 
     private func setupLocalKeyMonitor() {
