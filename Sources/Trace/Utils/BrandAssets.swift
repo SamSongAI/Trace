@@ -18,7 +18,7 @@ private enum BrandLogoVariant {
 enum BrandAssets {
     static let displayName = "Trace"
     static let slogan = "Thought is leverage, Leave a trace."
-    static let version = "1.0.3"
+    static let version = "0.2.4"
 
     static func menuBarLogo(size: CGFloat = 18) -> NSImage? {
         makeMenuBarTemplateLogo(size: size)
