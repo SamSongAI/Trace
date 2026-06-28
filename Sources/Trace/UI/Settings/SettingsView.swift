@@ -368,27 +368,21 @@ struct SettingsView: View {
                             }
 
                             SettingRow(label: L10n.fileNameFormat, palette: palette) {
-                                Picker("", selection: dailyFileDateFormatBinding) {
-                                    ForEach(DailyFileDateFormat.allCases) { format in
-                                        Text(format.title).tag(format)
-                                    }
-                                }
-                                .labelsHidden()
-                                .pickerStyle(.menu)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .settingsFieldChrome(palette)
+                                ModernPicker(
+                                    title: L10n.fileNameFormat,
+                                    selection: dailyFileDateFormatBinding,
+                                    options: DailyFileDateFormat.allCases.map { ($0, $0.title) },
+                                    palette: palette
+                                )
                             }
 
                             SettingRow(label: L10n.entryFormat, palette: palette) {
-                                Picker("", selection: $settings.dailyEntryThemePreset) {
-                                    ForEach(DailyEntryThemePreset.allCases) { preset in
-                                        Text(preset.title).tag(preset)
-                                    }
-                                }
-                                .labelsHidden()
-                                .pickerStyle(.menu)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .settingsFieldChrome(palette)
+                                ModernPicker(
+                                    title: L10n.entryFormat,
+                                    selection: $settings.dailyEntryThemePreset,
+                                    options: DailyEntryThemePreset.allCases.map { ($0, $0.title) },
+                                    palette: palette
+                                )
                             }
                         }
 
@@ -820,6 +814,110 @@ private struct SettingsFieldChrome: ViewModifier {
 private extension View {
     func settingsFieldChrome(_ palette: SettingsPalette) -> some View {
         modifier(SettingsFieldChrome(palette: palette))
+    }
+}
+
+// MARK: - Modern Picker
+
+private struct ModernPicker<T: Hashable>: View {
+    let title: String
+    @Binding var selection: T
+    let options: [(value: T, label: String)]
+    let palette: SettingsPalette
+
+    @State private var isExpanded = false
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(currentLabel)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(palette.fieldText)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 4)
+
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(palette.mutedText)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(palette.fieldBackground)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(isExpanded ? palette.accent : palette.fieldBorder, lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(options.indices, id: \.self) { index in
+                        let option = options[index]
+                        Button {
+                            selection = option.value
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                isExpanded = false
+                            }
+                        } label: {
+                            HStack {
+                                Text(option.label)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(palette.fieldText)
+
+                                Spacer()
+
+                                if selection == option.value {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(palette.accent)
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(
+                                selection == option.value
+                                    ? palette.accent.opacity(0.08)
+                                    : Color.clear
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        if index < options.count - 1 {
+                            Divider()
+                                .overlay(palette.fieldBorder.opacity(0.5))
+                                .padding(.horizontal, 4)
+                        }
+                    }
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(palette.fieldBackground)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(palette.fieldBorder, lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                .offset(y: 40)
+                .zIndex(1)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var currentLabel: String {
+        options.first(where: { $0.value == selection })?.label ?? title
     }
 }
 
