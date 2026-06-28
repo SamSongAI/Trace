@@ -67,7 +67,7 @@ struct CaptureView: View {
         }
         .frame(minWidth: 360, minHeight: 220)
         .background(theme.panelBackground)
-        .overlay(alignment: .bottom) {
+        .overlay(alignment: .center) {
             if let message = viewModel.toastMessage {
                 Text(message)
                     .font(.system(size: 12, weight: .medium))
@@ -77,8 +77,7 @@ struct CaptureView: View {
                     .background(theme.surface.opacity(0.95))
                     .clipShape(Capsule())
                     .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
-                    .padding(.bottom, 12)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(.opacity)
                     .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
             }
         }
@@ -155,6 +154,9 @@ struct CaptureView: View {
                                         .stroke(theme.border, lineWidth: 1)
                                 )
                                 .help(path as String)
+                                .onTapGesture {
+                                    NSWorkspace.shared.openFile(path)
+                                }
 
                             Button {
                                 removeThumbnail(at: index)
@@ -179,7 +181,14 @@ struct CaptureView: View {
 
     private func removeThumbnail(at index: Int) {
         guard viewModel.pastedImagePaths.indices.contains(index) else { return }
+        let markdown = viewModel.pastedImageMarkdowns[index]
         viewModel.pastedImagePaths.remove(at: index)
+        viewModel.pastedImageMarkdowns.remove(at: index)
+        if !markdown.isEmpty {
+            viewModel.text = viewModel.text
+                .replacingOccurrences(of: markdown + "\n", with: "")
+                .replacingOccurrences(of: markdown, with: "")
+        }
     }
 
     private var documentFooter: some View {

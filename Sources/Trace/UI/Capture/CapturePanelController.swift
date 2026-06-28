@@ -382,6 +382,7 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
                 markdowns.append(markdown)
                 if let absolutePath = absolutePath(forMarkdownImage: markdown) {
                     viewModel.pastedImagePaths.append(absolutePath)
+                    viewModel.pastedImageMarkdowns.append(markdown)
                 }
             } catch {
                 lastError = error

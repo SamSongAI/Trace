@@ -8,12 +8,14 @@ final class CaptureViewModel: ObservableObject {
     @Published var pinned: Bool = false
     @Published var toastMessage: String?
     @Published var pastedImagePaths: [String] = []
+    @Published var pastedImageMarkdowns: [String] = []
     @Published var isSending: Bool = false
 
     func resetInput() {
         text = ""
         fileTitle = ""
         pastedImagePaths = []
+        pastedImageMarkdowns = []
     }
 
     func beginSendAnimation(completion: @escaping () -> Void) {
