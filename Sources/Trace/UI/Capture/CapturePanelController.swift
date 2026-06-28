@@ -153,8 +153,7 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
                 keyCode: settings.modeToggleKeyCode,
                 modifiers: settings.modeToggleModifiers
             ) {
-                settings.noteWriteMode = settings.noteWriteMode.next()
-                NotificationCenter.default.post(name: .traceFocusInput, object: nil)
+                NotificationCenter.default.post(name: .traceCycleMode, object: nil)
                 return nil
             }
 
@@ -338,6 +337,8 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
                 destinationName = settings.title(for: viewModel.selectedSection)
             case .thread:
                 destinationName = viewModel.selectedThread?.name ?? ""
+            case .agent:
+                destinationName = "Agent"
             }
             viewModel.showToast(String(format: L10n.savedTo, destinationName))
 

@@ -31,6 +31,11 @@ struct CaptureView: View {
     @State private var showAgentChat: Bool = false
     @StateObject private var agentViewModel: AgentChatViewModel
 
+    private var currentMode: NoteWriteMode {
+        if showAgentChat { return .agent }
+        return settings.noteWriteMode == .thread ? .thread : .dimension
+    }
+
     private let sectionGridSpacing: CGFloat = 6
     private let minimumSectionButtonWidth: CGFloat = 92
     private let maximumSectionRows = 3
@@ -55,6 +60,7 @@ struct CaptureView: View {
         switch settings.noteWriteMode {
         case .dimension: return L10n.notePlaceholder
         case .thread: return L10n.threadPlaceholder
+        case .agent: return L10n.threadPlaceholder
         }
     }
 
@@ -80,6 +86,8 @@ struct CaptureView: View {
                     modeFooter
                 case .thread:
                     threadFooter
+                case .agent:
+                    EmptyView()
                 }
             }
         }
@@ -133,14 +141,23 @@ struct CaptureView: View {
         .onReceive(NotificationCenter.default.publisher(for: .traceFocusInput)) { _ in
             focusInputSoon()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .traceCycleMode)) { _ in
+            cycleMode()
+        }
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Text(BrandAssets.displayName)
                 .font(.custom("Lora", size: 13))
                 .fontWeight(.bold)
                 .foregroundStyle(theme.textPrimary)
+                .lineLimit(1)
+
+            Text(currentMode.compactTitle)
+                .font(.custom("Lora", size: 13))
+                .fontWeight(.regular)
+                .foregroundStyle(theme.textSecondary)
                 .lineLimit(1)
 
             Spacer()
@@ -156,10 +173,7 @@ struct CaptureView: View {
             .help(L10n.pinPanelHelp)
 
             Button {
-                showAgentChat.toggle()
-                if !showAgentChat {
-                    Task { await agentViewModel.endSession() }
-                }
+                cycleMode()
             } label: {
                 Image(systemName: "sparkles")
                     .font(.system(size: 11, weight: .medium))
@@ -181,6 +195,18 @@ struct CaptureView: View {
         .padding(.horizontal, 16)
         .frame(height: 36)
         .background(theme.chromeBackground)
+    }
+
+    private func cycleMode() {
+        if showAgentChat {
+            Task { await agentViewModel.endSession() }
+            showAgentChat = false
+            settings.noteWriteMode = .dimension
+        } else if settings.noteWriteMode == .dimension {
+            settings.noteWriteMode = .thread
+        } else {
+            showAgentChat = true
+        }
     }
 
     private var editor: some View {

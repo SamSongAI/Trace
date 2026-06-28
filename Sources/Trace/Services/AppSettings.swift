@@ -95,6 +95,7 @@ enum LegacySettingKeys {
 enum NoteWriteMode: String, CaseIterable, Identifiable {
     case dimension
     case thread
+    case agent
 
     var id: String { rawValue }
 
@@ -102,6 +103,7 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
         switch self {
         case .dimension: return L10n.writeModeDailyTitle
         case .thread: return L10n.writeModeThreadTitle
+        case .agent: return L10n.writeModeAgentCompact
         }
     }
 
@@ -109,6 +111,7 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
         switch self {
         case .dimension: return L10n.writeModeDailyCompact
         case .thread: return L10n.writeModeThreadCompact
+        case .agent: return L10n.writeModeAgentCompact
         }
     }
 
@@ -118,6 +121,8 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
             return "square.grid.2x2"
         case .thread:
             return "text.bubble"
+        case .agent:
+            return "sparkles"
         }
     }
 
@@ -125,6 +130,7 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
         switch self {
         case .dimension: return L10n.writeModeDailyDestination
         case .thread: return L10n.writeModeThreadDestination
+        case .agent: return L10n.writeModeAgentCompact
         }
     }
 
@@ -132,6 +138,7 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
         switch self {
         case .dimension: return L10n.writeModeDailySummary
         case .thread: return L10n.writeModeThreadSummary
+        case .agent: return L10n.writeModeAgentCompact
         }
     }
 
@@ -139,20 +146,23 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
         switch self {
         case .dimension: return L10n.writeModeDailyTarget
         case .thread: return L10n.writeModeThreadTarget
+        case .agent: return L10n.writeModeAgentCompact
         }
     }
 
     func next() -> NoteWriteMode {
         switch self {
         case .dimension: return .thread
-        case .thread: return .dimension
+        case .thread: return .agent
+        case .agent: return .dimension
         }
     }
 
     func previous() -> NoteWriteMode {
         switch self {
-        case .dimension: return .thread
+        case .dimension: return .agent
         case .thread: return .dimension
+        case .agent: return .thread
         }
     }
 }

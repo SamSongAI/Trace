@@ -321,7 +321,7 @@ struct SettingsView: View {
                     VStack(spacing: 12) {
                         SettingRow(label: L10n.writeMode, palette: palette) {
                             HStack(spacing: 8) {
-                                ForEach(NoteWriteMode.allCases) { mode in
+                                ForEach(NoteWriteMode.allCases.filter { $0 != .agent }) { mode in
                                     WriteModeTile(
                                         mode: mode,
                                         isSelected: settings.noteWriteMode == mode,

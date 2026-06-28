@@ -112,9 +112,9 @@ enum L10n {
 
     // MARK: - Thread Mode
 
-    static var writeModeDailyCompact: String { s("Daily", "Daily", "Daily") }
+    static var writeModeDailyCompact: String { s("Note", "Note", "Note") }
     static var writeModeThreadTitle: String { s("线程", "スレッド", "Thread") }
-    static var writeModeThreadCompact: String { s("线程", "スレッド", "Thread") }
+    static var writeModeThreadCompact: String { s("Thread", "Thread", "Thread") }
     static var writeModeThreadDestination: String { s("追加到线程", "スレッドに追加", "Append to thread") }
     static var writeModeThreadSummary: String {
         s("按主题追加到对应线程文件，适合连续追踪同一话题。",
@@ -126,6 +126,10 @@ enum L10n {
           "テーマごとに対応するスレッドファイルに追加。継続的なトラッキングに最適。",
           "Append to corresponding thread file by topic for continuous tracking.")
     }
+
+    // MARK: - Agent Mode
+
+    static var writeModeAgentCompact: String { s("Agent", "Agent", "Agent") }
     static var threadPlaceholder: String {
         s("输入想法，追加到选中线程...",
           "アイデアを入力してスレッドに追加...",

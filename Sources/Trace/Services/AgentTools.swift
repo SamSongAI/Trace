@@ -513,6 +513,8 @@ struct RouteCaptureTool: AgentTool {
             \(threadList)
             Analyze the content and suggest which thread it belongs to.
             """
+        case .agent:
+            return "Agent mode — no routing needed."
         }
     }
 }

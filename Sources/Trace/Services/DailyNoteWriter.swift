@@ -55,6 +55,8 @@ final class DailyNoteWriter {
             }
             let threadWriter = ThreadWriter(settings: settings)
             try threadWriter.save(text: trimmedText, to: thread, mode: mode, now: now)
+        case .agent:
+            break
         }
     }
 
