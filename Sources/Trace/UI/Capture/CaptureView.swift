@@ -107,6 +107,9 @@ struct CaptureView: View {
         .onAppear {
             focusInputSoon()
         }
+        .onChange(of: viewModel.text) { newText in
+            viewModel.syncThumbnailsWithText(newText)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .traceFocusInput)) { _ in
             focusInputSoon()
         }

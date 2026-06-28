@@ -16,6 +16,21 @@ final class CaptureViewModel: ObservableObject {
         pastedImageMarkdowns = []
     }
 
+    func syncThumbnailsWithText(_ newText: String) {
+        guard !pastedImageMarkdowns.isEmpty else { return }
+        var indicesToRemove: [Int] = []
+        for (index, markdown) in pastedImageMarkdowns.enumerated() {
+            if !newText.contains(markdown) {
+                indicesToRemove.append(index)
+            }
+        }
+        guard !indicesToRemove.isEmpty else { return }
+        for index in indicesToRemove.reversed() {
+            pastedImagePaths.remove(at: index)
+            pastedImageMarkdowns.remove(at: index)
+        }
+    }
+
     func beginSendAnimation(completion: @escaping () -> Void) {
         isSending = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
