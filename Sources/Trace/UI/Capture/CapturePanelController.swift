@@ -325,7 +325,6 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
                 text: trimmedText,
                 to: targetSection,
                 mode: mode,
-                documentTitle: viewModel.fileTitle,
                 thread: viewModel.selectedThread
             )
             settings.lastUsedSectionIndex = viewModel.selectedSection.index
@@ -339,8 +338,6 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
                 destinationName = settings.title(for: viewModel.selectedSection)
             case .thread:
                 destinationName = viewModel.selectedThread?.name ?? ""
-            case .file:
-                destinationName = viewModel.fileTitle.isEmpty ? L10n.writeModeDocumentTitle : viewModel.fileTitle
             }
             viewModel.showToast(String(format: L10n.savedTo, destinationName))
 

@@ -33,7 +33,6 @@ enum SettingKeys {
     static let dailyFolderName = "trace.dailyFolderName"
     static let dailyFileDateFormat = "trace.dailyFileDateFormat"
     static let noteWriteMode = "trace.noteWriteMode"
-    static let inboxFolderName = "trace.inboxFolderName"
     static let hotKeyCode = "trace.hotKeyCode"
     static let hotKeyModifiers = "trace.hotKeyModifiers"
     static let sendNoteKeyCode = "trace.sendNoteKeyCode"
@@ -53,7 +52,6 @@ enum SettingKeys {
     static let dailyEntryThemePreset = "trace.dailyEntryThemePreset"
     static let markdownEntrySeparatorStyle = "trace.markdownEntrySeparatorStyle"
     static let lastUsedSectionIndex = "trace.lastUsedSectionIndex"
-    static let inboxVaultPath = "trace.inboxVaultPath"
     static let threadConfigs = "trace.threadConfigs"
     static let lastUsedThreadId = "trace.lastUsedThreadId"
     static let draftText = "trace.draftText"
@@ -65,7 +63,6 @@ enum LegacySettingKeys {
     static let dailyFolderName = "flashnote.dailyFolderName"
     static let dailyFileDateFormat = "flashnote.dailyFileDateFormat"
     static let noteWriteMode = "flashnote.noteWriteMode"
-    static let inboxFolderName = "flashnote.inboxFolderName"
     static let hotKeyCode = "flashnote.hotKeyCode"
     static let hotKeyModifiers = "flashnote.hotKeyModifiers"
     static let sendNoteKeyCode = "flashnote.sendNoteKeyCode"
@@ -93,14 +90,12 @@ enum LegacySettingKeys {
 enum NoteWriteMode: String, CaseIterable, Identifiable {
     case dimension
     case thread
-    case file
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .dimension: return L10n.writeModeDailyTitle
-        case .file: return L10n.writeModeDocumentTitle
         case .thread: return L10n.writeModeThreadTitle
         }
     }
@@ -108,7 +103,6 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
     var compactTitle: String {
         switch self {
         case .dimension: return L10n.writeModeDailyCompact
-        case .file: return L10n.writeModeDocumentCompact
         case .thread: return L10n.writeModeThreadCompact
         }
     }
@@ -117,8 +111,6 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
         switch self {
         case .dimension:
             return "square.grid.2x2"
-        case .file:
-            return "doc.text"
         case .thread:
             return "text.bubble"
         }
@@ -127,7 +119,6 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
     var destinationTitle: String {
         switch self {
         case .dimension: return L10n.writeModeDailyDestination
-        case .file: return L10n.writeModeDocumentDestination
         case .thread: return L10n.writeModeThreadDestination
         }
     }
@@ -135,7 +126,6 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
     var summary: String {
         switch self {
         case .dimension: return L10n.writeModeDailySummary
-        case .file: return L10n.writeModeDocumentSummary
         case .thread: return L10n.writeModeThreadSummary
         }
     }
@@ -143,7 +133,6 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
     var targetSummary: String {
         switch self {
         case .dimension: return L10n.writeModeDailyTarget
-        case .file: return L10n.writeModeDocumentTarget
         case .thread: return L10n.writeModeThreadTarget
         }
     }
@@ -151,16 +140,14 @@ enum NoteWriteMode: String, CaseIterable, Identifiable {
     func next() -> NoteWriteMode {
         switch self {
         case .dimension: return .thread
-        case .thread: return .file
-        case .file: return .dimension
+        case .thread: return .dimension
         }
     }
 
     func previous() -> NoteWriteMode {
         switch self {
-        case .dimension: return .file
+        case .dimension: return .thread
         case .thread: return .dimension
-        case .file: return .thread
         }
     }
 }
@@ -306,11 +293,6 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    @Published var inboxVaultPath: String {
-        didSet {
-            defaults.set(inboxVaultPath, forKey: SettingKeys.inboxVaultPath)
-        }
-    }
 
     @Published var dailyFolderName: String {
         didSet {
@@ -330,11 +312,6 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    @Published var inboxFolderName: String {
-        didSet {
-            defaults.set(inboxFolderName, forKey: SettingKeys.inboxFolderName)
-        }
-    }
 
     @Published var hotKeyCode: UInt32 {
         didSet {
@@ -479,11 +456,9 @@ final class AppSettings: ObservableObject {
 
         language = AppLanguage(rawValue: defaults.string(forKey: SettingKeys.language) ?? "") ?? .systemDefault
         vaultPath = defaults.string(forKey: SettingKeys.vaultPath) ?? ""
-        inboxVaultPath = defaults.string(forKey: SettingKeys.inboxVaultPath) ?? ""
         dailyFolderName = defaults.string(forKey: SettingKeys.dailyFolderName) ?? "Daily"
         dailyFileDateFormat = defaults.string(forKey: SettingKeys.dailyFileDateFormat) ?? "yyyy M月d日 EEEE"
         noteWriteMode = NoteWriteMode(rawValue: defaults.string(forKey: SettingKeys.noteWriteMode) ?? "") ?? .dimension
-        inboxFolderName = defaults.string(forKey: SettingKeys.inboxFolderName) ?? "inbox"
 
         hotKeyCode = {
             let value = defaults.integer(forKey: SettingKeys.hotKeyCode)
@@ -601,30 +576,6 @@ final class AppSettings: ObservableObject {
 
     var hasValidVaultPath: Bool {
         vaultPathValidationIssue == nil
-    }
-
-    var inboxVaultPathValidationIssue: VaultPathValidationIssue? {
-        let trimmedPath = inboxVaultPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPath.isEmpty else { return .empty }
-
-        var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: trimmedPath, isDirectory: &isDirectory) else {
-            return .doesNotExist
-        }
-
-        guard isDirectory.boolValue else {
-            return .notDirectory
-        }
-
-        guard fileManager.isWritableFile(atPath: trimmedPath) else {
-            return .notWritable
-        }
-
-        return nil
-    }
-
-    var hasValidInboxVaultPath: Bool {
-        inboxVaultPathValidationIssue == nil
     }
 
     var defaultThread: ThreadConfig? {
@@ -886,7 +837,6 @@ final class AppSettings: ObservableObject {
             (SettingKeys.dailyFolderName, LegacySettingKeys.dailyFolderName),
             (SettingKeys.dailyFileDateFormat, LegacySettingKeys.dailyFileDateFormat),
             (SettingKeys.noteWriteMode, LegacySettingKeys.noteWriteMode),
-            (SettingKeys.inboxFolderName, LegacySettingKeys.inboxFolderName),
             (SettingKeys.hotKeyCode, LegacySettingKeys.hotKeyCode),
             (SettingKeys.hotKeyModifiers, LegacySettingKeys.hotKeyModifiers),
             (SettingKeys.sendNoteKeyCode, LegacySettingKeys.sendNoteKeyCode),

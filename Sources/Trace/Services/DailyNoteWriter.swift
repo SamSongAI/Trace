@@ -2,11 +2,9 @@ import Foundation
 
 protocol DailyNoteSettingsProviding: ThreadSettingsProviding {
     var vaultPath: String { get }
-    var inboxVaultPath: String { get }
     var dailyFolderName: String { get }
     var dailyFileDateFormat: String { get }
     var noteWriteMode: NoteWriteMode { get }
-    var inboxFolderName: String { get }
     var markdownEntrySeparatorStyle: MarkdownEntrySeparatorStyle { get }
     func title(for section: NoteSection) -> String
     func header(for section: NoteSection) -> String
@@ -42,8 +40,6 @@ final class DailyNoteWriter {
         text: String,
         to section: NoteSection,
         mode: DailyNoteSaveMode = .createNewEntry,
-        documentTitle: String? = nil,
-        fileTargetFolder: String? = nil,
         thread: ThreadConfig? = nil,
         now: Date = Date()
     ) throws {
@@ -53,13 +49,6 @@ final class DailyNoteWriter {
         switch settings.noteWriteMode {
         case .dimension:
             try saveToDailyNote(trimmedText, to: section, mode: mode, now: now)
-        case .file:
-            try saveToInboxFile(
-                trimmedText,
-                title: documentTitle,
-                targetFolder: fileTargetFolder,
-                now: now
-            )
         case .thread:
             guard let thread = thread else {
                 throw DailyNoteWriterError.invalidTargetFolderPath
@@ -104,60 +93,6 @@ final class DailyNoteWriter {
         return dailyDirectoryURL.appendingPathComponent(fileName, isDirectory: false)
     }
 
-    private func saveToInboxFile(
-        _ text: String,
-        title: String?,
-        targetFolder: String?,
-        now: Date
-    ) throws {
-        let fileURL = try inboxFileURL(for: now, title: title, targetFolder: targetFolder)
-        try ensureDailyDirectoryExists(at: fileURL.deletingLastPathComponent())
-
-        let content = inboxDocumentContent(for: text, title: title, at: now)
-        try content.write(to: fileURL, atomically: true, encoding: .utf8)
-    }
-
-    private func inboxFileURL(for date: Date, title: String?, targetFolder: String?) throws -> URL {
-        let inboxBaseURL = try inboxVaultURL()
-        let baseName = fileBaseName(for: title, at: date)
-        if let targetFolder, !targetFolder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let folderName = try normalizedRelativeFolderPath(targetFolder, fallback: "")
-            let targetDir = folderName.isEmpty ? inboxBaseURL : inboxBaseURL.appendingPathComponent(folderName, isDirectory: true)
-            return nextAvailableFileURL(baseName: baseName, in: targetDir)
-        }
-        return nextAvailableFileURL(baseName: baseName, in: inboxBaseURL)
-    }
-
-    private func nextAvailableFileURL(baseName: String, in directoryURL: URL) -> URL {
-        var candidate = directoryURL.appendingPathComponent("\(baseName).md", isDirectory: false)
-        var sequence = 2
-
-        while fileManager.fileExists(atPath: candidate.path) {
-            candidate = directoryURL.appendingPathComponent("\(baseName)-\(sequence).md", isDirectory: false)
-            sequence += 1
-        }
-
-        return candidate
-    }
-
-    private func inboxDocumentContent(for text: String, title: String?, at date: Date) -> String {
-        let escapedTitle = normalizedDocumentTitle(title)?
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        var frontmatterLines: [String] = []
-        if let escapedTitle {
-            frontmatterLines.append("title: \"\(escapedTitle)\"")
-        }
-        frontmatterLines.append("created: \"\(timestamp(for: date))\"")
-        let frontmatterBody = frontmatterLines.joined(separator: "\n")
-        return """
-        ---
-        \(frontmatterBody)
-        ---
-
-        \(text)
-        """
-    }
-
     private func vaultURL() throws -> URL {
         let trimmedVaultPath = settings.vaultPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedVaultPath.isEmpty else {
@@ -166,70 +101,9 @@ final class DailyNoteWriter {
         return URL(fileURLWithPath: trimmedVaultPath, isDirectory: true)
     }
 
-    private func inboxVaultURL() throws -> URL {
-        let trimmedPath = settings.inboxVaultPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPath.isEmpty else {
-            throw DailyNoteWriterError.invalidVaultPath
-        }
-        return URL(fileURLWithPath: trimmedPath, isDirectory: true)
-    }
-
     private func normalizedFolderName(_ folderName: String, fallback: String) -> String {
         let trimmed = folderName.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? fallback : trimmed
-    }
-
-    private func normalizedRelativeFolderPath(_ folderPath: String?, fallback: String) throws -> String {
-        let raw = folderPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let selected = raw.isEmpty ? fallback : raw
-        let stripped = selected
-            .replacingOccurrences(of: "\\", with: "/")
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-
-        let components = stripped
-            .split(separator: "/", omittingEmptySubsequences: true)
-            .map(String.init)
-
-        if components.isEmpty {
-            return fallback
-        }
-
-        for component in components {
-            if component == "." || component == ".." {
-                throw DailyNoteWriterError.invalidTargetFolderPath
-            }
-        }
-
-        return components.joined(separator: "/")
-    }
-
-    private func fileBaseName(for title: String?, at date: Date) -> String {
-        if let normalizedTitle = normalizedFileNameSegment(title), !normalizedTitle.isEmpty {
-            return normalizedTitle
-        }
-        return fileNameTimestampWithoutMilliseconds(for: date)
-    }
-
-    private func normalizedDocumentTitle(_ title: String?) -> String? {
-        guard let title else { return nil }
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private func normalizedFileNameSegment(_ title: String?) -> String? {
-        guard let normalizedTitle = normalizedDocumentTitle(title) else { return nil }
-
-        let invalidCharacters = CharacterSet(charactersIn: "/\\:*?\"<>|")
-        let replaced = normalizedTitle
-            .components(separatedBy: invalidCharacters)
-            .joined(separator: "-")
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
-        let collapsed = replaced
-            .replacingOccurrences(of: #"\s+"#, with: "-", options: .regularExpression)
-            .replacingOccurrences(of: #"-{2,}"#, with: "-", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "-. "))
-        return collapsed.isEmpty ? nil : collapsed
     }
 
     private func ensureDailyDirectoryExists(at directoryURL: URL) throws {

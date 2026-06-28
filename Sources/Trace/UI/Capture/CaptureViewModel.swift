@@ -4,7 +4,6 @@ final class CaptureViewModel: ObservableObject {
     @Published var text: String = ""
     @Published var selectedSection: NoteSection = .note
     @Published var selectedThread: ThreadConfig? = nil
-    @Published var fileTitle: String = ""
     @Published var pinned: Bool = false
     @Published var toastMessage: String?
     @Published var pastedImagePaths: [String] = []
@@ -13,7 +12,6 @@ final class CaptureViewModel: ObservableObject {
 
     func resetInput() {
         text = ""
-        fileTitle = ""
         pastedImagePaths = []
         pastedImageMarkdowns = []
     }

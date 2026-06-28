@@ -386,29 +386,6 @@ struct SettingsView: View {
                             }
                         }
 
-                        if settings.noteWriteMode == .file {
-                            SettingRow(label: L10n.vault, hint: L10n.vaultHintFile, palette: palette) {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack(spacing: 8) {
-                                        TextField("/Users/you/Documents", text: $settings.inboxVaultPath)
-                                            .textFieldStyle(.plain)
-                                            .settingsFieldChrome(palette)
-
-                                        Button(L10n.browse) {
-                                            chooseFolderPath(binding: $settings.inboxVaultPath)
-                                        }
-                                        .buttonStyle(SettingsPrimaryButtonStyle(palette: palette))
-                                    }
-
-                                    if let issue = settings.inboxVaultPathValidationIssue {
-                                        Text(issue.message)
-                                            .font(.system(size: 11, weight: .medium))
-                                            .foregroundStyle(palette.warningText)
-                                    }
-                                }
-                            }
-                        }
-
                     }
                 }
 

@@ -44,7 +44,6 @@ struct CaptureView: View {
     private var editorPlaceholder: String {
         switch settings.noteWriteMode {
         case .dimension: return L10n.notePlaceholder
-        case .file: return L10n.documentPlaceholder
         case .thread: return L10n.threadPlaceholder
         }
     }
@@ -60,8 +59,6 @@ struct CaptureView: View {
             switch settings.noteWriteMode {
             case .dimension:
                 modeFooter
-            case .file:
-                documentFooter
             case .thread:
                 threadFooter
             }
@@ -219,28 +216,6 @@ struct CaptureView: View {
         }
     }
 
-    private var documentFooter: some View {
-        VStack(spacing: 0) {
-            Divider().overlay(theme.border)
-
-            documentTitleField
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-        }
-        .background(theme.chromeBackground)
-    }
-
-    private var documentTitleField: some View {
-        ThemedTextField(
-            placeholder: L10n.documentTitlePlaceholder,
-            text: $viewModel.fileTitle,
-            textColor: theme.textPrimary,
-            font: .systemFont(ofSize: 13, weight: .medium),
-            backgroundColor: theme.surface
-        )
-        .frame(height: 38)
-    }
-
     private var modeFooter: some View {
         sectionBar
             .background(theme.chromeBackground)
@@ -382,57 +357,3 @@ struct CaptureView: View {
     }
 }
 
-// MARK: - Themed TextField
-
-private struct ThemedTextField: NSViewRepresentable {
-    let placeholder: String
-    @Binding var text: String
-    let textColor: Color
-    let font: NSFont
-    let backgroundColor: Color
-
-    func makeNSView(context: Context) -> NSTextField {
-        let textField = NSTextField()
-        textField.isBordered = false
-        textField.drawsBackground = true
-        textField.backgroundColor = NSColor(backgroundColor).withAlphaComponent(0.8)
-        textField.textColor = NSColor(textColor)
-        textField.font = font
-        textField.placeholderString = placeholder
-        textField.delegate = context.coordinator
-        textField.layer?.cornerRadius = 8
-        textField.layer?.masksToBounds = true
-
-        // Add padding
-        textField.cell?.usesSingleLineMode = true
-        textField.cell?.wraps = false
-        textField.cell?.isScrollable = true
-
-        return textField
-    }
-
-    func updateNSView(_ nsView: NSTextField, context: Context) {
-        if nsView.stringValue != text {
-            nsView.stringValue = text
-        }
-        nsView.textColor = NSColor(textColor)
-        nsView.backgroundColor = NSColor(backgroundColor).withAlphaComponent(0.8)
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text)
-    }
-
-    class Coordinator: NSObject, NSTextFieldDelegate {
-        @Binding var text: String
-
-        init(text: Binding<String>) {
-            _text = text
-        }
-
-        func controlTextDidChange(_ obj: Notification) {
-            guard let textField = obj.object as? NSTextField else { return }
-            text = textField.stringValue
-        }
-    }
-}

@@ -41,106 +41,6 @@ final class DailyNoteWriterTests: XCTestCase {
         XCTAssertTrue(content.contains("```\nfirst note\n\(expectedTimestamp)\n```"))
     }
 
-    func testFileModeCreatesStandaloneMarkdownDocumentInInboxFolderWhenTitleIsEmpty() throws {
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        let fixedDate = makeDate(year: 2026, month: 3, day: 5, hour: 10, minute: 34)
-        var settings = TestSettings(vaultPath: tempDir.path, dailyFolderName: "Daily", dailyFileDateFormat: "yyyy-MM-dd")
-        settings.noteWriteMode = .file
-        let writer = DailyNoteWriter(settings: settings)
-
-        try writer.save(text: "快速记录一条想法", to: .project, documentTitle: "", now: fixedDate)
-
-        let files = try FileManager.default.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "md" }
-        XCTAssertEqual(files.count, 1)
-        XCTAssertEqual(files[0].pathExtension, "md")
-        XCTAssertTrue(
-            files[0].lastPathComponent.range(
-                of: #"^\d{4}-\d{2}-\d{2}-\d{6}\.md$"#,
-                options: .regularExpression
-            ) != nil
-        )
-
-        let content = try String(contentsOf: files[0], encoding: .utf8)
-        XCTAssertFalse(content.contains("section:"))
-        XCTAssertTrue(content.contains("created: \"\(timestamp(from: fixedDate))\""))
-        XCTAssertTrue(content.contains("快速记录一条想法"))
-    }
-
-    func testFileModeUsesTitleAsFileNameAndAddsSequenceOnCollision() throws {
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        let fixedDate = makeDate(year: 2026, month: 3, day: 5, hour: 10, minute: 34)
-        var settings = TestSettings(vaultPath: tempDir.path, dailyFolderName: "Daily", dailyFileDateFormat: "yyyy-MM-dd")
-        settings.noteWriteMode = .file
-        let writer = DailyNoteWriter(settings: settings)
-
-        try writer.save(text: "文档 A", to: .note, documentTitle: "项目复盘", now: fixedDate)
-        try writer.save(text: "文档 B", to: .note, documentTitle: "项目复盘", now: fixedDate)
-
-        let files = try FileManager.default.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "md" }
-        XCTAssertEqual(files.count, 2)
-
-        let names = files.map(\.lastPathComponent).sorted()
-        XCTAssertEqual(names, ["项目复盘-2.md", "项目复盘.md"])
-    }
-
-    func testFileModeRespectsCustomRelativeTargetFolder() throws {
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        let fixedDate = makeDate(year: 2026, month: 3, day: 5, hour: 10, minute: 34)
-        var settings = TestSettings(vaultPath: tempDir.path, dailyFolderName: "Daily", dailyFileDateFormat: "yyyy-MM-dd")
-        settings.noteWriteMode = .file
-        settings.inboxFolderName = "inbox"
-        let writer = DailyNoteWriter(settings: settings)
-
-        try writer.save(
-            text: "route check",
-            to: .note,
-            documentTitle: "routing",
-            fileTargetFolder: "projects/trace",
-            now: fixedDate
-        )
-
-        let targetURL = tempDir
-            .appendingPathComponent("projects", isDirectory: true)
-            .appendingPathComponent("trace", isDirectory: true)
-            .appendingPathComponent("routing.md", isDirectory: false)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: targetURL.path))
-    }
-
-    func testFileModeRejectsPathTraversalInTargetFolder() throws {
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        let fixedDate = makeDate(year: 2026, month: 3, day: 5, hour: 10, minute: 34)
-        var settings = TestSettings(vaultPath: tempDir.path, dailyFolderName: "Daily", dailyFileDateFormat: "yyyy-MM-dd")
-        settings.noteWriteMode = .file
-        settings.inboxFolderName = "inbox"
-        let writer = DailyNoteWriter(settings: settings)
-
-        XCTAssertThrowsError(
-            try writer.save(
-                text: "route check",
-                to: .note,
-                documentTitle: "routing",
-                fileTargetFolder: "../outside",
-                now: fixedDate
-            )
-        ) { error in
-            XCTAssertEqual(error as? DailyNoteWriterError, .invalidTargetFolderPath)
-        }
-    }
-
     func testSaveRepairsMissingSectionThenInserts() throws {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -374,15 +274,12 @@ final class DailyNoteWriterTests: XCTestCase {
 
 private struct TestSettings: DailyNoteSettingsProviding {
     let vaultPath: String
-    var inboxVaultPath: String
     let dailyFolderName: String
     let dailyFileDateFormat: String
     var noteWriteMode: NoteWriteMode = .dimension
-    var inboxFolderName: String = "inbox"
 
     init(vaultPath: String, dailyFolderName: String, dailyFileDateFormat: String) {
         self.vaultPath = vaultPath
-        self.inboxVaultPath = vaultPath
         self.dailyFolderName = dailyFolderName
         self.dailyFileDateFormat = dailyFileDateFormat
     }

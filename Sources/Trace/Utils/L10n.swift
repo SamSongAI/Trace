@@ -29,11 +29,6 @@ enum L10n {
           "Obsidian Vault のルートディレクトリ、または他のノート保管庫のルートパス",
           "Root directory of your Obsidian Vault or note library")
     }
-    static var vaultHintFile: String {
-        s("文档保存的文件夹路径",
-          "ドキュメント保存先のフォルダパス",
-          "Folder path for document storage")
-    }
     static var dailyFolder: String { s("日记文件夹", "デイリーフォルダ", "Daily Folder") }
     static var dailyFolderHint: String {
         s("笔记库内存放日记的子文件夹名称，建议与 Obsidian 日记设置一致",
@@ -97,34 +92,21 @@ enum L10n {
     // MARK: - Write Mode
 
     static var writeModeDailyTitle: String { s("日记", "デイリー", "Daily") }
-    static var writeModeDocumentTitle: String { s("文档", "ドキュメント", "Document") }
     static var writeModeDailyDestination: String { s("追加到当天日记", "今日のデイリーに追加", "Append to today's daily") }
-    static var writeModeDocumentDestination: String { s("创建独立文档", "独立ドキュメントを作成", "Create standalone document") }
     static var writeModeDailySummary: String {
         s("追加到当天的日记文件，适合快速收集和后续整理。",
           "今日のデイリーファイルに追加。素早いメモや後での整理に最適。",
           "Append to today's daily file. Great for quick capture and later review.")
-    }
-    static var writeModeDocumentSummary: String {
-        s("每次新建一篇独立 Markdown 文档，适合沉淀为正式稿件。",
-          "毎回独立した Markdown ドキュメントを作成。清書に最適。",
-          "Create a standalone Markdown document each time. Good for polished writing.")
     }
     static var writeModeDailyTarget: String {
         s("按模块追加到当天日记，底部保留自定义模块切换。",
           "セクションごとに今日のデイリーに追加。下部でセクション切替可能。",
           "Append by section to today's daily note, with section switching at bottom.")
     }
-    static var writeModeDocumentTarget: String {
-        s("新建独立文件，可选标题，保存到指定目录。",
-          "独立ファイルを新規作成。タイトルは任意、指定フォルダに保存。",
-          "Create a standalone file with optional title, saved to the specified folder.")
-    }
 
     // MARK: - Thread Mode
 
     static var writeModeDailyCompact: String { s("Daily", "Daily", "Daily") }
-    static var writeModeDocumentCompact: String { s("文档", "ドキュメント", "Doc") }
     static var writeModeThreadTitle: String { s("线程", "スレッド", "Thread") }
     static var writeModeThreadCompact: String { s("线程", "スレッド", "Thread") }
     static var writeModeThreadDestination: String { s("追加到线程", "スレッドに追加", "Append to thread") }
@@ -201,8 +183,6 @@ enum L10n {
     // MARK: - Capture Panel
 
     static var notePlaceholder: String { s("输入笔记内容...", "ノートを入力...", "Type your note...") }
-    static var documentPlaceholder: String { s("输入文档内容...", "ドキュメントを入力...", "Type your document...") }
-    static var documentTitlePlaceholder: String { s("标题（可选）", "タイトル（任意）", "Title (optional)") }
     static var pinPanelHelp: String {
         s("固定面板，保存后不关闭 (⌘P)",
           "パネルを固定、保存後も閉じない (⌘P)",
