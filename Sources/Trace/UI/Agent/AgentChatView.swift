@@ -141,11 +141,8 @@ struct AgentChatView: View {
             .onChange(of: viewModel.messages.count) { _ in
                 scrollToBottom(proxy)
             }
-            .onChange(of: viewModel.streamingText) { _ in
-                scrollToBottom(proxy)
-            }
-            .onChange(of: viewModel.events.count) { _ in
-                scrollToBottom(proxy)
+            .onChange(of: viewModel.isLoading) { loading in
+                if loading { scrollToBottom(proxy) }
             }
         }
     }

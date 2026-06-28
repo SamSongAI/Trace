@@ -48,7 +48,7 @@ struct AgentMessage: Identifiable, Codable, Equatable {
 }
 
 struct AgentToolCall: Codable, Equatable {
-    let id: String
+    var id: String
     let type: String
     var function: AgentToolFunction
 }
@@ -216,7 +216,17 @@ final class AgentCore {
                 let repeatCount = recentToolCalls.filter { currentToolNames.contains($0) }.count
                 if repeatCount >= 3 {
                     agentPrint("Detected repeated tool calls, forcing final response")
+                    // Execute the tools to satisfy API contract, then add instruction to stop
+                    let toolResults = await executeToolCallsParallel(toolCalls, onToolCall: onToolCall, onToolResult: onToolResult)
                     conversationMessages.append(response)
+                    for result in toolResults {
+                        conversationMessages.append(AgentMessage(
+                            role: "tool",
+                            content: result.content,
+                            toolCallId: result.toolCallId,
+                            name: result.name
+                        ))
+                    }
                     conversationMessages.append(AgentMessage(
                         role: "user",
                         content: "You have already called these tools. Please provide a final text response now without any more tool calls."
@@ -382,7 +392,9 @@ final class AgentCore {
                         for rawToolCall in rawToolCalls {
                             let id = rawToolCall["id"] as? String ?? ""
                             let index = rawToolCall["index"] as? Int ?? 0
-                            let key = id.isEmpty ? "idx_\(index)" : id
+                            // Always use index as key — DeepSeek sends id in first chunk
+                            // but only index in subsequent chunks
+                            let key = "idx_\(index)"
 
                             if let function = rawToolCall["function"] as? [String: Any] {
                                 let name = function["name"] as? String ?? ""
@@ -391,6 +403,7 @@ final class AgentCore {
                                 if var existing = toolCalls[key] {
                                     existing.function.arguments += arguments
                                     if !name.isEmpty { existing.function.name = name }
+                                    if !id.isEmpty { existing.id = id }
                                     toolCalls[key] = existing
                                 } else if !name.isEmpty {
                                     toolCalls[key] = AgentToolCall(
@@ -475,9 +488,9 @@ final class AgentCore {
             return "Error: Unknown tool '\(toolName)'"
         }
 
-        guard let argsData = toolCall.function.arguments.data(using: .utf8),
+        guard let argsData = (toolCall.function.arguments.isEmpty ? "{}" : toolCall.function.arguments).data(using: .utf8),
               let args = try? JSONSerialization.jsonObject(with: argsData) as? [String: Any] else {
-            return "Error: Invalid tool arguments for '\(toolName)'"
+            return "Error: Invalid tool arguments for '\(toolName)': \(toolCall.function.arguments)"
         }
 
         // Execute with timeout
