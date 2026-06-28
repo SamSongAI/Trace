@@ -100,7 +100,7 @@ struct AgentChatView: View {
                             .id("error")
                     }
                 }
-                .padding(.vertical, 12)
+                .padding(.vertical, 10)
             }
             .onChange(of: viewModel.messages.count) { _ in
                 scrollToBottom(proxy)
@@ -120,38 +120,51 @@ struct AgentChatView: View {
         }
     }
 
+    @State private var inputFocused = false
+
     private var inputBar: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField(L10n.aiInputPlaceholder, text: $viewModel.inputText, axis: .vertical)
-                .font(.system(size: 13))
-                .textFieldStyle(.plain)
-                .lineLimit(1...5)
-                .foregroundStyle(theme.textPrimary)
-                .onSubmit {
-                    Task { await viewModel.send() }
+        HStack(alignment: .center, spacing: 8) {
+            ZStack(alignment: .leading) {
+                if viewModel.inputText.isEmpty {
+                    Text(L10n.aiInputPlaceholder)
+                        .font(.system(size: 13))
+                        .foregroundStyle(theme.textSecondary.opacity(0.5))
+                        .allowsHitTesting(false)
                 }
+
+                TextField("", text: $viewModel.inputText, axis: .vertical)
+                    .font(.system(size: 13))
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...5)
+                    .foregroundStyle(theme.textPrimary)
+                    .tint(theme.accent)
+                    .onSubmit {
+                        Task { await viewModel.send() }
+                    }
+            }
 
             Button {
                 Task { await viewModel.send() }
             } label: {
                 Image(systemName: viewModel.isLoading ? "stop.fill" : "arrow.up.circle.fill")
                     .font(.system(size: 22))
-                    .foregroundStyle(canSend ? theme.accent : theme.textSecondary.opacity(0.4))
+                    .foregroundStyle(canSend ? theme.accent : theme.textSecondary.opacity(0.3))
             }
             .buttonStyle(.plain)
             .disabled(!canSend)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(theme.surface.opacity(0.5))
+        .background(theme.surface)
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(theme.border.opacity(0.5), lineWidth: 0.5)
+                .stroke(theme.border, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .padding(.horizontal, 12)
-        .padding(.bottom, 12)
-        .background(theme.chromeBackground)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
+        .background(theme.panelBackground)
     }
 
     private var canSend: Bool {
@@ -181,51 +194,51 @@ private struct AgentMessageBubble: View {
             Text(message.content)
                 .font(.system(size: 13))
                 .foregroundStyle(theme.textPrimary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(theme.accent.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(theme.accent.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 12)
     }
 
     private var assistantBubble: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 6) {
             Image(systemName: "sparkles")
-                .font(.system(size: 10))
+                .font(.system(size: 9))
                 .foregroundStyle(theme.accent)
-                .frame(width: 22, height: 22)
-                .background(theme.accent.opacity(0.12))
+                .frame(width: 18, height: 18)
+                .background(theme.accent.opacity(0.1))
                 .clipShape(Circle())
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 if !message.content.isEmpty {
                     AgentMarkdownText(text: message.content, theme: theme)
                 }
                 if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
                     ForEach(toolCalls, id: \.id) { tc in
-                        HStack(spacing: 4) {
+                        HStack(spacing: 3) {
                             Image(systemName: "wrench.and.screwdriver")
-                                .font(.system(size: 9))
+                                .font(.system(size: 8))
                             Text(tc.function.name)
-                                .font(.system(size: 10, weight: .medium))
+                                .font(.system(size: 9, weight: .medium))
                         }
                         .foregroundStyle(theme.textSecondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(theme.surface.opacity(0.4))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(theme.surface.opacity(0.3))
                         .clipShape(Capsule())
                     }
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(theme.surface.opacity(0.5))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(theme.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             Spacer(minLength: 30)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 12)
     }
 }
 
@@ -236,27 +249,27 @@ private struct AgentStreamingBubble: View {
     let theme: TraceTheme.CapturePalette
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 6) {
             Image(systemName: "sparkles")
-                .font(.system(size: 10))
+                .font(.system(size: 9))
                 .foregroundStyle(theme.accent)
-                .frame(width: 22, height: 22)
-                .background(theme.accent.opacity(0.12))
+                .frame(width: 18, height: 18)
+                .background(theme.accent.opacity(0.1))
                 .clipShape(Circle())
 
             AgentMarkdownText(text: text, theme: theme)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(theme.surface.opacity(0.5))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(theme.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(theme.accent.opacity(0.2), lineWidth: 0.5)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(theme.accent.opacity(0.15), lineWidth: 0.5)
                 )
 
             Spacer(minLength: 30)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 12)
     }
 }
 
@@ -347,34 +360,34 @@ private struct AgentTypingIndicator: View {
     @State private var animate = false
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Image(systemName: "sparkles")
-                .font(.system(size: 10))
+                .font(.system(size: 9))
                 .foregroundStyle(theme.accent)
-                .frame(width: 22, height: 22)
-                .background(theme.accent.opacity(0.12))
+                .frame(width: 18, height: 18)
+                .background(theme.accent.opacity(0.1))
                 .clipShape(Circle())
 
-            HStack(spacing: 5) {
+            HStack(spacing: 4) {
                 ForEach(0..<3, id: \.self) { i in
                     Circle()
                         .fill(theme.textSecondary.opacity(0.5))
-                        .frame(width: 6, height: 6)
+                        .frame(width: 5, height: 5)
                         .scaleEffect(animate ? 1.0 : 0.5)
                         .animation(
-                            .easeInOut(duration: 0.5)
+                            .easeInOut(duration: 0.45)
                             .repeatForever()
-                            .delay(Double(i) * 0.15),
+                            .delay(Double(i) * 0.12),
                             value: animate
                         )
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(theme.surface.opacity(0.5))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(theme.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 12)
         .onAppear { animate = true }
     }
 }
