@@ -117,216 +117,179 @@ final class DailyNoteWriter {
             return try String(contentsOf: fileURL, encoding: .utf8)
         }
 
-        return ""
+        try ensureCSSExists(at: fileURL)
+        return htmlTemplate(for: fileURL)
     }
 
-    private func insert(_ entry: String, into content: String, under section: NoteSection) -> String {
-        var mutableContent = content
-        let header = settings.header(for: section)
+    private func ensureCSSExists(at dailyFileURL: URL) throws {
+        let vaultURL = dailyFileURL.deletingLastPathComponent().deletingLastPathComponent()
+        let traceDir = vaultURL.appendingPathComponent(".trace", isDirectory: true)
+        let cssURL = traceDir.appendingPathComponent("style.css", isDirectory: false)
 
-        if let headerRange = mutableContent.range(of: header) {
-            let afterHeaderIndex = headerRange.upperBound
-            let lineBreakIndex = mutableContent[afterHeaderIndex...].firstIndex(of: "\n") ?? mutableContent.endIndex
-            let insertIndex = lineBreakIndex == mutableContent.endIndex
-                ? mutableContent.endIndex
-                : mutableContent.index(after: lineBreakIndex)
-            let prefix: String
-            if insertIndex < mutableContent.endIndex {
-                prefix = mutableContent[insertIndex] == "\n" ? "" : "\n"
-            } else {
-                prefix = lineBreakIndex == mutableContent.endIndex ? "\n\n" : "\n"
-            }
-            mutableContent.insert(contentsOf: "\(prefix)\(entry)", at: insertIndex)
-            return mutableContent
+        guard !fileManager.fileExists(atPath: cssURL.path) else { return }
+
+        try fileManager.createDirectory(at: traceDir, withIntermediateDirectories: true)
+        let css = """
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            background: #fafafa;
+            color: #333;
+            line-height: 1.6;
+            padding: 24px;
+            max-width: 720px;
+            margin: 0 auto;
         }
-
-        if mutableContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "\(header)\n\n\(entry)"
+        h1 {
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            color: #1a1a1a;
         }
-
-        if !mutableContent.hasSuffix("\n") {
-            mutableContent.append("\n")
+        section { margin-bottom: 28px; }
+        h2 {
+            font-size: 15px;
+            font-weight: 600;
+            color: #666;
+            margin-bottom: 12px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #eee;
         }
-
-        mutableContent.append("\n\(header)\n\n")
-        mutableContent.append(entry)
-        return mutableContent
+        .card {
+            background: #fff;
+            border-radius: 10px;
+            padding: 14px 16px;
+            margin-bottom: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+        }
+        .card p {
+            font-size: 14px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .card time {
+            display: block;
+            font-size: 11px;
+            color: #999;
+            margin-top: 8px;
+        }
+        .card .separator {
+            border: none;
+            border-top: 1px dashed #e0e0e0;
+            margin: 10px 0;
+        }
+        code {
+            font-family: "SF Mono", Menlo, monospace;
+            font-size: 12px;
+            background: #f0f0f0;
+            padding: 2px 5px;
+            border-radius: 4px;
+        }
+        pre {
+            background: #f5f5f5;
+            padding: 12px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 8px 0;
+        }
+        pre code { background: none; padding: 0; }
+        img { max-width: 100%; border-radius: 8px; margin: 8px 0; }
+        a { color: #4A90D9; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        """
+        try css.write(to: cssURL, atomically: true, encoding: .utf8)
     }
 
-    private func entryForText(_ text: String, at date: Date) -> String {
-        switch settings.dailyEntryThemePreset {
-        case .codeBlockClassic:
-            let body = "```\n\(text)\n\(timestamp(for: date))\n```"
-            return markdownEntry(body)
-        case .plainTextTimestamp:
-            return markdownEntry(plainTextBodyForText(text, at: date))
-        case .markdownQuote:
-            return markdownEntry(markdownQuoteBodyForText(text, at: date))
-        }
-    }
-
-    private func appendLatestEntry(_ text: String, at date: Date, into content: String, under section: NoteSection) -> String? {
-        switch settings.dailyEntryThemePreset {
-        case .codeBlockClassic:
-            return appendLatestCodeBlockEntry(text, at: date, into: content, under: section)
-        case .plainTextTimestamp:
-            return appendLatestPlainTextEntry(text, at: date, into: content, under: section)
-        case .markdownQuote:
-            return appendLatestMarkdownQuoteEntry(text, at: date, into: content, under: section)
-        }
-    }
-
-    private func appendLatestCodeBlockEntry(_ text: String, at date: Date, into content: String, under section: NoteSection) -> String? {
-        guard let sectionBodyRange = sectionBodyRange(in: content, under: section) else {
-            return nil
-        }
-
-        let sectionBody = content[sectionBodyRange]
-        guard let openingFenceRange = sectionBody.range(of: "```") else {
-            return nil
-        }
-
-        guard let closingFenceRange = sectionBody[openingFenceRange.upperBound...].range(of: "```") else {
-            return nil
-        }
-
-        let insertionIndex = closingFenceRange.lowerBound
-        let prefix = insertionIndex > content.startIndex && content[content.index(before: insertionIndex)] == "\n"
-            ? ""
-            : "\n"
-        let appendedChunk = "\(prefix)---\n\(text)\n\(timestamp(for: date))\n"
-
-        var mutableContent = content
-        mutableContent.insert(contentsOf: appendedChunk, at: insertionIndex)
-        return mutableContent
-    }
-
-    private func quotedText(from text: String) -> String {
-        text
-            .components(separatedBy: .newlines)
-            .map { line in
-                line.isEmpty ? ">" : "> \(line)"
-            }
-            .joined(separator: "\n")
-    }
-
-    private func markdownQuoteBodyForText(_ text: String, at date: Date) -> String {
-        let body = quotedText(from: text)
+    private func htmlTemplate(for fileURL: URL) -> String {
+        let fileName = fileURL.deletingPathExtension().lastPathComponent
         return """
-        \(body)
-        >
-        > \(timestamp(for: date))
+        <!DOCTYPE html>
+        <html lang="zh">
+        <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="stylesheet" href="../.trace/style.css">
+        <title>\(fileName)</title>
+        </head>
+        <body>
+        <h1>\(fileName)</h1>
+        </body>
+        </html>
         """
     }
 
-    private func plainTextBodyForText(_ text: String, at date: Date) -> String {
-        "\(text)\n\(timestamp(for: date))"
-    }
+    private func insert(_ entry: String, into content: String, under section: NoteSection) -> String {
+        let sectionTitle = settings.title(for: section)
+        let sectionTag = "<section data-section=\"\(sectionTitle)\">"
+        let h2Tag = "<h2>\(sectionTitle)</h2>"
 
-    private func markdownEntry(_ body: String) -> String {
-        "\(body)\n\n"
-    }
-
-    private func appendLatestPlainTextEntry(_ text: String, at date: Date, into content: String, under section: NoteSection) -> String? {
-        guard let sectionBodyRange = sectionBodyRange(in: content, under: section) else {
-            return nil
-        }
-
-        let sectionBody = content[sectionBodyRange]
-        guard let latestTimestampRange = sectionBody.range(
-            of: #"(?m)^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$"#,
-            options: .regularExpression
-        ) else {
-            return nil
-        }
-
-        let insertionIndex = latestTimestampRange.upperBound
-        let appendedChunk = "\n---\n\(text)\n\(timestamp(for: date))"
-
-        var mutableContent = content
-        mutableContent.insert(contentsOf: appendedChunk, at: insertionIndex)
-        return mutableContent
-    }
-
-    private func appendLatestMarkdownQuoteEntry(_ text: String, at date: Date, into content: String, under section: NoteSection) -> String? {
-        guard let sectionBodyRange = sectionBodyRange(in: content, under: section) else {
-            return nil
-        }
-
-        let sectionBody = content[sectionBodyRange]
-        guard let quoteStart = firstQuoteBlockStart(in: sectionBody) else {
-            return nil
-        }
-
-        let quoteEnd = calloutBlockEnd(in: sectionBody, from: quoteStart)
-        let insertionIndex = quoteEnd
-        let appendedBody = quotedText(from: text)
-        let chunk = "\n> ---\n\(appendedBody)\n>\n> \(timestamp(for: date))\n"
-
-        var mutableContent = content
-        mutableContent.insert(contentsOf: chunk, at: insertionIndex)
-        return mutableContent
-    }
-
-    private func firstQuoteBlockStart(in sectionBody: Substring) -> String.Index? {
-        var lineStart = sectionBody.startIndex
-
-        while lineStart < sectionBody.endIndex {
-            let lineBreak = sectionBody[lineStart...].firstIndex(of: "\n")
-            let lineEnd = lineBreak ?? sectionBody.endIndex
-            let line = sectionBody[lineStart..<lineEnd]
-            if line.hasPrefix(">") {
-                return lineStart
+        // Section already exists — insert card before </section>
+        if let sectionRange = content.range(of: sectionTag) {
+            let afterSection = sectionRange.upperBound
+            // Find </section> for this section
+            if let closeRange = content[afterSection...].range(of: "</section>") {
+                var mutable = content
+                mutable.insert(contentsOf: "\n\(entry)", at: closeRange.lowerBound)
+                return mutable
             }
-
-            guard let lineBreak else { break }
-            lineStart = sectionBody.index(after: lineBreak)
         }
 
-        return nil
+        // Section doesn't exist — create it before </body>
+        let sectionHtml = "\n\(sectionTag)\n\(h2Tag)\n\(entry)\n</section>"
+        if let bodyCloseRange = content.range(of: "</body>") {
+            var mutable = content
+            mutable.insert(contentsOf: sectionHtml, at: bodyCloseRange.lowerBound)
+            return mutable
+        }
+
+        // Fallback: append
+        return content + sectionHtml
     }
 
-    private func calloutBlockEnd(in sectionBody: Substring, from start: String.Index) -> String.Index {
-        var lineStart = start
-
-        while lineStart < sectionBody.endIndex {
-            guard let lineBreak = sectionBody[lineStart...].firstIndex(of: "\n") else {
-                let line = sectionBody[lineStart..<sectionBody.endIndex]
-                return line.hasPrefix(">") ? sectionBody.endIndex : lineStart
-            }
-
-            let line = sectionBody[lineStart..<lineBreak]
-            if lineStart != start, line.hasPrefix("> [!") {
-                return lineStart
-            }
-            if !line.hasPrefix(">") {
-                return lineStart
-            }
-
-            lineStart = sectionBody.index(after: lineBreak)
-        }
-
-        return sectionBody.endIndex
+    private func entryForText(_ text: String, at date: Date) -> String {
+        let escaped = htmlEscape(text)
+        let time = timestamp(for: date)
+        return """
+        <div class="card">
+        <p>\(escaped)</p>
+        <time>\(time)</time>
+        </div>
+        """
     }
 
-    private func sectionBodyRange(in content: String, under section: NoteSection) -> Range<String.Index>? {
-        let header = settings.header(for: section)
-        guard let headerRange = content.range(of: header) else {
-            return nil
-        }
+    private func appendLatestEntry(_ text: String, at date: Date, into content: String, under section: NoteSection) -> String? {
+        let sectionTitle = settings.title(for: section)
+        let sectionTag = "<section data-section=\"\(sectionTitle)\">"
 
-        let afterHeaderLineBreak = content[headerRange.upperBound...].firstIndex(of: "\n")
-        let sectionStart = afterHeaderLineBreak.map { content.index(after: $0) } ?? content.endIndex
+        guard let sectionRange = content.range(of: sectionTag) else { return nil }
+        let afterSection = sectionRange.upperBound
 
-        guard sectionStart < content.endIndex else {
-            return sectionStart..<sectionStart
-        }
+        // Find the last </time></div> in this section, insert before </div>
+        guard let closeSectionRange = content[afterSection...].range(of: "</section>") else { return nil }
+        let sectionBody = content[afterSection..<closeSectionRange.lowerBound]
 
-        if let nextHeaderRange = content[sectionStart...].range(of: "\n# ") {
-            return sectionStart..<nextHeaderRange.lowerBound
-        }
+        guard let lastTimeRange = sectionBody.range(of: "</time>", options: .backwards) else { return nil }
+        // Find the </div> after this </time>
+        let afterTime = lastTimeRange.upperBound
+        guard let divCloseRange = content[afterTime...].range(of: "</div>") else { return nil }
 
-        return sectionStart..<content.endIndex
+        let escaped = htmlEscape(text)
+        let time = timestamp(for: date)
+        let chunk = """
+        \n<hr class="separator">\n<p>\(escaped)</p>\n<time>\(time)</time>
+        """
+
+        var mutable = content
+        mutable.insert(contentsOf: chunk, at: divCloseRange.lowerBound)
+        return mutable
+    }
+
+    private func htmlEscape(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
     }
 
     private func timestamp(for date: Date) -> String {
@@ -340,7 +303,7 @@ final class DailyNoteWriter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = settings.dailyFileDateFormat
-        return formatter.string(from: date) + ".md"
+        return formatter.string(from: date) + ".html"
     }
 
     private func fileNameTimestampWithoutMilliseconds(for date: Date) -> String {
