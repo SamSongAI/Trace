@@ -507,6 +507,8 @@ final class AppSettings: ObservableObject {
         aiApiKey = defaults.string(forKey: SettingKeys.aiApiKey) ?? ""
         aiModel = defaults.string(forKey: SettingKeys.aiModel) ?? "gpt-4o-mini"
         aiEndpoint = defaults.string(forKey: SettingKeys.aiEndpoint) ?? "https://api.openai.com/v1"
+        let _dbgMsg = "[AppSettings] AI config: enabled=\(defaults.bool(forKey: SettingKeys.aiEnabled)), key=\((defaults.string(forKey: SettingKeys.aiApiKey) ?? "").prefix(8))..., model=\(defaults.string(forKey: SettingKeys.aiModel) ?? ""), endpoint=\(defaults.string(forKey: SettingKeys.aiEndpoint) ?? "")"
+        FileHandle.standardError.write((_dbgMsg + "\n").data(using: .utf8) ?? Data())
         dailyFileDateFormat = defaults.string(forKey: SettingKeys.dailyFileDateFormat) ?? "yyyy M月d日 EEEE"
         noteWriteMode = NoteWriteMode(rawValue: defaults.string(forKey: SettingKeys.noteWriteMode) ?? "") ?? .dimension
 

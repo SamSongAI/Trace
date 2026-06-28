@@ -3,6 +3,11 @@ import os.log
 
 private let agentLog = Logger(subsystem: "com.trace.app", category: "AgentCore")
 
+private func agentPrint(_ message: String) {
+    let line = "[AgentCore] \(message)\n"
+    FileHandle.standardError.write(line.data(using: .utf8) ?? Data())
+}
+
 struct AgentMessage: Identifiable, Codable, Equatable {
     let id: UUID
     var role: String
@@ -24,8 +29,10 @@ struct AgentMessage: Identifiable, Codable, Equatable {
         var dict: [String: Any] = ["role": role]
         if let content, !content.isEmpty {
             dict["content"] = content
+        } else if role == "assistant" {
+            dict["content"] = ""
         } else {
-            dict["content"] = NSNull()
+            dict["content"] = content ?? ""
         }
         if let toolCalls, !toolCalls.isEmpty {
             dict["tool_calls"] = toolCalls.map { $0.toAPIDict() }
@@ -183,10 +190,12 @@ final class AgentCore {
             conversationMessages.insert(AgentMessage(role: "system", content: systemPrompt), at: 0)
         }
 
-        agentLog.info("Chat started with \(conversationMessages.count) messages")
+        agentPrint("Chat started with \(conversationMessages.count) messages")
+
+        var recentToolCalls: [String] = []
 
         for iteration in 0..<maxIterations {
-            agentLog.info("Iteration \(iteration)")
+            agentPrint("Iteration \(iteration)")
             onIteration?(iteration)
 
             // Compaction: if conversation is too long, summarize older messages
@@ -194,9 +203,25 @@ final class AgentCore {
 
             let response = try await callAPIStreaming(messages: conversationMessages, onToken: onToken)
 
-            agentLog.info("Response: content=\(response.content?.count ?? 0) chars, toolCalls=\(response.toolCalls?.count ?? 0)")
+            agentPrint("Response: content=\(response.content?.count ?? 0) chars, toolCalls=\(response.toolCalls?.count ?? 0)")
 
             if let toolCalls = response.toolCalls, !toolCalls.isEmpty {
+                // Detect repeated tool calls (same tool called 3+ times in a row)
+                let currentToolNames = toolCalls.map { $0.function.name }
+                let repeatCount = recentToolCalls.filter { currentToolNames.contains($0) }.count
+                if repeatCount >= 3 {
+                    agentPrint("Detected repeated tool calls, forcing final response")
+                    conversationMessages.append(response)
+                    conversationMessages.append(AgentMessage(
+                        role: "user",
+                        content: "You have already called these tools. Please provide a final text response now without any more tool calls."
+                    ))
+                    recentToolCalls.removeAll()
+                    continue
+                }
+                recentToolCalls.append(contentsOf: currentToolNames)
+                if recentToolCalls.count > 6 { recentToolCalls.removeFirst(recentToolCalls.count - 6) }
+
                 conversationMessages.append(response)
 
                 // Execute tool calls in parallel (industry standard: OpenAI/Claude SDK)
@@ -211,12 +236,12 @@ final class AgentCore {
                     ))
                 }
             } else {
-                agentLog.info("Chat complete")
+                agentPrint("Chat complete")
                 return response
             }
         }
 
-        agentLog.error("Max iterations reached")
+        agentPrint("Max iterations reached")
         throw AgentError.maxIterationsReached
     }
 
@@ -293,12 +318,11 @@ final class AgentCore {
         if !tools.isEmpty {
             body["tools"] = tools.map { ["type": "function", "function": $0.definition.function.toDict()] }
             body["tool_choice"] = "auto"
-            body["parallel_tool_calls"] = true
         }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        agentLog.info("API request to \(url.absoluteString), model=\(self.settings.aiModel)")
+        agentPrint("API request to \(url.absoluteString), model=\(self.settings.aiModel)")
         let requestStart = Date()
 
         // Retry with exponential backoff for 5xx errors
@@ -313,7 +337,7 @@ final class AgentCore {
 
                 if httpResponse.statusCode >= 500 && attempt < maxRetries - 1 {
                     let delay = pow(2.0, Double(attempt)) * 0.5
-                    agentLog.warning("HTTP \(httpResponse.statusCode), retrying in \(delay)s (attempt \(attempt + 1)/\(self.maxRetries))")
+                    agentPrint("HTTP \(httpResponse.statusCode), retrying in \(delay)s (attempt \(attempt + 1)/\(self.maxRetries))")
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     continue
                 }
@@ -323,11 +347,11 @@ final class AgentCore {
                     for try await line in bytes.lines {
                         errorBody += line
                     }
-                    agentLog.error("API error: HTTP \(httpResponse.statusCode), body=\(errorBody)")
+                    agentPrint("API error: HTTP \(httpResponse.statusCode), body=\(errorBody)")
                     throw AgentError.apiError("HTTP \(httpResponse.statusCode): \(errorBody)")
                 }
 
-                agentLog.info("Stream started, \(Date().timeIntervalSince(requestStart))s")
+                agentPrint("Stream started, \(Date().timeIntervalSince(requestStart))s")
 
                 var content = ""
                 var toolCalls: [String: AgentToolCall] = [:]
@@ -375,7 +399,7 @@ final class AgentCore {
                     }
                 }
 
-                agentLog.info("Stream done: \(tokenCount) tokens, \(content.count) chars, \(Date().timeIntervalSince(requestStart))s total")
+                agentPrint("Stream done: \(tokenCount) tokens, \(content.count) chars, \(Date().timeIntervalSince(requestStart))s total")
 
                 let finalToolCalls = Array(toolCalls.values)
                 return AgentMessage(
@@ -387,7 +411,7 @@ final class AgentCore {
                 lastError = error
                 if attempt < maxRetries - 1 {
                     let delay = pow(2.0, Double(attempt)) * 0.5
-                    agentLog.warning("Request failed: \(error.localizedDescription), retrying in \(delay)s")
+                    agentPrint("Request failed: \(error.localizedDescription), retrying in \(delay)s")
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 }
             }
@@ -411,13 +435,13 @@ final class AgentCore {
             for toolCall in toolCalls {
                 let toolName = toolCall.function.name
                 let toolArgs = toolCall.function.arguments
-                agentLog.info("Tool call: \(toolName)(\(toolArgs))")
+                agentPrint("Tool call: \(toolName)(\(toolArgs))")
                 onToolCall?(toolName)
 
                 group.addTask { [self] in
                     let result = await self.executeToolWithTimeout(toolCall)
                     let truncated = self.truncateResult(result)
-                    agentLog.info("Tool result [\(toolName)]: \(result.count) chars")
+                    agentPrint("Tool result [\(toolName)]: \(result.count) chars")
                     onToolResult?(toolName, truncated)
                     return ToolResult(toolCallId: toolCall.id, name: toolName, content: truncated)
                 }

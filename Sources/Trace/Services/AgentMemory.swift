@@ -151,10 +151,10 @@ final class AgentMemory {
 
     func sessionEndPrompt() -> String {
         return """
-        Before ending this session, please:
-        1. If you learned new things about the user, use update_identity to update identity.md
-        2. Use save_session_summary to write a brief summary of this conversation
-        3. If you discovered any insights from the user's vault, use save_insight to record them
+        Wrap up this session. Do ALL of the following in a SINGLE response, then stop:
+        1. If you learned new things about the user, call update_identity once.
+        2. Call save_session_summary once with a brief summary.
+        3. Do NOT call any other tools. Do NOT repeat tool calls. Output a brief farewell message and stop.
         """
     }
 }
