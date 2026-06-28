@@ -427,6 +427,13 @@ enum PasteboardImageResolver {
             images.append(image)
         }
 
+        // 6. HTML image extraction (handles WeChat articles, web pages)
+        if images.isEmpty {
+            if let htmlImages = resolveImagesFromHTML(in: pasteboard) {
+                images.append(contentsOf: htmlImages)
+            }
+        }
+
         return images
     }
 
@@ -501,6 +508,40 @@ enum PasteboardImageResolver {
         }
 
         return utType.conforms(to: .image)
+    }
+
+    private static func resolveImagesFromHTML(in pasteboard: NSPasteboard) -> [NSImage]? {
+        let htmlType = NSPasteboard.PasteboardType.html
+        guard let htmlData = pasteboard.data(forType: htmlType),
+              !htmlData.isEmpty,
+              let html = String(data: htmlData, encoding: .utf8) ?? String(data: htmlData, encoding: .unicode) else {
+            return nil
+        }
+
+        let imgURLs = extractImageURLs(from: html)
+        guard !imgURLs.isEmpty else { return nil }
+
+        var images: [NSImage] = []
+        for urlString in imgURLs {
+            guard let url = URL(string: urlString) else { continue }
+            if let data = try? Data(contentsOf: url), let image = NSImage(data: data) {
+                images.append(image)
+            }
+        }
+        return images.isEmpty ? nil : images
+    }
+
+    private static func extractImageURLs(from html: String) -> [String] {
+        let pattern = #"<img[^>]+src\s*=\s*["']([^"']+)["']"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return []
+        }
+        let range = NSRange(html.startIndex..., in: html)
+        let matches = regex.matches(in: html, options: [], range: range)
+        return matches.compactMap { match in
+            guard let urlRange = Range(match.range(at: 1), in: html) else { return nil }
+            return String(html[urlRange])
+        }
     }
 }
 
