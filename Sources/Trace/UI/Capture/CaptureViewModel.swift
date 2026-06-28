@@ -7,10 +7,12 @@ final class CaptureViewModel: ObservableObject {
     @Published var fileTitle: String = ""
     @Published var pinned: Bool = false
     @Published var toastMessage: String?
+    @Published var pastedImagePaths: [String] = []
 
     func resetInput() {
         text = ""
         fileTitle = ""
+        pastedImagePaths = []
     }
 
     func showToast(_ message: String, duration: TimeInterval = 1.5) {

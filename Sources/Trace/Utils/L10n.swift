@@ -252,6 +252,26 @@ enum L10n {
           "画像のエンコードに失敗しました。PNG ファイルを書き込めません。",
           "Image encoding failed. Cannot write PNG file.")
     }
+    static var imagePastedOne: String {
+        s("已粘贴 1 张图片",
+          "画像 1 枚を貼り付けました",
+          "Pasted 1 image")
+    }
+    static var imagePastedMultiple: String {
+        s("已粘贴 %d 张图片",
+          "画像 %d 枚を貼り付けました",
+          "Pasted %d images")
+    }
+    static var imagePasteFailed: String {
+        s("图片粘贴失败",
+          "画像の貼り付けに失敗しました",
+          "Image paste failed")
+    }
+    static var imageNoImageFound: String {
+        s("剪贴板中没有图片",
+          "クリップボードに画像がありません",
+          "No image found in clipboard")
+    }
 
     // MARK: - Theme Descriptions
 

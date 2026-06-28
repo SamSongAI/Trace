@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -14,10 +15,10 @@ struct CaptureTextEditor: NSViewRepresentable {
     @Binding var isFocused: Bool
     let placeholder: String
     let theme: Theme
-    let onPasteImage: ((NSImage) -> String?)?
+    let onPasteImages: (([NSImage]) -> [String])?
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, isFocused: $isFocused, onPasteImage: onPasteImage)
+        Coordinator(text: $text, isFocused: $isFocused, onPasteImages: onPasteImages)
     }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -53,9 +54,10 @@ struct CaptureTextEditor: NSViewRepresentable {
         textView.placeholderColor = theme.placeholderColor
         textView.placeholderFont = theme.editorFont
         textView.string = text
-        textView.onPasteImage = { image, textView in
-            context.coordinator.handlePastedImage(image, in: textView)
+        textView.onPasteImages = { images, textView in
+            context.coordinator.handlePastedImages(images, in: textView)
         }
+        registerForDraggedTypes(in: textView)
 
         scrollView.documentView = textView
         return scrollView
@@ -87,21 +89,30 @@ struct CaptureTextEditor: NSViewRepresentable {
         }
     }
 
+    private func registerForDraggedTypes(in textView: NSView) {
+        textView.registerForDraggedTypes([
+            .png,
+            .tiff,
+            .pdf,
+            NSPasteboard.PasteboardType.fileURL
+        ])
+    }
+
     final class Coordinator: NSObject, NSTextViewDelegate {
         private let text: Binding<String>
         private let isFocused: Binding<Bool>
-        private let onPasteImage: ((NSImage) -> String?)?
+        private let onPasteImages: (([NSImage]) -> [String])?
         private var isApplyingExternalText = false
         private var pendingExternalText: String?
 
         init(
             text: Binding<String>,
             isFocused: Binding<Bool>,
-            onPasteImage: ((NSImage) -> String?)?
+            onPasteImages: (([NSImage]) -> [String])?
         ) {
             self.text = text
             self.isFocused = isFocused
-            self.onPasteImage = onPasteImage
+            self.onPasteImages = onPasteImages
         }
 
         func syncTextViewIfNeeded(_ textView: NSTextView, with updatedText: String) {
@@ -147,14 +158,26 @@ struct CaptureTextEditor: NSViewRepresentable {
             isFocused.wrappedValue = false
         }
 
-        func handlePastedImage(_ image: NSImage, in textView: NSTextView) {
-            guard let onPasteImage,
-                  let markdown = onPasteImage(image) else {
+        func handlePastedImages(_ images: [NSImage], in textView: NSTextView) {
+            guard !images.isEmpty else {
                 NSSound.beep()
                 return
             }
 
-            let insertion = markdown + "\n"
+            let markdowns: [String]
+            if let onPasteImages {
+                markdowns = onPasteImages(images)
+            } else {
+                NSSound.beep()
+                return
+            }
+
+            guard !markdowns.isEmpty else {
+                NSSound.beep()
+                return
+            }
+
+            let insertion = markdowns.map { $0 + "\n" }.joined()
             textView.insertText(insertion, replacementRange: textView.selectedRange())
 
             if text.wrappedValue != textView.string {
@@ -200,7 +223,7 @@ private final class PlaceholderTextView: NSTextView {
         didSet { needsDisplay = true }
     }
 
-    var onPasteImage: ((NSImage, NSTextView) -> Void)?
+    var onPasteImages: (([NSImage], NSTextView) -> Void)?
 
     override var string: String {
         didSet { needsDisplay = true }
@@ -235,6 +258,28 @@ private final class PlaceholderTextView: NSTextView {
         return super.readSelection(from: pboard, type: pasteboardType)
     }
 
+    // MARK: - Drag and Drop
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let pasteboard = sender.draggingPasteboard
+        let hasImages = PasteboardImageResolver.resolveAll(from: pasteboard).count > 0
+        return hasImages ? .copy : NSDragOperation()
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let pasteboard = sender.draggingPasteboard
+        let hasImages = PasteboardImageResolver.resolveAll(from: pasteboard).count > 0
+        return hasImages ? .copy : NSDragOperation()
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let pasteboard = sender.draggingPasteboard
+        let images = PasteboardImageResolver.resolveAll(from: pasteboard)
+        guard !images.isEmpty else { return false }
+        onPasteImages?(images, self)
+        return true
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 
@@ -265,21 +310,24 @@ private final class PlaceholderTextView: NSTextView {
         from pasteboard: NSPasteboard,
         preferredType: NSPasteboard.PasteboardType? = nil
     ) -> Bool {
-        let resolvedImage: NSImage?
+        let images: [NSImage]
         if let preferredType,
-           let items = pasteboard.pasteboardItems,
-           let matchingItem = items.first(where: { $0.types.contains(preferredType) }),
-           let image = PasteboardImageResolver.resolve(from: matchingItem, preferredType: preferredType) {
-            resolvedImage = image
+           let items = pasteboard.pasteboardItems {
+            images = items.compactMap { item in
+                if item.types.contains(preferredType) {
+                    return PasteboardImageResolver.resolve(from: item, preferredType: preferredType)
+                }
+                return nil
+            }
         } else {
-            resolvedImage = PasteboardImageResolver.resolve(from: pasteboard)
+            images = PasteboardImageResolver.resolveAll(from: pasteboard)
         }
 
-        guard let resolvedImage else {
+        guard !images.isEmpty else {
             return false
         }
 
-        onPasteImage?(resolvedImage, self)
+        onPasteImages?(images, self)
         return true
     }
 }
@@ -301,50 +349,71 @@ enum PasteboardImageResolver {
     ]
 
     static func resolve(from pasteboard: NSPasteboard) -> NSImage? {
-        if let image = pasteboard
-            .readObjects(forClasses: [NSImage.self], options: nil)?
-            .first as? NSImage {
-            return image
-        }
+        resolveAll(from: pasteboard).first
+    }
 
-        if let image = NSImage(pasteboard: pasteboard) {
-            return image
-        }
+    static func resolveAll(from pasteboard: NSPasteboard) -> [NSImage] {
+        var images: [NSImage] = []
+        var seen = Set<String>()
 
-        for type in standardImageTypes {
-            if let data = pasteboard.data(forType: type),
-               let image = NSImage(data: data) {
-                return image
-            }
-        }
-
-        if let items = pasteboard.pasteboardItems,
-           let image = resolve(from: items) {
-            return image
-        }
-
-        let fileURLOptions: [NSPasteboard.ReadingOptionKey: Any] = [
-            .urlReadingFileURLsOnly: true
-        ]
-        if let urls = pasteboard.readObjects(
-            forClasses: [NSURL.self],
-            options: fileURLOptions
-        ) as? [URL] {
-            for url in urls {
-                if let image = NSImage(contentsOf: url) {
-                    return image
+        // 1. readObjects for NSImage — may return multiple
+        if let nsImages = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage] {
+            for image in nsImages {
+                let key = imageKey(image)
+                if !seen.contains(key) {
+                    seen.insert(key)
+                    images.append(image)
                 }
             }
         }
 
-        if let fileURLString = pasteboard.string(forType: .fileURL),
-           let url = URL(string: fileURLString),
-           url.isFileURL,
-           let image = NSImage(contentsOf: url) {
-            return image
+        // 2. Per-item resolution for custom pasteboard types
+        if let items = pasteboard.pasteboardItems {
+            for item in items {
+                if let image = resolve(from: item) {
+                    let key = imageKey(image)
+                    if !seen.contains(key) {
+                        seen.insert(key)
+                        images.append(image)
+                    }
+                }
+            }
         }
 
-        return nil
+        // 3. File URLs — may be multiple image files
+        if images.isEmpty {
+            let fileURLOptions: [NSPasteboard.ReadingOptionKey: Any] = [
+                .urlReadingFileURLsOnly: true
+            ]
+            if let urls = pasteboard.readObjects(
+                forClasses: [NSURL.self],
+                options: fileURLOptions
+            ) as? [URL] {
+                for url in urls {
+                    if let image = NSImage(contentsOf: url) {
+                        let key = imageKey(image)
+                        if !seen.contains(key) {
+                            seen.insert(key)
+                            images.append(image)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Fallback: single image via NSImage(pasteboard:)
+        if images.isEmpty, let image = NSImage(pasteboard: pasteboard) {
+            images.append(image)
+        }
+
+        return images
+    }
+
+    private static func imageKey(_ image: NSImage) -> String {
+        if let tiff = image.tiffRepresentation {
+            return SHA256.hash(data: tiff).compactMap { String(format: "%02x", $0) }.joined()
+        }
+        return UUID().uuidString
     }
 
     static func resolve(from items: [NSPasteboardItem]) -> NSImage? {
@@ -355,6 +424,10 @@ enum PasteboardImageResolver {
         }
 
         return nil
+    }
+
+    static func resolveAll(from items: [NSPasteboardItem]) -> [NSImage] {
+        items.compactMap { resolve(from: $0) }
     }
 
     static func resolve(from item: NSPasteboardItem) -> NSImage? {

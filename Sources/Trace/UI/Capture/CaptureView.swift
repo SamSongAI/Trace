@@ -22,7 +22,7 @@ private struct ThreadGridWidthPreferenceKey: PreferenceKey {
 struct CaptureView: View {
     @ObservedObject var viewModel: CaptureViewModel
     @ObservedObject var settings: AppSettings
-    let onPasteImage: ((NSImage) -> String?)?
+    let onPasteImages: (([NSImage]) -> [String])?
 
     @State private var inputFocused = false
     @State private var sectionGridWidth: CGFloat = 0
@@ -53,6 +53,9 @@ struct CaptureView: View {
             header
             Divider().overlay(theme.border)
             editor
+            if !viewModel.pastedImagePaths.isEmpty {
+                thumbnailStrip
+            }
             switch settings.noteWriteMode {
             case .dimension:
                 modeFooter
@@ -128,9 +131,36 @@ struct CaptureView: View {
             isFocused: $inputFocused,
             placeholder: editorPlaceholder,
             theme: editorTheme,
-            onPasteImage: onPasteImage
+            onPasteImages: onPasteImages
         )
         .background(theme.panelBackground)
+    }
+
+    private var thumbnailStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(viewModel.pastedImagePaths.indices, id: \.self) { index in
+                    let path = viewModel.pastedImagePaths[index]
+                    if let nsImage = NSImage(contentsOfFile: path) {
+                        Image(nsImage: nsImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 48, height: 48)
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .stroke(theme.border, lineWidth: 1)
+                            )
+                            .help(path as String)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+        .frame(height: 60)
+        .background(theme.surface.opacity(0.4))
+        .overlay(Divider().overlay(theme.border), alignment: .top)
     }
 
     private var documentFooter: some View {

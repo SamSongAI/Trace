@@ -106,8 +106,8 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
         let rootView = CaptureView(
             viewModel: viewModel,
             settings: settings,
-            onPasteImage: { [weak self] image in
-                self?.markdownForPastedImage(image)
+            onPasteImages: { [weak self] images in
+                self?.markdownForPastedImages(images) ?? []
             }
         )
 
@@ -353,13 +353,52 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
         alert.beginSheetModal(for: panel)
     }
 
-    private func markdownForPastedImage(_ image: NSImage) -> String? {
-        do {
-            return try clipboardImageWriter.saveFromPasteboardImage(image)
-        } catch {
-            showError(error.localizedDescription)
-            return nil
+    private func markdownForPastedImages(_ images: [NSImage]) -> [String] {
+        var markdowns: [String] = []
+        var lastError: Error?
+
+        for image in images {
+            do {
+                let markdown = try clipboardImageWriter.saveFromPasteboardImage(image)
+                markdowns.append(markdown)
+                if let absolutePath = absolutePath(forMarkdownImage: markdown) {
+                    viewModel.pastedImagePaths.append(absolutePath)
+                }
+            } catch {
+                lastError = error
+            }
         }
+
+        if markdowns.isEmpty {
+            if let lastError {
+                showError(lastError.localizedDescription)
+            } else {
+                viewModel.showToast(L10n.imagePasteFailed)
+            }
+        } else {
+            let count = markdowns.count
+            if count == 1 {
+                viewModel.showToast(L10n.imagePastedOne)
+            } else {
+                viewModel.showToast(String(format: L10n.imagePastedMultiple, count))
+            }
+        }
+
+        return markdowns
+    }
+
+    private func absolutePath(forMarkdownImage markdown: String) -> String? {
+        guard let openParen = markdown.firstIndex(of: "("),
+              let closeParen = markdown.firstIndex(of: ")"),
+              openParen < closeParen else { return nil }
+
+        let relativePath = String(markdown[markdown.index(after: openParen)..<closeParen])
+        let vaultPath = settings.vaultPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !vaultPath.isEmpty else { return nil }
+
+        return (vaultPath as NSString)
+            .appendingPathComponent(settings.dailyFolderName)
+            .appending("/\(relativePath)")
     }
 
     private func bindPinnedBehavior() {

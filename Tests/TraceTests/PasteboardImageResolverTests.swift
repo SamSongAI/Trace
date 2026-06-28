@@ -37,6 +37,34 @@ final class PasteboardImageResolverTests: XCTestCase {
         XCTAssertNil(image)
     }
 
+    // MARK: - resolveAll tests
+
+    func testResolveAllFromMultipleItems() throws {
+        let item1 = NSPasteboardItem()
+        item1.setData(try makePNGData(), forType: .png)
+        let item2 = NSPasteboardItem()
+        item2.setData(try makePNGData(), forType: .png)
+
+        let images = PasteboardImageResolver.resolveAll(from: [item1, item2])
+
+        XCTAssertEqual(images.count, 2)
+    }
+
+    func testResolveAllFromSingleItem() throws {
+        let item = NSPasteboardItem()
+        item.setData(try makePNGData(), forType: .png)
+
+        let images = PasteboardImageResolver.resolveAll(from: [item])
+
+        XCTAssertEqual(images.count, 1)
+    }
+
+    func testResolveAllFromEmptyItemsArray() {
+        let images = PasteboardImageResolver.resolveAll(from: [NSPasteboardItem]())
+
+        XCTAssertTrue(images.isEmpty)
+    }
+
     private func makePNGData() throws -> Data {
         let rep = try makeBitmapImageRep()
         return try XCTUnwrap(rep.representation(using: .png, properties: [:]))
