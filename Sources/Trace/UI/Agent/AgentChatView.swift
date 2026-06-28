@@ -52,8 +52,6 @@ struct AgentChatView: View {
             }
 
             VStack(spacing: 0) {
-                toolbar
-                Divider().overlay(theme.border)
                 messageList
                 inputBar
             }
@@ -65,51 +63,103 @@ struct AgentChatView: View {
         }
     }
 
-    private var toolbar: some View {
-        HStack(spacing: 8) {
+    private var inputBar: some View {
+        HStack(alignment: .bottom, spacing: 8) {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isSidebarOpen.toggle()
                 }
             } label: {
                 Image(systemName: "sidebar.left")
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .foregroundStyle(theme.textSecondary)
             }
             .buttonStyle(.plain)
             .help("Toggle history")
-
-            Text("Agent")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(theme.textSecondary)
-
-            Spacer()
+            .padding(.bottom, 4)
 
             Button {
                 viewModel.newSession()
             } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 11))
+                Image(systemName: "plus.bubble")
+                    .font(.system(size: 12))
                     .foregroundStyle(theme.textSecondary)
             }
             .buttonStyle(.plain)
             .help("New chat")
+            .padding(.bottom, 4)
 
-            if !viewModel.messages.isEmpty {
-                Button {
-                    viewModel.copyLastResponse()
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 10))
-                        .foregroundStyle(theme.textSecondary)
+            ZStack(alignment: .leading) {
+                if viewModel.inputText.isEmpty {
+                    Text(L10n.aiInputPlaceholder)
+                        .font(.system(size: 13))
+                        .foregroundStyle(theme.textSecondary.opacity(0.5))
+                        .allowsHitTesting(false)
                 }
-                .buttonStyle(.plain)
-                .help("Copy last response")
+
+                TextField("", text: $viewModel.inputText, axis: .vertical)
+                    .font(.system(size: 13))
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...5)
+                    .foregroundStyle(theme.textPrimary)
+                    .tint(theme.accent)
+                    .focused($inputFocused)
+                    .onSubmit {
+                        Task { await viewModel.send() }
+                    }
             }
+
+            Button {
+                if viewModel.isLoading {
+                    viewModel.stop()
+                } else {
+                    Task { await viewModel.send() }
+                }
+            } label: {
+                Image(systemName: viewModel.isLoading ? "stop.fill" : "arrow.up.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(viewModel.isLoading ? theme.accentStrong : (canSend ? theme.accent : theme.textSecondary.opacity(0.3)))
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSend && !canStop)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, 10)
+        .background(theme.surface)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(theme.border, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
+        .background(theme.panelBackground)
     }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        let targetId: String
+        if viewModel.isSavingMemory {
+            targetId = "saving"
+        } else if !viewModel.streamingText.isEmpty {
+            targetId = "streaming"
+        } else if !viewModel.events.isEmpty {
+            targetId = "events"
+        } else if viewModel.isLoading {
+            targetId = "typing"
+        } else {
+            targetId = viewModel.messages.last?.id.uuidString ?? "typing"
+        }
+        if animated {
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo(targetId, anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo(targetId, anchor: .bottom)
+        }
+    }
+
+    @State private var isSidebarOpen = false
 
     private var messageList: some View {
         ScrollViewReader { proxy in
@@ -182,80 +232,6 @@ struct AgentChatView: View {
         }
     }
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
-        let targetId: String
-        if viewModel.isSavingMemory {
-            targetId = "saving"
-        } else if !viewModel.streamingText.isEmpty {
-            targetId = "streaming"
-        } else if !viewModel.events.isEmpty {
-            targetId = "events"
-        } else if viewModel.isLoading {
-            targetId = "typing"
-        } else {
-            targetId = viewModel.messages.last?.id.uuidString ?? "typing"
-        }
-        if animated {
-            withAnimation(.easeOut(duration: 0.2)) {
-                proxy.scrollTo(targetId, anchor: .bottom)
-            }
-        } else {
-            proxy.scrollTo(targetId, anchor: .bottom)
-        }
-    }
-
-    @State private var isSidebarOpen = false
-
-    private var inputBar: some View {
-        HStack(alignment: .center, spacing: 8) {
-            ZStack(alignment: .leading) {
-                if viewModel.inputText.isEmpty {
-                    Text(L10n.aiInputPlaceholder)
-                        .font(.system(size: 13))
-                        .foregroundStyle(theme.textSecondary.opacity(0.5))
-                        .allowsHitTesting(false)
-                }
-
-                TextField("", text: $viewModel.inputText, axis: .vertical)
-                    .font(.system(size: 13))
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...5)
-                    .foregroundStyle(theme.textPrimary)
-                    .tint(theme.accent)
-                    .focused($inputFocused)
-                    .onSubmit {
-                        Task { await viewModel.send() }
-                    }
-            }
-
-            Button {
-                if viewModel.isLoading {
-                    viewModel.stop()
-                } else {
-                    Task { await viewModel.send() }
-                }
-            } label: {
-                Image(systemName: viewModel.isLoading ? "stop.fill" : "arrow.up.circle.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(viewModel.isLoading ? theme.accentStrong : (canSend ? theme.accent : theme.textSecondary.opacity(0.3)))
-            }
-            .buttonStyle(.plain)
-            .disabled(!canSend && !canStop)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(theme.surface)
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(theme.border, lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .padding(.horizontal, 12)
-        .padding(.top, 6)
-        .padding(.bottom, 10)
-        .background(theme.panelBackground)
-    }
-
     private var canSend: Bool {
         !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !viewModel.isLoading
     }
@@ -306,8 +282,8 @@ private struct AgentMessageBubble: View {
 
     private var assistantBubble: some View {
         HStack(alignment: .top, spacing: 6) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 9))
+            Image(systemName: "robot")
+                .font(.system(size: 10))
                 .foregroundStyle(theme.accent)
                 .frame(width: 18, height: 18)
                 .background(theme.accent.opacity(0.1))
@@ -380,8 +356,8 @@ private struct AgentStreamingBubble: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 9))
+            Image(systemName: "robot")
+                .font(.system(size: 10))
                 .foregroundStyle(theme.accent)
                 .frame(width: 18, height: 18)
                 .background(theme.accent.opacity(0.1))
@@ -686,8 +662,8 @@ private struct AgentTypingIndicator: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 9))
+            Image(systemName: "robot")
+                .font(.system(size: 10))
                 .foregroundStyle(theme.accent)
                 .frame(width: 18, height: 18)
                 .background(theme.accent.opacity(0.1))
