@@ -342,9 +342,10 @@ private struct AgentStreamingBubble: View {
 private struct AgentEventFlowView: View {
     let events: [AgentEvent]
     let theme: TraceTheme.CapturePalette
+    @State private var expandedTools: Set<UUID> = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 2) {
             ForEach(events) { event in
                 switch event.kind {
                 case .iteration:
@@ -359,59 +360,87 @@ private struct AgentEventFlowView: View {
                     .padding(.vertical, 2)
 
                 case .toolStart:
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 4) {
-                            ProgressView()
-                                .scaleEffect(0.5)
-                                .frame(width: 10, height: 10)
-                            Image(systemName: "wrench.and.screwdriver")
-                                .font(.system(size: 8))
-                            Text(event.toolName ?? "tool")
-                                .font(.system(size: 10, weight: .medium))
-                        }
-                        .foregroundStyle(theme.accent)
-
-                        if let args = event.toolArgs, !args.isEmpty {
-                            Text(args.prefix(80))
-                                .font(.system(size: 8, design: .monospaced))
-                                .foregroundStyle(theme.textSecondary.opacity(0.5))
-                                .lineLimit(1)
-                                .padding(.leading, 16)
-                        }
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(theme.accent.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    toolRow(event)
 
                 case .toolResult:
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 8))
-                            Text(event.toolName ?? "tool")
-                                .font(.system(size: 10, weight: .medium))
-                            Text("done")
-                                .font(.system(size: 9))
-                                .foregroundStyle(theme.textSecondary.opacity(0.5))
-                        }
-                        .foregroundStyle(theme.textSecondary)
-
-                        if let result = event.toolResult, !result.isEmpty {
-                            Text(result.prefix(120))
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundStyle(theme.textSecondary.opacity(0.6))
-                                .lineLimit(2)
-                                .padding(.leading, 16)
-                        }
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
+                    EmptyView()
                 }
             }
         }
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func toolRow(_ event: AgentEvent) -> some View {
+        let isExpanded = expandedTools.contains(event.id)
+        let resultEvent = events.first(where: { $0.kind == .toolResult && $0.toolName == event.toolName })
+
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 4) {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 7))
+                    .foregroundStyle(theme.textSecondary.opacity(0.4))
+
+                ProgressView()
+                    .scaleEffect(0.5)
+                    .frame(width: 10, height: 10)
+
+                Image(systemName: "wrench.and.screwdriver")
+                    .font(.system(size: 8))
+
+                Text(event.toolName ?? "tool")
+                    .font(.system(size: 10, weight: .medium))
+
+                if resultEvent != nil {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(theme.textSecondary.opacity(0.5))
+                }
+            }
+            .foregroundStyle(theme.accent)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if isExpanded {
+                    expandedTools.remove(event.id)
+                } else {
+                    expandedTools.insert(event.id)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(theme.accent.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 4) {
+                    if let args = event.toolArgs, !args.isEmpty {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("args")
+                                .font(.system(size: 8, weight: .medium))
+                                .foregroundStyle(theme.textSecondary.opacity(0.4))
+                            Text(args)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(theme.textSecondary.opacity(0.6))
+                                .lineLimit(4)
+                        }
+                    }
+                    if let result = resultEvent?.toolResult, !result.isEmpty {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("result")
+                                .font(.system(size: 8, weight: .medium))
+                                .foregroundStyle(theme.textSecondary.opacity(0.4))
+                            Text(result)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(theme.textSecondary.opacity(0.6))
+                                .lineLimit(6)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .padding(.leading, 20)
+            }
+        }
     }
 }
 
@@ -575,6 +604,22 @@ private struct AgentMarkdownText: View {
 
     private func parseInline(_ text: String) -> AttributedString {
         var att = AttributedString(text)
+
+        // File paths: /Users/... or ~/... or vault-relative .md/.txt files
+        if let regex = try? NSRegularExpression(pattern: #"(?:~/[\w./-]+|/Users/[\w./-]+|/tmp/[\w./-]+)"#) {
+            let nsString = text as NSString
+            let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsString.length))
+            for m in matches.reversed() {
+                let path = nsString.substring(with: m.range)
+                if let range = att.range(of: path) {
+                    var link = AttributedString(path)
+                    link.foregroundColor = theme.accent
+                    link.underlineStyle = .single
+                    link.link = URL(fileURLWithPath: path)
+                    att.replaceSubrange(range, with: link)
+                }
+            }
+        }
 
         // Bold **text**
         if let regex = try? NSRegularExpression(pattern: #"\*\*(.+?)\*\*"#) {

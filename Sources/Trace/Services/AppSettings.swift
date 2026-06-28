@@ -505,8 +505,8 @@ final class AppSettings: ObservableObject {
         imageAssetsFolderName = defaults.string(forKey: SettingKeys.imageAssetsFolderName) ?? "assets"
         aiEnabled = defaults.bool(forKey: SettingKeys.aiEnabled)
         aiApiKey = defaults.string(forKey: SettingKeys.aiApiKey) ?? ""
-        aiModel = defaults.string(forKey: SettingKeys.aiModel) ?? "gpt-4o-mini"
-        aiEndpoint = defaults.string(forKey: SettingKeys.aiEndpoint) ?? "https://api.openai.com/v1"
+        aiModel = "deepseek-chat"
+        aiEndpoint = "https://api.deepseek.com"
         dailyFileDateFormat = defaults.string(forKey: SettingKeys.dailyFileDateFormat) ?? "yyyy M月d日 EEEE"
         noteWriteMode = NoteWriteMode(rawValue: defaults.string(forKey: SettingKeys.noteWriteMode) ?? "") ?? .dimension
 

@@ -520,18 +520,6 @@ struct SettingsView: View {
                                     .textFieldStyle(.plain)
                                     .settingsFieldChrome(palette)
                             }
-
-                            SettingRow(label: L10n.aiModel, hint: L10n.aiModelHint, palette: palette) {
-                                TextField("gpt-4o-mini", text: $settings.aiModel)
-                                    .textFieldStyle(.plain)
-                                    .settingsFieldChrome(palette)
-                            }
-
-                            SettingRow(label: L10n.aiEndpoint, hint: L10n.aiEndpointHint, palette: palette) {
-                                TextField("https://api.openai.com/v1", text: $settings.aiEndpoint)
-                                    .textFieldStyle(.plain)
-                                    .settingsFieldChrome(palette)
-                            }
                         }
                     }
                 }
