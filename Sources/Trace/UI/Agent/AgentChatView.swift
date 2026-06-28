@@ -45,50 +45,19 @@ struct AgentChatView: View {
     }
 
     private var chatView: some View {
-        HStack(spacing: 0) {
-            if isSidebarOpen {
-                AgentSidebarView(viewModel: viewModel, theme: theme, isSidebarOpen: $isSidebarOpen)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
-            }
-
-            VStack(spacing: 0) {
-                messageList
-                inputBar
-            }
-            .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    inputFocused = true
-                }
+        VStack(spacing: 0) {
+            messageList
+            inputBar
+        }
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                inputFocused = true
             }
         }
     }
 
     private var inputBar: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isSidebarOpen.toggle()
-                }
-            } label: {
-                Image(systemName: "sidebar.left")
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.textSecondary)
-            }
-            .buttonStyle(.plain)
-            .help("Toggle history")
-            .padding(.bottom, 4)
-
-            Button {
-                viewModel.newSession()
-            } label: {
-                Image(systemName: "plus.bubble")
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.textSecondary)
-            }
-            .buttonStyle(.plain)
-            .help("New chat")
-            .padding(.bottom, 4)
-
             ZStack(alignment: .leading) {
                 if viewModel.inputText.isEmpty {
                     Text(L10n.aiInputPlaceholder)
@@ -158,8 +127,6 @@ struct AgentChatView: View {
             proxy.scrollTo(targetId, anchor: .bottom)
         }
     }
-
-    @State private var isSidebarOpen = false
 
     private var messageList: some View {
         ScrollViewReader { proxy in
@@ -695,10 +662,10 @@ private struct AgentTypingIndicator: View {
 
 // MARK: - Sidebar
 
-private struct AgentSidebarView: View {
+struct AgentSidebarView: View {
     @ObservedObject var viewModel: AgentChatViewModel
     let theme: TraceTheme.CapturePalette
-    @Binding var isSidebarOpen: Bool
+    var onClose: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 0) {
@@ -710,9 +677,7 @@ private struct AgentSidebarView: View {
                 Spacer()
 
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        isSidebarOpen = false
-                    }
+                    onClose()
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 9))

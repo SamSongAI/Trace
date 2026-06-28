@@ -29,6 +29,7 @@ struct CaptureView: View {
     @State private var threadGridWidth: CGFloat = 0
     @State private var previewImagePath: String?
     @State private var showAgentChat: Bool = false
+    @State private var showAgentSidebar: Bool = false
     @StateObject private var agentViewModel: AgentChatViewModel
 
     private var currentMode: NoteWriteMode {
@@ -65,71 +66,94 @@ struct CaptureView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider().overlay(theme.border)
-            if showAgentChat {
-                AgentChatView(
-                    viewModel: agentViewModel,
-                    settings: settings,
-                    theme: theme,
-                    isPresented: $showAgentChat
-                )
-                .frame(minHeight: 200)
-            } else {
-                editor
-                if !viewModel.pastedImagePaths.isEmpty {
-                    thumbnailStrip
-                }
-                switch settings.noteWriteMode {
-                case .dimension:
-                    modeFooter
-                case .thread:
-                    threadFooter
-                case .agent:
-                    EmptyView()
+        ZStack(alignment: .leading) {
+            VStack(spacing: 0) {
+                header
+                Divider().overlay(theme.border)
+                if showAgentChat {
+                    AgentChatView(
+                        viewModel: agentViewModel,
+                        settings: settings,
+                        theme: theme,
+                        isPresented: $showAgentChat
+                    )
+                    .frame(minHeight: 200)
+                } else {
+                    editor
+                    if !viewModel.pastedImagePaths.isEmpty {
+                        thumbnailStrip
+                    }
+                    switch settings.noteWriteMode {
+                    case .dimension:
+                        modeFooter
+                    case .thread:
+                        threadFooter
+                    case .agent:
+                        EmptyView()
+                    }
                 }
             }
-        }
-        .frame(minWidth: 360, minHeight: 220)
-        .background(theme.panelBackground)
-        .overlay(alignment: .center) {
-            if let message = viewModel.toastMessage, previewImagePath == nil {
-                Text(message)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(theme.textSecondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(theme.surface.opacity(0.95))
-                    .clipShape(Capsule())
-                    .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
-                    .transition(.opacity)
-                    .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
+            .frame(minWidth: 360, minHeight: 220)
+            .background(theme.panelBackground)
+            .overlay(alignment: .center) {
+                if let message = viewModel.toastMessage, previewImagePath == nil {
+                    Text(message)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(theme.textSecondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(theme.surface.opacity(0.95))
+                        .clipShape(Capsule())
+                        .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                        .transition(.opacity)
+                        .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
+                }
             }
-        }
-        .overlay {
-            if let path = previewImagePath, let nsImage = NSImage(contentsOfFile: path) {
-                ZStack {
-                    Color.black.opacity(0.6)
-                        .ignoresSafeArea()
-                        .onTapGesture {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                previewImagePath = nil
+            .overlay {
+                if let path = previewImagePath, let nsImage = NSImage(contentsOfFile: path) {
+                    ZStack {
+                        Color.black.opacity(0.6)
+                            .ignoresSafeArea()
+                            .onTapGesture {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    previewImagePath = nil
+                                }
                             }
-                        }
 
-                    Image(nsImage: nsImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .padding(20)
-                        .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
-                        .onTapGesture {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                previewImagePath = nil
+                        Image(nsImage: nsImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .padding(20)
+                            .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+                            .onTapGesture {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    previewImagePath = nil
+                                }
                             }
-                        }
+                    }
+                    .transition(.opacity)
                 }
-                .transition(.opacity)
+            }
+
+            if showAgentSidebar && showAgentChat {
+                AgentSidebarView(
+                    viewModel: agentViewModel,
+                    theme: theme,
+                    onClose: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showAgentSidebar = false
+                        }
+                    }
+                )
+                .frame(width: 180)
+                .background(theme.panelBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .shadow(color: .black.opacity(0.15), radius: 8, x: 2)
+                .padding(.leading, 4)
+                .padding(.top, 36)
+                .padding(.bottom, 4)
+                .transition(.move(edge: .leading).combined(with: .opacity))
+                .zIndex(1)
             }
         }
         .onAppear {
@@ -175,12 +199,26 @@ struct CaptureView: View {
             Button {
                 cycleMode()
             } label: {
-                Image(systemName: "sparkles")
+                Image(systemName: "robot")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(showAgentChat ? theme.accent : theme.iconMuted)
             }
             .buttonStyle(.plain)
             .help(L10n.aiAgentTooltip)
+
+            if showAgentChat {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showAgentSidebar.toggle()
+                    }
+                } label: {
+                    Image(systemName: "sidebar.left")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(showAgentSidebar ? theme.accent : theme.iconMuted)
+                }
+                .buttonStyle(.plain)
+                .help("History")
+            }
 
             Button {
                 NotificationCenter.default.post(name: .traceOpenSettings, object: nil)
