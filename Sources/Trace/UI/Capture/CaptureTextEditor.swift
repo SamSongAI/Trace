@@ -242,6 +242,15 @@ private final class PlaceholderTextView: NSTextView {
         super.paste(sender)
     }
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if modifiers == .command, event.charactersIgnoringModifiers?.lowercased() == "v" {
+            paste(nil)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
     override func readSelection(from pboard: NSPasteboard) -> Bool {
         if handleImagePaste(from: pboard) {
             return true
@@ -401,7 +410,19 @@ enum PasteboardImageResolver {
             }
         }
 
-        // 4. Fallback: single image via NSImage(pasteboard:)
+        // 4. Direct pasteboard-level type check (handles macOS screenshot clipboard)
+        if images.isEmpty {
+            for type in standardImageTypes {
+                if let data = pasteboard.data(forType: type),
+                   !data.isEmpty,
+                   let image = NSImage(data: data) {
+                    images.append(image)
+                    break
+                }
+            }
+        }
+
+        // 5. Fallback: single image via NSImage(pasteboard:)
         if images.isEmpty, let image = NSImage(pasteboard: pasteboard) {
             images.append(image)
         }
