@@ -27,6 +27,7 @@ struct CaptureView: View {
     @State private var inputFocused = false
     @State private var sectionGridWidth: CGFloat = 0
     @State private var threadGridWidth: CGFloat = 0
+    @State private var previewImagePath: String?
 
     private let sectionGridSpacing: CGFloat = 6
     private let minimumSectionButtonWidth: CGFloat = 92
@@ -68,7 +69,7 @@ struct CaptureView: View {
         .frame(minWidth: 360, minHeight: 220)
         .background(theme.panelBackground)
         .overlay(alignment: .center) {
-            if let message = viewModel.toastMessage {
+            if let message = viewModel.toastMessage, previewImagePath == nil {
                 Text(message)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(theme.textSecondary)
@@ -79,6 +80,31 @@ struct CaptureView: View {
                     .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
                     .transition(.opacity)
                     .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
+            }
+        }
+        .overlay {
+            if let path = previewImagePath, let nsImage = NSImage(contentsOfFile: path) {
+                ZStack {
+                    Color.black.opacity(0.6)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                previewImagePath = nil
+                            }
+                        }
+
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .padding(20)
+                        .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+                        .onTapGesture {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                previewImagePath = nil
+                            }
+                        }
+                }
+                .transition(.opacity)
             }
         }
         .onAppear {
@@ -155,7 +181,9 @@ struct CaptureView: View {
                                 )
                                 .help(path as String)
                                 .onTapGesture {
-                                    NSWorkspace.shared.openFile(path)
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        previewImagePath = path
+                                    }
                                 }
 
                             Button {
