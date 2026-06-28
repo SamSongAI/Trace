@@ -45,9 +45,45 @@ struct AgentChatView: View {
 
     private var chatView: some View {
         VStack(spacing: 0) {
+            toolbar
+            Divider().overlay(theme.border)
             messageList
             inputBar
         }
+    }
+
+    private var toolbar: some View {
+        HStack(spacing: 8) {
+            Text("Agent")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(theme.textSecondary)
+
+            Spacer()
+
+            if !viewModel.messages.isEmpty {
+                Button {
+                    viewModel.copyLastResponse()
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .help("Copy last response")
+
+                Button {
+                    viewModel.clearHistory()
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear conversation")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
     }
 
     private var messageList: some View {
@@ -303,20 +339,30 @@ private struct AgentEventFlowView: View {
                     .padding(.vertical, 2)
 
                 case .toolStart:
-                    HStack(spacing: 4) {
-                        ProgressView()
-                            .scaleEffect(0.5)
-                            .frame(width: 10, height: 10)
-                        Image(systemName: "wrench.and.screwdriver")
-                            .font(.system(size: 8))
-                        Text(event.toolName ?? "tool")
-                            .font(.system(size: 10, weight: .medium))
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 4) {
+                            ProgressView()
+                                .scaleEffect(0.5)
+                                .frame(width: 10, height: 10)
+                            Image(systemName: "wrench.and.screwdriver")
+                                .font(.system(size: 8))
+                            Text(event.toolName ?? "tool")
+                                .font(.system(size: 10, weight: .medium))
+                        }
+                        .foregroundStyle(theme.accent)
+
+                        if let args = event.toolArgs, !args.isEmpty {
+                            Text(args.prefix(80))
+                                .font(.system(size: 8, design: .monospaced))
+                                .foregroundStyle(theme.textSecondary.opacity(0.5))
+                                .lineLimit(1)
+                                .padding(.leading, 16)
+                        }
                     }
-                    .foregroundStyle(theme.accent)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
                     .background(theme.accent.opacity(0.08))
-                    .clipShape(Capsule())
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
                 case .toolResult:
                     VStack(alignment: .leading, spacing: 2) {
@@ -356,14 +402,158 @@ private struct AgentMarkdownText: View {
     let theme: TraceTheme.CapturePalette
 
     var body: some View {
-        Text(attributedText)
-            .font(.system(size: 13))
-            .foregroundStyle(theme.textPrimary)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(parseBlocks().enumerated()), id: \.offset) { _, block in
+                renderBlock(block)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contextMenu {
+            Button("Copy") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            }
+        }
     }
 
-    private var attributedText: AttributedString {
+    private enum Block {
+        case paragraph(AttributedString)
+        case codeBlock(String)
+        case bulletList([AttributedString])
+        case header(AttributedString, Int)
+    }
+
+    private func parseBlocks() -> [Block] {
+        var blocks: [Block] = []
+        let lines = text.components(separatedBy: "\n")
+        var i = 0
+
+        while i < lines.count {
+            let line = lines[i]
+
+            // Code block ```
+            if line.hasPrefix("```") {
+                var codeLines: [String] = []
+                i += 1
+                while i < lines.count && !lines[i].hasPrefix("```") {
+                    codeLines.append(lines[i])
+                    i += 1
+                }
+                i += 1
+                blocks.append(.codeBlock(codeLines.joined(separator: "\n")))
+                continue
+            }
+
+            // Headers
+            if line.hasPrefix("### ") {
+                blocks.append(.header(parseInline(String(line.dropFirst(4))), 3))
+                i += 1
+                continue
+            }
+            if line.hasPrefix("## ") {
+                blocks.append(.header(parseInline(String(line.dropFirst(3))), 2))
+                i += 1
+                continue
+            }
+            if line.hasPrefix("# ") {
+                blocks.append(.header(parseInline(String(line.dropFirst(2))), 1))
+                i += 1
+                continue
+            }
+
+            // Bullet list
+            if line.hasPrefix("- ") || line.hasPrefix("* ") {
+                var items: [AttributedString] = []
+                while i < lines.count && (lines[i].hasPrefix("- ") || lines[i].hasPrefix("* ")) {
+                    let item = lines[i].dropFirst(2)
+                    items.append(parseInline(String(item)))
+                    i += 1
+                }
+                blocks.append(.bulletList(items))
+                continue
+            }
+
+            // Empty line
+            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                i += 1
+                continue
+            }
+
+            // Paragraph (collect consecutive non-empty, non-special lines)
+            var paraLines: [String] = []
+            while i < lines.count {
+                let l = lines[i]
+                if l.trimmingCharacters(in: .whitespaces).isEmpty || l.hasPrefix("```") || l.hasPrefix("# ") || l.hasPrefix("## ") || l.hasPrefix("### ") || l.hasPrefix("- ") || l.hasPrefix("* ") {
+                    break
+                }
+                paraLines.append(l)
+                i += 1
+            }
+            if !paraLines.isEmpty {
+                blocks.append(.paragraph(parseInline(paraLines.joined(separator: "\n"))))
+            }
+        }
+
+        return blocks
+    }
+
+    private func renderBlock(_ block: Block) -> some View {
+        switch block {
+        case .paragraph(let att):
+            return AnyView(
+                Text(att)
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.textPrimary)
+                    .textSelection(.enabled)
+            )
+
+        case .codeBlock(let code):
+            return AnyView(
+                Text(code)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(theme.textPrimary)
+                    .textSelection(.enabled)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(theme.surface.opacity(0.6))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .contextMenu {
+                        Button("Copy") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(code, forType: .string)
+                        }
+                    }
+            )
+
+        case .bulletList(let items):
+            return AnyView(
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                        HStack(alignment: .top, spacing: 6) {
+                            Text("\u{2022}")
+                                .font(.system(size: 13))
+                                .foregroundStyle(theme.textSecondary)
+                            Text(item)
+                                .font(.system(size: 13))
+                                .foregroundStyle(theme.textPrimary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+            )
+
+        case .header(let att, let level):
+            let size: CGFloat = level == 1 ? 16 : (level == 2 ? 14 : 13)
+            return AnyView(
+                Text(att)
+                    .font(.system(size: size, weight: .bold))
+                    .foregroundStyle(theme.textPrimary)
+                    .textSelection(.enabled)
+            )
+        }
+    }
+
+    private func parseInline(_ text: String) -> AttributedString {
         var att = AttributedString(text)
 
         // Bold **text**

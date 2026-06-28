@@ -30,10 +30,14 @@ final class AgentChatViewModel: ObservableObject {
     private let memory: AgentMemory
     private var tokenBuffer = ""
     private var flushTimer: Timer?
+    private let historyURL: URL?
 
     init(settings: AppSettings) {
         self.memory = AgentMemory(vaultPath: settings.vaultPath)
         self.agent = AgentCore(settings: settings)
+
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        self.historyURL = appSupport?.appendingPathComponent("Trace/agent-history.json")
 
         // File system tools
         agent.registerTool(ReadFileTool(vaultPath: settings.vaultPath))
@@ -54,6 +58,8 @@ final class AgentChatViewModel: ObservableObject {
         // Search & routing
         agent.registerTool(SearchVaultTool(vaultPath: settings.vaultPath))
         agent.registerTool(RouteCaptureTool(settings: settings))
+
+        loadHistory()
     }
 
     var isConfigured: Bool {
@@ -82,9 +88,9 @@ final class AgentChatViewModel: ObservableObject {
                 onToken: { [weak self] token in
                     self?.appendToken(token)
                 },
-                onToolCall: { [weak self] name in
+                onToolCall: { [weak self] name, args in
                     DispatchQueue.main.async {
-                        self?.events.append(AgentEvent(kind: .toolStart, toolName: name, toolArgs: nil, toolResult: nil, iteration: nil))
+                        self?.events.append(AgentEvent(kind: .toolStart, toolName: name, toolArgs: args, toolResult: nil, iteration: nil))
                     }
                 },
                 onToolResult: { [weak self] name, result in
@@ -102,6 +108,7 @@ final class AgentChatViewModel: ObservableObject {
             stopFlushTimer()
             streamingText = ""
             messages.append(response)
+            saveHistory()
         } catch {
             flushTokens()
             stopFlushTimer()
@@ -146,5 +153,32 @@ final class AgentChatViewModel: ObservableObject {
         messages.removeAll()
         errorMessage = nil
         events = []
+        saveHistory()
+    }
+
+    // MARK: - History Persistence
+
+    private func loadHistory() {
+        guard let url = historyURL,
+              let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode([AgentMessage].self, from: data) else { return }
+        messages = decoded
+    }
+
+    private func saveHistory() {
+        guard let url = historyURL else { return }
+        let dir = url.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let displayMessages = messages.filter { $0.role == "user" || $0.role == "assistant" }
+        if let data = try? JSONEncoder().encode(displayMessages) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    func copyLastResponse() {
+        guard let lastAssistant = messages.last(where: { $0.role == "assistant" }),
+              let content = lastAssistant.content else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(content, forType: .string)
     }
 }

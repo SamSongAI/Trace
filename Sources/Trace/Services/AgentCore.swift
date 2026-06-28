@@ -174,15 +174,20 @@ final class AgentCore {
         - context/ layer: user's original captures. You READ this to understand context.
         - agent/ layer: your memory. You WRITE here to remember across sessions.
 
-        Always respond concisely. When you need to take action, use the available tools. \
-        When asking the user questions, keep them short and specific.
+        Response rules:
+        - Keep responses SHORT. 1-3 sentences for simple questions.
+        - Use brief markdown: **bold** for emphasis, `code` for paths/names.
+        - Avoid long code blocks unless explicitly asked.
+        - No headers unless the response is structured (lists, steps).
+        - When you need to take action, use the available tools.
+        - When asking the user questions, keep them short and specific.
         \(memoryBlock)
         """
         cachedSystemPrompt = prompt
         return prompt
     }
 
-    func chat(messages: [AgentMessage], onToken: ((String) -> Void)? = nil, onToolCall: ((String) -> Void)? = nil, onToolResult: ((String, String) -> Void)? = nil, onIteration: ((Int) -> Void)? = nil) async throws -> AgentMessage {
+    func chat(messages: [AgentMessage], onToken: ((String) -> Void)? = nil, onToolCall: ((String, String) -> Void)? = nil, onToolResult: ((String, String) -> Void)? = nil, onIteration: ((Int) -> Void)? = nil) async throws -> AgentMessage {
         guard isConfigured else { throw AgentError.notConfigured }
 
         var conversationMessages = messages
@@ -428,7 +433,7 @@ final class AgentCore {
         let content: String
     }
 
-    private func executeToolCallsParallel(_ toolCalls: [AgentToolCall], onToolCall: ((String) -> Void)?, onToolResult: ((String, String) -> Void)?) async -> [ToolResult] {
+    private func executeToolCallsParallel(_ toolCalls: [AgentToolCall], onToolCall: ((String, String) -> Void)?, onToolResult: ((String, String) -> Void)?) async -> [ToolResult] {
         var results: [ToolResult] = []
 
         await withTaskGroup(of: ToolResult?.self) { group in
@@ -436,7 +441,7 @@ final class AgentCore {
                 let toolName = toolCall.function.name
                 let toolArgs = toolCall.function.arguments
                 agentPrint("Tool call: \(toolName)(\(toolArgs))")
-                onToolCall?(toolName)
+                onToolCall?(toolName, toolArgs)
 
                 group.addTask { [self] in
                     let result = await self.executeToolWithTimeout(toolCall)
