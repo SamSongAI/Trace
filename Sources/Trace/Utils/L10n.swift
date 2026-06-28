@@ -214,6 +214,11 @@ enum L10n {
 
     static var emptyNotSaved: String { s("内容为空，未保存", "内容が空のため保存されませんでした", "Empty content, not saved") }
     static var saveFailed: String { s("保存失败", "保存に失敗しました", "Save Failed") }
+    static var savedTo: String {
+        s("已保存到「%@」",
+          "「%@」に保存しました",
+          "Saved to \"%@\"")
+    }
 
     // MARK: - Global Hotkey Alert
 

@@ -134,6 +134,8 @@ struct CaptureView: View {
             onPasteImages: onPasteImages
         )
         .background(theme.panelBackground)
+        .opacity(viewModel.isSending ? 0.3 : 1.0)
+        .animation(.easeOut(duration: 0.2), value: viewModel.isSending)
     }
 
     private var thumbnailStrip: some View {
@@ -142,16 +144,28 @@ struct CaptureView: View {
                 ForEach(viewModel.pastedImagePaths.indices, id: \.self) { index in
                     let path = viewModel.pastedImagePaths[index]
                     if let nsImage = NSImage(contentsOfFile: path) {
-                        Image(nsImage: nsImage)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 48, height: 48)
-                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .stroke(theme.border, lineWidth: 1)
-                            )
-                            .help(path as String)
+                        ZStack(alignment: .topTrailing) {
+                            Image(nsImage: nsImage)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 48, height: 48)
+                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .stroke(theme.border, lineWidth: 1)
+                                )
+                                .help(path as String)
+
+                            Button {
+                                removeThumbnail(at: index)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(theme.textSecondary, theme.surface)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(2)
+                        }
                     }
                 }
             }
@@ -161,6 +175,11 @@ struct CaptureView: View {
         .frame(height: 60)
         .background(theme.surface.opacity(0.4))
         .overlay(Divider().overlay(theme.border), alignment: .top)
+    }
+
+    private func removeThumbnail(at index: Int) {
+        guard viewModel.pastedImagePaths.indices.contains(index) else { return }
+        viewModel.pastedImagePaths.remove(at: index)
     }
 
     private var documentFooter: some View {

@@ -56,6 +56,7 @@ enum SettingKeys {
     static let inboxVaultPath = "trace.inboxVaultPath"
     static let threadConfigs = "trace.threadConfigs"
     static let lastUsedThreadId = "trace.lastUsedThreadId"
+    static let draftText = "trace.draftText"
 }
 
 enum LegacySettingKeys {
@@ -450,6 +451,17 @@ final class AppSettings: ObservableObject {
     var lastUsedSectionIndex: Int {
         get { defaults.integer(forKey: SettingKeys.lastUsedSectionIndex) }
         set { defaults.set(newValue, forKey: SettingKeys.lastUsedSectionIndex) }
+    }
+
+    var draftText: String {
+        get { defaults.string(forKey: SettingKeys.draftText) ?? "" }
+        set {
+            if newValue.isEmpty {
+                defaults.removeObject(forKey: SettingKeys.draftText)
+            } else {
+                defaults.set(newValue, forKey: SettingKeys.draftText)
+            }
+        }
     }
 
     init(

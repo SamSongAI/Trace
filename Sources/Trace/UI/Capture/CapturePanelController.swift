@@ -66,6 +66,9 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
         rememberFrontmostApplicationBeforeShowing()
         viewModel.selectedSection = settings.defaultSection
         viewModel.selectedThread = settings.defaultThread
+        if viewModel.text.isEmpty {
+            viewModel.text = settings.draftText
+        }
         applySavedFrameIfNeeded(on: panel)
 
         bringPanelToFront(panel)
@@ -75,6 +78,7 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
     func hide(restoreDelay: TimeInterval = 0) {
         guard let panel else { return }
         settings.savePanelFrame(panel.frame)
+        settings.draftText = viewModel.text
         viewModel.pinned = false
         panel.orderOut(nil)
         restorePreviousFrontmostApplicationIfNeeded(after: restoreDelay)
@@ -328,12 +332,27 @@ final class CapturePanelController: NSObject, NSWindowDelegate {
             if let thread = viewModel.selectedThread {
                 settings.setLastUsedThread(thread)
             }
-            if viewModel.pinned {
-                viewModel.resetInput()
-                NotificationCenter.default.post(name: .traceFocusInput, object: nil)
-            } else {
-                viewModel.resetInput()
-                hide(restoreDelay: 0.08)
+
+            let destinationName: String
+            switch settings.noteWriteMode {
+            case .dimension:
+                destinationName = settings.title(for: viewModel.selectedSection)
+            case .thread:
+                destinationName = viewModel.selectedThread?.name ?? ""
+            case .file:
+                destinationName = viewModel.fileTitle.isEmpty ? L10n.writeModeDocumentTitle : viewModel.fileTitle
+            }
+            viewModel.showToast(String(format: L10n.savedTo, destinationName))
+
+            viewModel.beginSendAnimation { [weak self] in
+                guard let self else { return }
+                self.viewModel.resetInput()
+                self.settings.draftText = ""
+                if self.viewModel.pinned {
+                    NotificationCenter.default.post(name: .traceFocusInput, object: nil)
+                } else {
+                    self.hide(restoreDelay: 0.08)
+                }
             }
         } catch {
             showError(error.localizedDescription)
