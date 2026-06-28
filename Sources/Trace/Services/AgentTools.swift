@@ -1,5 +1,17 @@
 import Foundation
 
+private func resolveVaultPath(_ path: String, vaultPath: String) -> String {
+    if path.hasPrefix("/") {
+        let standardized = (path as NSString).standardizingPath
+        let vaultStandardized = (vaultPath as NSString).standardizingPath
+        if standardized.hasPrefix(vaultStandardized) {
+            return standardized
+        }
+        return (vaultPath as NSString).appendingPathComponent(path)
+    }
+    return (vaultPath as NSString).appendingPathComponent(path)
+}
+
 struct ReadFileTool: AgentTool {
     let name = "read_file"
     let description = "Read the contents of a file at the given absolute or vault-relative path."
@@ -22,18 +34,16 @@ struct ReadFileTool: AgentTool {
         self.vaultPath = vaultPath
     }
 
+    private func resolvePath(_ path: String) -> String {
+        resolveVaultPath(path, vaultPath: vaultPath)
+    }
+
     func execute(arguments: [String: Any]) throws -> String {
         guard let path = arguments["path"] as? String else {
             return "Error: Missing 'path' parameter."
         }
 
-        let resolvedPath: String
-        if path.hasPrefix("/") {
-            resolvedPath = path
-        } else {
-            resolvedPath = (vaultPath as NSString).appendingPathComponent(path)
-        }
-
+        let resolvedPath = resolvePath(path)
         guard FileManager.default.fileExists(atPath: resolvedPath) else {
             return "Error: File not found at \(resolvedPath)"
         }
@@ -72,19 +82,17 @@ struct WriteFileTool: AgentTool {
         self.vaultPath = vaultPath
     }
 
+    private func resolvePath(_ path: String) -> String {
+        resolveVaultPath(path, vaultPath: vaultPath)
+    }
+
     func execute(arguments: [String: Any]) throws -> String {
         guard let path = arguments["path"] as? String,
               let content = arguments["content"] as? String else {
             return "Error: Missing 'path' or 'content' parameter."
         }
 
-        let resolvedPath: String
-        if path.hasPrefix("/") {
-            resolvedPath = path
-        } else {
-            resolvedPath = (vaultPath as NSString).appendingPathComponent(path)
-        }
-
+        let resolvedPath = resolvePath(path)
         let dir = (resolvedPath as NSString).deletingLastPathComponent
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
 
@@ -117,12 +125,7 @@ struct ListDirectoryTool: AgentTool {
 
     func execute(arguments: [String: Any]) throws -> String {
         let path = arguments["path"] as? String ?? ""
-        let resolvedPath: String
-        if path.isEmpty || !path.hasPrefix("/") {
-            resolvedPath = (vaultPath as NSString).appendingPathComponent(path)
-        } else {
-            resolvedPath = path
-        }
+        let resolvedPath = path.isEmpty ? vaultPath : resolveVaultPath(path, vaultPath: vaultPath)
 
         guard FileManager.default.fileExists(atPath: resolvedPath) else {
             return "Error: Directory not found at \(resolvedPath)"
@@ -240,18 +243,16 @@ struct CreateDirectoryTool: AgentTool {
         self.vaultPath = vaultPath
     }
 
+    private func resolvePath(_ path: String) -> String {
+        resolveVaultPath(path, vaultPath: vaultPath)
+    }
+
     func execute(arguments: [String: Any]) throws -> String {
         guard let path = arguments["path"] as? String else {
             return "Error: Missing 'path' parameter."
         }
 
-        let resolvedPath: String
-        if path.hasPrefix("/") {
-            resolvedPath = path
-        } else {
-            resolvedPath = (vaultPath as NSString).appendingPathComponent(path)
-        }
-
+        let resolvedPath = resolvePath(path)
         try FileManager.default.createDirectory(atPath: resolvedPath, withIntermediateDirectories: true)
         return "Created directory: \(path)"
     }

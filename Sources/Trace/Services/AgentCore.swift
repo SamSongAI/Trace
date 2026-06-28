@@ -230,72 +230,6 @@ final class AgentCore {
         return "\(head)\n\n... (truncated, \(result.count) chars total) ...\n\n\(tail)"
     }
 
-    private func callAPI(messages: [AgentMessage]) async throws -> AgentMessage {
-        let endpoint = settings.aiEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: "\(endpoint)/chat/completions") else {
-            throw AgentError.invalidEndpoint
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(settings.aiApiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        var body: [String: Any] = [
-            "model": settings.aiModel,
-            "messages": messages.map { $0.toAPIDict() }
-        ]
-
-        if !tools.isEmpty {
-            body["tools"] = tools.map { ["type": "function", "function": $0.definition.function.toDict()] }
-            body["tool_choice"] = "auto"
-        }
-
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw AgentError.noResponse
-        }
-
-        guard httpResponse.statusCode == 200 else {
-            let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
-            throw AgentError.apiError("HTTP \(httpResponse.statusCode): \(errorBody)")
-        }
-
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = json["choices"] as? [[String: Any]],
-              let firstChoice = choices.first,
-              let message = firstChoice["message"] as? [String: Any] else {
-            throw AgentError.noResponse
-        }
-
-        let content = message["content"] as? String ?? ""
-        var toolCalls: [AgentToolCall] = []
-
-        if let rawToolCalls = message["tool_calls"] as? [[String: Any]] {
-            for rawToolCall in rawToolCalls {
-                guard let id = rawToolCall["id"] as? String,
-                      let type = rawToolCall["type"] as? String,
-                      let function = rawToolCall["function"] as? [String: Any],
-                      let name = function["name"] as? String,
-                      let arguments = function["arguments"] as? String else { continue }
-                toolCalls.append(AgentToolCall(
-                    id: id,
-                    type: type,
-                    function: AgentToolFunction(name: name, arguments: arguments)
-                ))
-            }
-        }
-
-        return AgentMessage(
-            role: message["role"] as? String ?? "assistant",
-            content: content,
-            toolCalls: toolCalls.isEmpty ? nil : toolCalls
-        )
-    }
-
     private func callAPIStreaming(messages: [AgentMessage], onToken: ((String) -> Void)?) async throws -> AgentMessage {
         let endpoint = settings.aiEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: "\(endpoint)/chat/completions") else {
@@ -306,6 +240,7 @@ final class AgentCore {
         request.httpMethod = "POST"
         request.setValue("Bearer \(settings.aiApiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 120
 
         var body: [String: Any] = [
             "model": settings.aiModel,

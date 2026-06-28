@@ -9,6 +9,7 @@ final class AgentChatViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var streamingText: String = ""
     @Published var activeToolCall: String?
+    @Published var isSavingMemory: Bool = false
 
     private let agent: AgentCore
     private let memory: AgentMemory
@@ -83,9 +84,9 @@ final class AgentChatViewModel: ObservableObject {
 
     func endSession() async {
         guard !messages.isEmpty else { return }
-        isLoading = true
+        isSavingMemory = true
         await agent.endSession(messages: messages)
-        isLoading = false
+        isSavingMemory = false
     }
 
     func clearHistory() {

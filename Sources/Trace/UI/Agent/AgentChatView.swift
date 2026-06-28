@@ -74,6 +74,23 @@ struct AgentChatView: View {
                             .id("typing")
                     }
 
+                    if viewModel.isSavingMemory {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                                .frame(width: 12, height: 12)
+                            Text("Saving memory...")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundStyle(theme.textSecondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(theme.surface.opacity(0.4))
+                        .clipShape(Capsule())
+                        .padding(.horizontal, 52)
+                        .id("saving")
+                    }
+
                     if let error = viewModel.errorMessage {
                         Text(error)
                             .font(.system(size: 11, weight: .medium))
