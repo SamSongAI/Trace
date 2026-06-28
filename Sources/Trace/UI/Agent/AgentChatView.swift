@@ -668,6 +668,16 @@ struct AgentSidebarView: View {
                 Spacer()
 
                 Button {
+                    viewModel.newSession()
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(theme.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .help("New chat")
+
+                Button {
                     onClose()
                 } label: {
                     Image(systemName: "xmark")
