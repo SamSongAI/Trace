@@ -7,17 +7,35 @@ final class AgentChatViewModel: ObservableObject {
     @Published var inputText: String = ""
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
+    @Published var streamingText: String = ""
+    @Published var activeToolCall: String?
 
     private let agent: AgentCore
+    private let memory: AgentMemory
 
     init(settings: AppSettings) {
+        self.memory = AgentMemory(vaultPath: settings.vaultPath)
         self.agent = AgentCore(settings: settings)
+
+        // File system tools
         agent.registerTool(ReadFileTool(vaultPath: settings.vaultPath))
         agent.registerTool(WriteFileTool(vaultPath: settings.vaultPath))
         agent.registerTool(ListDirectoryTool(vaultPath: settings.vaultPath))
         agent.registerTool(CreateDirectoryTool(vaultPath: settings.vaultPath))
+
+        // Config tools
         agent.registerTool(GetConfigTool(settings: settings))
         agent.registerTool(UpdateConfigTool(settings: settings))
+
+        // Memory tools
+        agent.registerTool(UpdateIdentityTool(memory: memory))
+        agent.registerTool(SaveSessionSummaryTool(memory: memory))
+        agent.registerTool(SaveInsightTool(memory: memory))
+        agent.registerTool(UpdateTodosTool(memory: memory))
+
+        // Search & routing
+        agent.registerTool(SearchVaultTool(vaultPath: settings.vaultPath))
+        agent.registerTool(RouteCaptureTool(settings: settings))
     }
 
     var isConfigured: Bool {
@@ -30,6 +48,7 @@ final class AgentChatViewModel: ObservableObject {
 
         inputText = ""
         errorMessage = nil
+        streamingText = ""
 
         let userMessage = AgentMessage(role: "user", content: text)
         messages.append(userMessage)
@@ -37,12 +56,35 @@ final class AgentChatViewModel: ObservableObject {
         isLoading = true
 
         do {
-            let response = try await agent.chat(messages: messages)
+            let response = try await agent.chat(
+                messages: messages,
+                onToken: { token in
+                    Task { @MainActor in
+                        self.streamingText += token
+                    }
+                },
+                onToolCall: { name in
+                    Task { @MainActor in
+                        self.activeToolCall = name
+                    }
+                }
+            )
+            self.activeToolCall = nil
+            self.streamingText = ""
             messages.append(response)
         } catch {
+            self.activeToolCall = nil
+            self.streamingText = ""
             errorMessage = error.localizedDescription
         }
 
+        isLoading = false
+    }
+
+    func endSession() async {
+        guard !messages.isEmpty else { return }
+        isLoading = true
+        await agent.endSession(messages: messages)
         isLoading = false
     }
 

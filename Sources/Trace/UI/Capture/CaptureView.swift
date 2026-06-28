@@ -143,14 +143,6 @@ struct CaptureView: View {
                 .foregroundStyle(theme.textPrimary)
                 .lineLimit(1)
 
-            Text(settings.noteWriteMode.compactTitle)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(theme.textSecondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(theme.surface.opacity(0.6))
-                .clipShape(Capsule())
-
             Spacer()
 
             Button {
@@ -165,6 +157,9 @@ struct CaptureView: View {
 
             Button {
                 showAgentChat.toggle()
+                if !showAgentChat {
+                    Task { await agentViewModel.endSession() }
+                }
             } label: {
                 Image(systemName: "sparkles")
                     .font(.system(size: 11, weight: .medium))
