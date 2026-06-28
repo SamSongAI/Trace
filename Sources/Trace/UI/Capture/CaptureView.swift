@@ -172,15 +172,6 @@ struct CaptureView: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            if showAgentChat {
-                Image(systemName: "robot")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(theme.accent)
-                    .frame(width: 18, height: 18)
-                    .background(theme.accent.opacity(0.1))
-                    .clipShape(Circle())
-            }
-
             Text(BrandAssets.displayName)
                 .font(.custom("Lora", size: 13))
                 .fontWeight(.bold)
@@ -208,7 +199,7 @@ struct CaptureView: View {
             Button {
                 cycleMode()
             } label: {
-                Image(systemName: "robot")
+                Image(systemName: "brain.head.profile")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(showAgentChat ? theme.accent : theme.iconMuted)
             }

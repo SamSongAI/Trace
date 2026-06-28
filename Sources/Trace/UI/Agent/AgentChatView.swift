@@ -58,25 +58,16 @@ struct AgentChatView: View {
 
     private var inputBar: some View {
         HStack(alignment: .center, spacing: 8) {
-            ZStack(alignment: .leading) {
-                if viewModel.inputText.isEmpty {
-                    Text(L10n.aiInputPlaceholder)
-                        .font(.system(size: 13))
-                        .foregroundStyle(theme.textSecondary.opacity(0.5))
-                        .allowsHitTesting(false)
+            TextField(L10n.aiInputPlaceholder, text: $viewModel.inputText, axis: .vertical)
+                .font(.system(size: 13))
+                .textFieldStyle(.plain)
+                .lineLimit(1...5)
+                .foregroundStyle(theme.textPrimary)
+                .tint(theme.accent)
+                .focused($inputFocused)
+                .onSubmit {
+                    Task { await viewModel.send() }
                 }
-
-                TextField("", text: $viewModel.inputText, axis: .vertical)
-                    .font(.system(size: 13))
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...5)
-                    .foregroundStyle(theme.textPrimary)
-                    .tint(theme.accent)
-                    .focused($inputFocused)
-                    .onSubmit {
-                        Task { await viewModel.send() }
-                    }
-            }
 
             Button {
                 if viewModel.isLoading {
@@ -249,7 +240,7 @@ private struct AgentMessageBubble: View {
 
     private var assistantBubble: some View {
         HStack(alignment: .top, spacing: 6) {
-            Image(systemName: "robot")
+            Image(systemName: "brain.head.profile")
                 .font(.system(size: 10))
                 .foregroundStyle(theme.accent)
                 .frame(width: 18, height: 18)
@@ -323,7 +314,7 @@ private struct AgentStreamingBubble: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
-            Image(systemName: "robot")
+            Image(systemName: "brain.head.profile")
                 .font(.system(size: 10))
                 .foregroundStyle(theme.accent)
                 .frame(width: 18, height: 18)
@@ -629,7 +620,7 @@ private struct AgentTypingIndicator: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "robot")
+            Image(systemName: "brain.head.profile")
                 .font(.system(size: 10))
                 .foregroundStyle(theme.accent)
                 .frame(width: 18, height: 18)
