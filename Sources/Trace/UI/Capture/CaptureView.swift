@@ -149,9 +149,9 @@ struct CaptureView: View {
                 .background(theme.panelBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .shadow(color: .black.opacity(0.15), radius: 8, x: 2)
-                .padding(.leading, 4)
+                .padding(.leading, 16)
                 .padding(.top, 36)
-                .padding(.bottom, 4)
+                .padding(.bottom, 16)
                 .transition(.move(edge: .leading).combined(with: .opacity))
                 .zIndex(1)
             }

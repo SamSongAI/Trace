@@ -57,7 +57,7 @@ struct AgentChatView: View {
     }
 
     private var inputBar: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        HStack(alignment: .center, spacing: 8) {
             ZStack(alignment: .leading) {
                 if viewModel.inputText.isEmpty {
                     Text(L10n.aiInputPlaceholder)
@@ -685,7 +685,7 @@ struct AgentSidebarView: View {
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 12)
             .padding(.vertical, 8)
 
             Divider().overlay(theme.border)
@@ -696,17 +696,11 @@ struct AgentSidebarView: View {
                         sessionRow(session)
                     }
                 }
-                .padding(.horizontal, 6)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 6)
             }
         }
         .frame(width: 180)
-        .background(theme.panelBackground)
-        .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(theme.border)
-                .frame(width: 0.5)
-        }
     }
 
     private func sessionRow(_ session: AgentSession) -> some View {
