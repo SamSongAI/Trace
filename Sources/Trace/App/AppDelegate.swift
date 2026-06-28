@@ -140,6 +140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.title = "Trace Settings"
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             window.setContentSize(NSSize(width: 760, height: 760))
+            window.minSize = NSSize(width: 520, height: 480)
             window.isReleasedWhenClosed = false
             window.center()
             settingsWindowController = NSWindowController(window: window)

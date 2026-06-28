@@ -485,13 +485,13 @@ struct SettingsView: View {
 
                 // Shortcuts
                 SectionCard(title: L10n.shortcuts, palette: palette) {
-                    VStack(spacing: 0) {
+                    VStack(spacing: 4) {
                         shortcutRow(for: .create)
                         shortcutRow(for: .send)
                         shortcutRow(for: .append)
                         shortcutRow(for: .toggleWriteMode)
 
-                        Divider().overlay(palette.mutedText.opacity(0.15)).padding(.vertical, 6)
+                        Divider().overlay(palette.mutedText.opacity(0.15)).padding(.vertical, 8)
 
                         fixedShortcutRow("Esc", L10n.shortcutClosePanel)
                         fixedShortcutRow("⌘P", L10n.shortcutPinPanel)
@@ -585,7 +585,7 @@ struct SettingsView: View {
                     .foregroundStyle(palette.accent)
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
     }
 
     @ViewBuilder
@@ -604,8 +604,7 @@ struct SettingsView: View {
 
             Spacer()
         }
-        .padding(.vertical, 4)
-        .padding(.vertical, 3)
+        .padding(.vertical, 6)
     }
 
     // MARK: - Logic
