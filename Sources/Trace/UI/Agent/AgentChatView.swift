@@ -139,24 +139,42 @@ struct AgentChatView: View {
                 .padding(.vertical, 10)
             }
             .onChange(of: viewModel.messages.count) { _ in
-                scrollToBottom(proxy)
+                scrollToBottom(proxy, animated: true)
             }
             .onChange(of: viewModel.isLoading) { loading in
-                if loading { scrollToBottom(proxy) }
+                if loading {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        scrollToBottom(proxy, animated: true)
+                    }
+                }
+            }
+            .onChange(of: viewModel.streamingText) { _ in
+                scrollToBottom(proxy, animated: false)
+            }
+            .onChange(of: viewModel.events.count) { _ in
+                scrollToBottom(proxy, animated: false)
             }
         }
     }
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
         let targetId: String
-        if !viewModel.streamingText.isEmpty {
+        if viewModel.isSavingMemory {
+            targetId = "saving"
+        } else if !viewModel.streamingText.isEmpty {
             targetId = "streaming"
         } else if !viewModel.events.isEmpty {
             targetId = "events"
+        } else if viewModel.isLoading {
+            targetId = "typing"
         } else {
             targetId = viewModel.messages.last?.id.uuidString ?? "typing"
         }
-        withAnimation(.easeOut(duration: 0.15)) {
+        if animated {
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo(targetId, anchor: .bottom)
+            }
+        } else {
             proxy.scrollTo(targetId, anchor: .bottom)
         }
     }
@@ -185,14 +203,18 @@ struct AgentChatView: View {
             }
 
             Button {
-                Task { await viewModel.send() }
+                if viewModel.isLoading {
+                    viewModel.stop()
+                } else {
+                    Task { await viewModel.send() }
+                }
             } label: {
                 Image(systemName: viewModel.isLoading ? "stop.fill" : "arrow.up.circle.fill")
                     .font(.system(size: 22))
-                    .foregroundStyle(canSend ? theme.accent : theme.textSecondary.opacity(0.3))
+                    .foregroundStyle(viewModel.isLoading ? theme.accentStrong : (canSend ? theme.accent : theme.textSecondary.opacity(0.3)))
             }
             .buttonStyle(.plain)
-            .disabled(!canSend)
+            .disabled(!canSend && !canStop)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -210,6 +232,10 @@ struct AgentChatView: View {
 
     private var canSend: Bool {
         !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !viewModel.isLoading
+    }
+
+    private var canStop: Bool {
+        viewModel.isLoading
     }
 }
 

@@ -31,6 +31,7 @@ final class AgentChatViewModel: ObservableObject {
     private var tokenBuffer = ""
     private var flushTimer: Timer?
     private let historyURL: URL?
+    private var sendTask: Task<Void, Never>?
 
     init(settings: AppSettings) {
         self.memory = AgentMemory(vaultPath: settings.vaultPath)
@@ -82,40 +83,53 @@ final class AgentChatViewModel: ObservableObject {
         isLoading = true
         startFlushTimer()
 
-        do {
-            let response = try await agent.chat(
-                messages: messages,
-                onToken: { [weak self] token in
-                    self?.appendToken(token)
-                },
-                onToolCall: { [weak self] name, args in
-                    DispatchQueue.main.async {
-                        self?.events.append(AgentEvent(kind: .toolStart, toolName: name, toolArgs: args, toolResult: nil, iteration: nil))
+        sendTask = Task {
+            do {
+                let response = try await agent.chat(
+                    messages: messages,
+                    onToken: { [weak self] token in
+                        self?.appendToken(token)
+                    },
+                    onToolCall: { [weak self] name, args in
+                        DispatchQueue.main.async {
+                            self?.events.append(AgentEvent(kind: .toolStart, toolName: name, toolArgs: args, toolResult: nil, iteration: nil))
+                        }
+                    },
+                    onToolResult: { [weak self] name, result in
+                        DispatchQueue.main.async {
+                            self?.events.append(AgentEvent(kind: .toolResult, toolName: name, toolArgs: nil, toolResult: result, iteration: nil))
+                        }
+                    },
+                    onIteration: { [weak self] iter in
+                        DispatchQueue.main.async {
+                            self?.events.append(AgentEvent(kind: .iteration, toolName: nil, toolArgs: nil, toolResult: nil, iteration: iter))
+                        }
                     }
-                },
-                onToolResult: { [weak self] name, result in
-                    DispatchQueue.main.async {
-                        self?.events.append(AgentEvent(kind: .toolResult, toolName: name, toolArgs: nil, toolResult: result, iteration: nil))
-                    }
-                },
-                onIteration: { [weak self] iter in
-                    DispatchQueue.main.async {
-                        self?.events.append(AgentEvent(kind: .iteration, toolName: nil, toolArgs: nil, toolResult: nil, iteration: iter))
-                    }
-                }
-            )
-            flushTokens()
-            stopFlushTimer()
-            streamingText = ""
-            messages.append(response)
-            saveHistory()
-        } catch {
-            flushTokens()
-            stopFlushTimer()
-            streamingText = ""
-            errorMessage = error.localizedDescription
-        }
+                )
+                if Task.isCancelled { return }
+                flushTokens()
+                stopFlushTimer()
+                streamingText = ""
+                messages.append(response)
+                saveHistory()
+            } catch {
+                if Task.isCancelled { return }
+                flushTokens()
+                stopFlushTimer()
+                streamingText = ""
+                errorMessage = error.localizedDescription
+            }
 
+            isLoading = false
+        }
+    }
+
+    func stop() {
+        sendTask?.cancel()
+        sendTask = nil
+        flushTokens()
+        stopFlushTimer()
+        streamingText = ""
         isLoading = false
     }
 
