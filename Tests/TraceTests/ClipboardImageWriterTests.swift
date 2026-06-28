@@ -96,5 +96,6 @@ final class ClipboardImageWriterTests: XCTestCase {
 private struct ClipboardTestSettings: ClipboardImageWritingSettingsProviding {
     let vaultPath: String
     let dailyFolderName: String
+    let imageAssetsFolderName: String = "assets"
     let hasValidVaultPath: Bool
 }

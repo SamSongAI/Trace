@@ -35,6 +35,12 @@ enum L10n {
           "デイリーノート用のサブフォルダ名。Obsidian のデイリーノート設定と合わせてください",
           "Subfolder name for daily notes, should match your Obsidian daily notes settings")
     }
+    static var imageAssetsFolder: String { s("图片文件夹", "画像フォルダ", "Image Assets Folder") }
+    static var imageAssetsFolderHint: String {
+        s("粘贴图片的存放子文件夹名称，默认为 assets",
+          "貼り付け画像の保存先サブフォルダ名。デフォルトは assets",
+          "Subfolder name for pasted images, defaults to assets")
+    }
     static var fileNameFormat: String { s("文件名格式", "ファイル名の形式", "File Name Format") }
     static var entryFormat: String { s("条目格式", "エントリー形式", "Entry Format") }
     static var sectionName: String { s("模块名", "セクション名", "Section Name") }

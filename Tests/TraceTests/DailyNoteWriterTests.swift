@@ -277,6 +277,7 @@ private struct TestSettings: DailyNoteSettingsProviding {
     let dailyFolderName: String
     let dailyFileDateFormat: String
     var noteWriteMode: NoteWriteMode = .dimension
+    var imageAssetsFolderName: String = "assets"
 
     init(vaultPath: String, dailyFolderName: String, dailyFileDateFormat: String) {
         self.vaultPath = vaultPath

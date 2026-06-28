@@ -4,6 +4,7 @@ import Foundation
 protocol ClipboardImageWritingSettingsProviding {
     var vaultPath: String { get }
     var dailyFolderName: String { get }
+    var imageAssetsFolderName: String { get }
     var hasValidVaultPath: Bool { get }
 }
 
@@ -42,7 +43,9 @@ final class ClipboardImageWriter {
         try data.write(to: targetURL, options: .atomic)
 
         let dateFolder = dayFolderString(for: now)
-        let relativePath = "assets/\(dateFolder)/\(fileName)"
+        let assetsFolder = settings.imageAssetsFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let assetsName = assetsFolder.isEmpty ? "assets" : assetsFolder
+        let relativePath = "\(assetsName)/\(dateFolder)/\(fileName)"
         return "![image](\(relativePath))"
     }
 
@@ -52,10 +55,13 @@ final class ClipboardImageWriter {
             throw ClipboardImageWriterError.invalidVaultPath
         }
 
+        let assetsFolder = settings.imageAssetsFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let assetsName = assetsFolder.isEmpty ? "assets" : assetsFolder
+
         let vaultURL = URL(fileURLWithPath: trimmedVaultPath, isDirectory: true)
         return vaultURL
             .appendingPathComponent(settings.dailyFolderName, isDirectory: true)
-            .appendingPathComponent("assets", isDirectory: true)
+            .appendingPathComponent(assetsName, isDirectory: true)
             .appendingPathComponent(dayFolderString(for: date), isDirectory: true)
     }
 

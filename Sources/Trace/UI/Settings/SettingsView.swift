@@ -361,6 +361,12 @@ struct SettingsView: View {
                                     .settingsFieldChrome(palette)
                             }
 
+                            SettingRow(label: L10n.imageAssetsFolder, hint: L10n.imageAssetsFolderHint, palette: palette) {
+                                TextField("assets", text: $settings.imageAssetsFolderName)
+                                    .textFieldStyle(.plain)
+                                    .settingsFieldChrome(palette)
+                            }
+
                             SettingRow(label: L10n.fileNameFormat, palette: palette) {
                                 Picker("", selection: dailyFileDateFormatBinding) {
                                     ForEach(DailyFileDateFormat.allCases) { format in

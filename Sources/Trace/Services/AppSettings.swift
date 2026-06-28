@@ -55,6 +55,7 @@ enum SettingKeys {
     static let threadConfigs = "trace.threadConfigs"
     static let lastUsedThreadId = "trace.lastUsedThreadId"
     static let draftText = "trace.draftText"
+    static let imageAssetsFolderName = "trace.imageAssetsFolderName"
 }
 
 enum LegacySettingKeys {
@@ -300,6 +301,12 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var imageAssetsFolderName: String {
+        didSet {
+            defaults.set(imageAssetsFolderName, forKey: SettingKeys.imageAssetsFolderName)
+        }
+    }
+
     @Published var dailyFileDateFormat: String {
         didSet {
             defaults.set(dailyFileDateFormat, forKey: SettingKeys.dailyFileDateFormat)
@@ -457,6 +464,7 @@ final class AppSettings: ObservableObject {
         language = AppLanguage(rawValue: defaults.string(forKey: SettingKeys.language) ?? "") ?? .systemDefault
         vaultPath = defaults.string(forKey: SettingKeys.vaultPath) ?? ""
         dailyFolderName = defaults.string(forKey: SettingKeys.dailyFolderName) ?? "Daily"
+        imageAssetsFolderName = defaults.string(forKey: SettingKeys.imageAssetsFolderName) ?? "assets"
         dailyFileDateFormat = defaults.string(forKey: SettingKeys.dailyFileDateFormat) ?? "yyyy M月d日 EEEE"
         noteWriteMode = NoteWriteMode(rawValue: defaults.string(forKey: SettingKeys.noteWriteMode) ?? "") ?? .dimension
 
