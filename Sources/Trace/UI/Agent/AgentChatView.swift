@@ -64,12 +64,12 @@ struct AgentChatView: View {
                             .id("streaming")
                     }
 
-                    if let toolName = viewModel.activeToolCall {
-                        AgentToolCallIndicator(toolName: toolName, theme: theme)
-                            .id("toolcall")
+                    if viewModel.isLoading && !viewModel.events.isEmpty {
+                        AgentEventFlowView(events: viewModel.events, theme: theme)
+                            .id("events")
                     }
 
-                    if viewModel.isLoading && viewModel.streamingText.isEmpty && viewModel.activeToolCall == nil {
+                    if viewModel.isLoading && viewModel.streamingText.isEmpty && viewModel.events.isEmpty {
                         AgentTypingIndicator(theme: theme)
                             .id("typing")
                     }
@@ -108,13 +108,21 @@ struct AgentChatView: View {
             .onChange(of: viewModel.streamingText) { _ in
                 scrollToBottom(proxy)
             }
+            .onChange(of: viewModel.events.count) { _ in
+                scrollToBottom(proxy)
+            }
         }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        let targetId: String = viewModel.streamingText.isEmpty
-            ? (viewModel.messages.last?.id.uuidString ?? "typing")
-            : "streaming"
+        let targetId: String
+        if !viewModel.streamingText.isEmpty {
+            targetId = "streaming"
+        } else if !viewModel.events.isEmpty {
+            targetId = "events"
+        } else {
+            targetId = viewModel.messages.last?.id.uuidString ?? "typing"
+        }
         withAnimation(.easeOut(duration: 0.15)) {
             proxy.scrollTo(targetId, anchor: .bottom)
         }
@@ -273,30 +281,71 @@ private struct AgentStreamingBubble: View {
     }
 }
 
-// MARK: - Tool Call Indicator
+// MARK: - Event Flow View
 
-private struct AgentToolCallIndicator: View {
-    let toolName: String
+private struct AgentEventFlowView: View {
+    let events: [AgentEvent]
     let theme: TraceTheme.CapturePalette
 
     var body: some View {
-        HStack(spacing: 6) {
-            ProgressView()
-                .scaleEffect(0.6)
-                .frame(width: 12, height: 12)
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(events) { event in
+                switch event.kind {
+                case .iteration:
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 8))
+                        Text("Round \(event.iteration.map { $0 + 1 } ?? 1)")
+                            .font(.system(size: 9, weight: .medium))
+                    }
+                    .foregroundStyle(theme.textSecondary.opacity(0.6))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
 
-            Image(systemName: "wrench.and.screwdriver")
-                .font(.system(size: 9))
+                case .toolStart:
+                    HStack(spacing: 4) {
+                        ProgressView()
+                            .scaleEffect(0.5)
+                            .frame(width: 10, height: 10)
+                        Image(systemName: "wrench.and.screwdriver")
+                            .font(.system(size: 8))
+                        Text(event.toolName ?? "tool")
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .foregroundStyle(theme.accent)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(theme.accent.opacity(0.08))
+                    .clipShape(Capsule())
 
-            Text(toolName)
-                .font(.system(size: 11, weight: .medium))
+                case .toolResult:
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 8))
+                            Text(event.toolName ?? "tool")
+                                .font(.system(size: 10, weight: .medium))
+                            Text("done")
+                                .font(.system(size: 9))
+                                .foregroundStyle(theme.textSecondary.opacity(0.5))
+                        }
+                        .foregroundStyle(theme.textSecondary)
+
+                        if let result = event.toolResult, !result.isEmpty {
+                            Text(result.prefix(120))
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(theme.textSecondary.opacity(0.6))
+                                .lineLimit(2)
+                                .padding(.leading, 16)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                }
+            }
         }
-        .foregroundStyle(theme.textSecondary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(theme.surface.opacity(0.4))
-        .clipShape(Capsule())
-        .padding(.horizontal, 52)
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

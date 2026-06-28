@@ -1,4 +1,7 @@
 import Foundation
+import os.log
+
+private let agentLog = Logger(subsystem: "com.trace.app", category: "AgentCore")
 
 struct AgentMessage: Identifiable, Codable, Equatable {
     let id: UUID
@@ -158,7 +161,7 @@ final class AgentCore {
         """
     }
 
-    func chat(messages: [AgentMessage], onToken: ((String) -> Void)? = nil, onToolCall: ((String) -> Void)? = nil) async throws -> AgentMessage {
+    func chat(messages: [AgentMessage], onToken: ((String) -> Void)? = nil, onToolCall: ((String) -> Void)? = nil, onToolResult: ((String, String) -> Void)? = nil, onIteration: ((Int) -> Void)? = nil) async throws -> AgentMessage {
         guard isConfigured else { throw AgentError.notConfigured }
 
         var conversationMessages = messages
@@ -166,31 +169,47 @@ final class AgentCore {
             conversationMessages.insert(AgentMessage(role: "system", content: systemPrompt), at: 0)
         }
 
-        for _ in 0..<maxIterations {
+        agentLog.info("Chat started with \(conversationMessages.count) messages")
+
+        for iteration in 0..<maxIterations {
+            agentLog.info("Iteration \(iteration)")
+            onIteration?(iteration)
+
             // Compaction: if conversation is too long, summarize older messages
             conversationMessages = try await compactIfNeeded(conversationMessages)
 
             let response = try await callAPIStreaming(messages: conversationMessages, onToken: onToken)
 
+            agentLog.info("Response: content=\(response.content.count) chars, toolCalls=\(response.toolCalls?.count ?? 0)")
+
             if let toolCalls = response.toolCalls, !toolCalls.isEmpty {
                 conversationMessages.append(response)
 
                 for toolCall in toolCalls {
-                    onToolCall?(toolCall.function.name)
+                    let toolName = toolCall.function.name
+                    let toolArgs = toolCall.function.arguments
+                    agentLog.info("Tool call: \(toolName)(\(toolArgs))")
+                    onToolCall?(toolName)
+
                     let result = try await executeToolCall(toolCall)
                     let truncated = truncateResult(result)
+                    agentLog.info("Tool result: \(result.count) chars")
+                    onToolResult?(toolName, truncated)
+
                     conversationMessages.append(AgentMessage(
                         role: "tool",
                         content: truncated,
                         toolCallId: toolCall.id,
-                        name: toolCall.function.name
+                        name: toolName
                     ))
                 }
             } else {
+                agentLog.info("Chat complete")
                 return response
             }
         }
 
+        agentLog.error("Max iterations reached")
         throw AgentError.maxIterationsReached
     }
 
@@ -255,6 +274,9 @@ final class AgentCore {
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+        agentLog.info("API request to \(url.absoluteString), model=\(self.settings.aiModel)")
+        let requestStart = Date()
+
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -266,11 +288,15 @@ final class AgentCore {
             for try await line in bytes.lines {
                 errorBody += line
             }
+            agentLog.error("API error: HTTP \(httpResponse.statusCode), body=\(errorBody)")
             throw AgentError.apiError("HTTP \(httpResponse.statusCode): \(errorBody)")
         }
 
+        agentLog.info("Stream started, \(Date().timeIntervalSince(requestStart))s")
+
         var content = ""
         var toolCalls: [String: AgentToolCall] = [:]
+        var tokenCount = 0
 
         for try await line in bytes.lines {
             guard line.hasPrefix("data: ") else { continue }
@@ -284,6 +310,7 @@ final class AgentCore {
 
             if let text = delta["content"] as? String, !text.isEmpty {
                 content += text
+                tokenCount += 1
                 onToken?(text)
             }
 
@@ -312,6 +339,8 @@ final class AgentCore {
                 }
             }
         }
+
+        agentLog.info("Stream done: \(tokenCount) tokens, \(content.count) chars, \(Date().timeIntervalSince(requestStart))s total")
 
         let finalToolCalls = Array(toolCalls.values)
         return AgentMessage(

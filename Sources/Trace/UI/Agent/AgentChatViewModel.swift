@@ -1,6 +1,21 @@
 import Foundation
 import SwiftUI
 
+struct AgentEvent: Identifiable {
+    let id = UUID()
+    let kind: Kind
+    let toolName: String?
+    let toolArgs: String?
+    let toolResult: String?
+    let iteration: Int?
+    
+    enum Kind {
+        case iteration
+        case toolStart
+        case toolResult
+    }
+}
+
 @MainActor
 final class AgentChatViewModel: ObservableObject {
     @Published var messages: [AgentMessage] = []
@@ -8,11 +23,13 @@ final class AgentChatViewModel: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
     @Published var streamingText: String = ""
-    @Published var activeToolCall: String?
+    @Published var events: [AgentEvent] = []
     @Published var isSavingMemory: Bool = false
 
     private let agent: AgentCore
     private let memory: AgentMemory
+    private var tokenBuffer = ""
+    private var flushTimer: Timer?
 
     init(settings: AppSettings) {
         self.memory = AgentMemory(vaultPath: settings.vaultPath)
@@ -50,36 +67,72 @@ final class AgentChatViewModel: ObservableObject {
         inputText = ""
         errorMessage = nil
         streamingText = ""
+        events = []
+        tokenBuffer = ""
 
         let userMessage = AgentMessage(role: "user", content: text)
         messages.append(userMessage)
 
         isLoading = true
+        startFlushTimer()
 
         do {
             let response = try await agent.chat(
                 messages: messages,
-                onToken: { token in
-                    Task { @MainActor in
-                        self.streamingText += token
+                onToken: { [weak self] token in
+                    self?.appendToken(token)
+                },
+                onToolCall: { [weak self] name in
+                    DispatchQueue.main.async {
+                        self?.events.append(AgentEvent(kind: .toolStart, toolName: name, toolArgs: nil, toolResult: nil, iteration: nil))
                     }
                 },
-                onToolCall: { name in
-                    Task { @MainActor in
-                        self.activeToolCall = name
+                onToolResult: { [weak self] name, result in
+                    DispatchQueue.main.async {
+                        self?.events.append(AgentEvent(kind: .toolResult, toolName: name, toolArgs: nil, toolResult: result, iteration: nil))
+                    }
+                },
+                onIteration: { [weak self] iter in
+                    DispatchQueue.main.async {
+                        self?.events.append(AgentEvent(kind: .iteration, toolName: nil, toolArgs: nil, toolResult: nil, iteration: iter))
                     }
                 }
             )
-            self.activeToolCall = nil
-            self.streamingText = ""
+            flushTokens()
+            stopFlushTimer()
+            streamingText = ""
             messages.append(response)
         } catch {
-            self.activeToolCall = nil
-            self.streamingText = ""
+            flushTokens()
+            stopFlushTimer()
+            streamingText = ""
             errorMessage = error.localizedDescription
         }
 
         isLoading = false
+    }
+
+    private func appendToken(_ token: String) {
+        tokenBuffer += token
+    }
+
+    private func startFlushTimer() {
+        flushTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.flushTokens()
+            }
+        }
+    }
+
+    private func stopFlushTimer() {
+        flushTimer?.invalidate()
+        flushTimer = nil
+    }
+
+    private func flushTokens() {
+        guard !tokenBuffer.isEmpty else { return }
+        streamingText += tokenBuffer
+        tokenBuffer = ""
     }
 
     func endSession() async {
@@ -92,5 +145,6 @@ final class AgentChatViewModel: ObservableObject {
     func clearHistory() {
         messages.removeAll()
         errorMessage = nil
+        events = []
     }
 }
