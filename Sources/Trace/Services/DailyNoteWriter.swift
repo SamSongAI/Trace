@@ -269,9 +269,10 @@ final class DailyNoteWriter {
         let sectionBody = content[afterSection..<closeSectionRange.lowerBound]
 
         guard let lastTimeRange = sectionBody.range(of: "</time>", options: .backwards) else { return nil }
-        // Find the </div> after this </time>
+        // Find the </div> after this </time>, but only within this section
         let afterTime = lastTimeRange.upperBound
-        guard let divCloseRange = content[afterTime...].range(of: "</div>") else { return nil }
+        let sectionEnd = closeSectionRange.lowerBound
+        guard let divCloseRange = content[afterTime..<sectionEnd].range(of: "</div>") else { return nil }
 
         let escaped = htmlEscape(text)
         let time = timestamp(for: date)

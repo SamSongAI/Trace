@@ -17,7 +17,7 @@ struct AgentChatView: View {
 
     private var notConfiguredView: some View {
         VStack(spacing: 16) {
-            Image(systemName: "sparkles")
+            Image(systemName: "brain.head.profile")
                 .font(.system(size: 28))
                 .foregroundStyle(theme.accent)
 
@@ -615,7 +615,8 @@ private struct AgentMarkdownText: View {
                     var link = AttributedString(path)
                     link.foregroundColor = theme.accent
                     link.underlineStyle = .single
-                    link.link = URL(fileURLWithPath: path)
+                    let expandedPath = (path as NSString).expandingTildeInPath
+                    link.link = URL(fileURLWithPath: expandedPath)
                     att.replaceSubrange(range, with: link)
                 }
             }
