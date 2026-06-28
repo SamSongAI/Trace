@@ -286,4 +286,34 @@ enum L10n {
           "オートミールの背景と陶土オレンジのアクセント。温かみのある質感。",
           "Oat background with clay-orange accent, warm and tactile.")
     }
+
+    // MARK: - AI Agent
+    static var ai: String { s("AI 助手", "AI アシスタント", "AI Agent") }
+    static var aiSettings: String { s("AI 设置", "AI 設定", "AI Settings") }
+    static var aiEnable: String { s("启用 AI 助手", "AI アシスタントを有効化", "Enable AI Agent") }
+    static var aiApiKey: String { s("API Key", "API キー", "API Key") }
+    static var aiApiKeyHint: String {
+        s("OpenAI / Anthropic / 其他兼容服务的 API Key",
+          "OpenAI / Anthropic / 互換サービスの API キー",
+          "API key for OpenAI, Anthropic, or any OpenAI-compatible service")
+    }
+    static var aiModel: String { s("模型", "モデル", "Model") }
+    static var aiModelHint: String {
+        s("如 gpt-4o-mini, claude-3-5-sonnet, 或本地 Ollama 模型名",
+          "例: gpt-4o-mini, claude-3-5-sonnet, またはローカル Ollama モデル名",
+          "e.g. gpt-4o-mini, claude-3-5-sonnet, or local Ollama model name")
+    }
+    static var aiEndpoint: String { s("API 地址", "API エンドポイント", "API Endpoint") }
+    static var aiEndpointHint: String {
+        s("OpenAI 兼容的 API 地址，本地 Ollama 用 http://localhost:11434/v1",
+          "OpenAI 互換の API エンドポイント。ローカル Ollama は http://localhost:11434/v1",
+          "OpenAI-compatible API endpoint. For local Ollama: http://localhost:11434/v1")
+    }
+    static var aiNotConfigured: String {
+        s("AI 助手尚未配置。\n请在设置中填写 API Key 后使用。",
+          "AI アシスタントが未設定です。\n設定で API キーを入力してください。",
+          "AI Agent is not configured.\nPlease set your API key in Settings.")
+    }
+    static var aiInputPlaceholder: String { s("问点什么…", "何か聞く…", "Ask anything…") }
+    static var aiAgentTooltip: String { s("AI 助手", "AI アシスタント", "AI Agent") }
 }

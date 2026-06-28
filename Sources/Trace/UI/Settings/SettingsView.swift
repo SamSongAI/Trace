@@ -500,6 +500,42 @@ struct SettingsView: View {
                     }
                 }
 
+                // AI Agent
+                SectionCard(title: L10n.aiSettings, palette: palette) {
+                    VStack(spacing: 12) {
+                        HStack {
+                            Text(L10n.aiEnable)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(palette.sectionTitle)
+                            Spacer()
+                            Toggle("", isOn: $settings.aiEnabled)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .tint(palette.accent)
+                        }
+
+                        if settings.aiEnabled {
+                            SettingRow(label: L10n.aiApiKey, hint: L10n.aiApiKeyHint, palette: palette) {
+                                SecureField("sk-...", text: $settings.aiApiKey)
+                                    .textFieldStyle(.plain)
+                                    .settingsFieldChrome(palette)
+                            }
+
+                            SettingRow(label: L10n.aiModel, hint: L10n.aiModelHint, palette: palette) {
+                                TextField("gpt-4o-mini", text: $settings.aiModel)
+                                    .textFieldStyle(.plain)
+                                    .settingsFieldChrome(palette)
+                            }
+
+                            SettingRow(label: L10n.aiEndpoint, hint: L10n.aiEndpointHint, palette: palette) {
+                                TextField("https://api.openai.com/v1", text: $settings.aiEndpoint)
+                                    .textFieldStyle(.plain)
+                                    .settingsFieldChrome(palette)
+                            }
+                        }
+                    }
+                }
+
                 // System
                 SectionCard(title: L10n.system, palette: palette) {
                     VStack(spacing: 12) {

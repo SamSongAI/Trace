@@ -28,6 +28,8 @@ struct CaptureView: View {
     @State private var sectionGridWidth: CGFloat = 0
     @State private var threadGridWidth: CGFloat = 0
     @State private var previewImagePath: String?
+    @State private var showAgentChat: Bool = false
+    @StateObject private var agentViewModel: AgentChatViewModel
 
     private let sectionGridSpacing: CGFloat = 6
     private let minimumSectionButtonWidth: CGFloat = 92
@@ -35,6 +37,14 @@ struct CaptureView: View {
 
     private var theme: CaptureTheme {
         settings.appTheme.capture
+    }
+
+    init(viewModel: CaptureViewModel, settings: AppSettings, onPasteImages: (([NSImage]) -> [String])? = nil) {
+        self.viewModel = viewModel
+        self.settings = settings
+        self.onPasteImages = onPasteImages
+        let agentVM = AgentChatViewModel(settings: settings)
+        _agentViewModel = StateObject(wrappedValue: agentVM)
     }
 
     private var editorTheme: CaptureTextEditor.Theme {
@@ -52,15 +62,25 @@ struct CaptureView: View {
         VStack(spacing: 0) {
             header
             Divider().overlay(theme.border)
-            editor
-            if !viewModel.pastedImagePaths.isEmpty {
-                thumbnailStrip
-            }
-            switch settings.noteWriteMode {
-            case .dimension:
-                modeFooter
-            case .thread:
-                threadFooter
+            if showAgentChat {
+                AgentChatView(
+                    viewModel: agentViewModel,
+                    settings: settings,
+                    theme: theme,
+                    isPresented: $showAgentChat
+                )
+                .frame(minHeight: 200)
+            } else {
+                editor
+                if !viewModel.pastedImagePaths.isEmpty {
+                    thumbnailStrip
+                }
+                switch settings.noteWriteMode {
+                case .dimension:
+                    modeFooter
+                case .thread:
+                    threadFooter
+                }
             }
         }
         .frame(minWidth: 360, minHeight: 220)
@@ -142,6 +162,16 @@ struct CaptureView: View {
             }
             .buttonStyle(.plain)
             .help(L10n.pinPanelHelp)
+
+            Button {
+                showAgentChat.toggle()
+            } label: {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(showAgentChat ? theme.accent : theme.iconMuted)
+            }
+            .buttonStyle(.plain)
+            .help(L10n.aiAgentTooltip)
 
             Button {
                 NotificationCenter.default.post(name: .traceOpenSettings, object: nil)

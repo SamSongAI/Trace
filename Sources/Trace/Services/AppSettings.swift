@@ -56,6 +56,10 @@ enum SettingKeys {
     static let lastUsedThreadId = "trace.lastUsedThreadId"
     static let draftText = "trace.draftText"
     static let imageAssetsFolderName = "trace.imageAssetsFolderName"
+    static let aiEnabled = "trace.aiEnabled"
+    static let aiApiKey = "trace.aiApiKey"
+    static let aiModel = "trace.aiModel"
+    static let aiEndpoint = "trace.aiEndpoint"
 }
 
 enum LegacySettingKeys {
@@ -307,6 +311,30 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var aiEnabled: Bool {
+        didSet {
+            defaults.set(aiEnabled, forKey: SettingKeys.aiEnabled)
+        }
+    }
+
+    @Published var aiApiKey: String {
+        didSet {
+            defaults.set(aiApiKey, forKey: SettingKeys.aiApiKey)
+        }
+    }
+
+    @Published var aiModel: String {
+        didSet {
+            defaults.set(aiModel, forKey: SettingKeys.aiModel)
+        }
+    }
+
+    @Published var aiEndpoint: String {
+        didSet {
+            defaults.set(aiEndpoint, forKey: SettingKeys.aiEndpoint)
+        }
+    }
+
     @Published var dailyFileDateFormat: String {
         didSet {
             defaults.set(dailyFileDateFormat, forKey: SettingKeys.dailyFileDateFormat)
@@ -465,6 +493,10 @@ final class AppSettings: ObservableObject {
         vaultPath = defaults.string(forKey: SettingKeys.vaultPath) ?? ""
         dailyFolderName = defaults.string(forKey: SettingKeys.dailyFolderName) ?? "Daily"
         imageAssetsFolderName = defaults.string(forKey: SettingKeys.imageAssetsFolderName) ?? "assets"
+        aiEnabled = defaults.bool(forKey: SettingKeys.aiEnabled)
+        aiApiKey = defaults.string(forKey: SettingKeys.aiApiKey) ?? ""
+        aiModel = defaults.string(forKey: SettingKeys.aiModel) ?? "gpt-4o-mini"
+        aiEndpoint = defaults.string(forKey: SettingKeys.aiEndpoint) ?? "https://api.openai.com/v1"
         dailyFileDateFormat = defaults.string(forKey: SettingKeys.dailyFileDateFormat) ?? "yyyy M月d日 EEEE"
         noteWriteMode = NoteWriteMode(rawValue: defaults.string(forKey: SettingKeys.noteWriteMode) ?? "") ?? .dimension
 
