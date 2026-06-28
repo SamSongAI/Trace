@@ -16,6 +16,30 @@ struct AgentEvent: Identifiable {
     }
 }
 
+struct AgentSession: Identifiable, Codable {
+    let id: UUID
+    var title: String
+    var messages: [AgentMessage]
+    var createdAt: Date
+    var updatedAt: Date
+    
+    init(id: UUID = UUID(), title: String = "New Chat", messages: [AgentMessage] = [], createdAt: Date = Date(), updatedAt: Date = Date()) {
+        self.id = id
+        self.title = title
+        self.messages = messages
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+    
+    var preview: String {
+        let lastUser = messages.last(where: { $0.role == "user" })
+        if let content = lastUser?.content {
+            return String(content.prefix(40))
+        }
+        return title
+    }
+}
+
 @MainActor
 final class AgentChatViewModel: ObservableObject {
     @Published var messages: [AgentMessage] = []
@@ -25,12 +49,14 @@ final class AgentChatViewModel: ObservableObject {
     @Published var streamingText: String = ""
     @Published var events: [AgentEvent] = []
     @Published var isSavingMemory: Bool = false
+    @Published var sessions: [AgentSession] = []
+    @Published var currentSessionId: UUID?
 
     private let agent: AgentCore
     private let memory: AgentMemory
     private var tokenBuffer = ""
     private var flushTimer: Timer?
-    private let historyURL: URL?
+    private let sessionsURL: URL?
     private var sendTask: Task<Void, Never>?
 
     init(settings: AppSettings) {
@@ -38,7 +64,7 @@ final class AgentChatViewModel: ObservableObject {
         self.agent = AgentCore(settings: settings)
 
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-        self.historyURL = appSupport?.appendingPathComponent("Trace/agent-history.json")
+        self.sessionsURL = appSupport?.appendingPathComponent("Trace/agent-sessions.json")
 
         // File system tools
         agent.registerTool(ReadFileTool(vaultPath: settings.vaultPath))
@@ -60,7 +86,13 @@ final class AgentChatViewModel: ObservableObject {
         agent.registerTool(SearchVaultTool(vaultPath: settings.vaultPath))
         agent.registerTool(RouteCaptureTool(settings: settings))
 
-        loadHistory()
+        loadSessions()
+        if sessions.isEmpty {
+            newSession()
+        } else {
+            currentSessionId = sessions.first?.id
+            messages = sessions.first?.messages ?? []
+        }
     }
 
     var isConfigured: Bool {
@@ -111,7 +143,7 @@ final class AgentChatViewModel: ObservableObject {
                 stopFlushTimer()
                 streamingText = ""
                 messages.append(response)
-                saveHistory()
+                updateCurrentSession()
             } catch {
                 if Task.isCancelled { return }
                 flushTokens()
@@ -167,24 +199,67 @@ final class AgentChatViewModel: ObservableObject {
         messages.removeAll()
         errorMessage = nil
         events = []
-        saveHistory()
+        updateCurrentSession()
     }
 
-    // MARK: - History Persistence
+    // MARK: - Session Management
 
-    private func loadHistory() {
-        guard let url = historyURL,
+    func newSession() {
+        let session = AgentSession()
+        sessions.insert(session, at: 0)
+        currentSessionId = session.id
+        messages = []
+        errorMessage = nil
+        events = []
+        saveSessions()
+    }
+
+    func switchToSession(_ id: UUID) {
+        guard let session = sessions.first(where: { $0.id == id }) else { return }
+        currentSessionId = id
+        messages = session.messages
+        errorMessage = nil
+        events = []
+    }
+
+    func deleteSession(_ id: UUID) {
+        sessions.removeAll { $0.id == id }
+        if currentSessionId == id {
+            if let first = sessions.first {
+                currentSessionId = first.id
+                messages = first.messages
+            } else {
+                newSession()
+            }
+        }
+        saveSessions()
+    }
+
+    private func updateCurrentSession() {
+        guard let id = currentSessionId,
+              let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
+        sessions[idx].messages = messages
+        sessions[idx].updatedAt = Date()
+        if sessions[idx].title == "New Chat", let firstUser = messages.first(where: { $0.role == "user" }), let content = firstUser.content {
+            sessions[idx].title = String(content.prefix(30))
+        }
+        saveSessions()
+    }
+
+    // MARK: - Persistence
+
+    private func loadSessions() {
+        guard let url = sessionsURL,
               let data = try? Data(contentsOf: url),
-              let decoded = try? JSONDecoder().decode([AgentMessage].self, from: data) else { return }
-        messages = decoded
+              let decoded = try? JSONDecoder().decode([AgentSession].self, from: data) else { return }
+        sessions = decoded
     }
 
-    private func saveHistory() {
-        guard let url = historyURL else { return }
+    private func saveSessions() {
+        guard let url = sessionsURL else { return }
         let dir = url.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let displayMessages = messages.filter { $0.role == "user" || $0.role == "assistant" }
-        if let data = try? JSONEncoder().encode(displayMessages) {
+        if let data = try? JSONEncoder().encode(sessions) {
             try? data.write(to: url, options: .atomic)
         }
     }

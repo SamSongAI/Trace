@@ -5,6 +5,7 @@ struct AgentChatView: View {
     @ObservedObject var settings: AppSettings
     let theme: TraceTheme.CapturePalette
     @Binding var isPresented: Bool
+    @FocusState private var inputFocused: Bool
 
     var body: some View {
         if !viewModel.isConfigured {
@@ -44,21 +45,55 @@ struct AgentChatView: View {
     }
 
     private var chatView: some View {
-        VStack(spacing: 0) {
-            toolbar
-            Divider().overlay(theme.border)
-            messageList
-            inputBar
+        HStack(spacing: 0) {
+            if isSidebarOpen {
+                AgentSidebarView(viewModel: viewModel, theme: theme, isSidebarOpen: $isSidebarOpen)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+
+            VStack(spacing: 0) {
+                toolbar
+                Divider().overlay(theme.border)
+                messageList
+                inputBar
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    inputFocused = true
+                }
+            }
         }
     }
 
     private var toolbar: some View {
         HStack(spacing: 8) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isSidebarOpen.toggle()
+                }
+            } label: {
+                Image(systemName: "sidebar.left")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.textSecondary)
+            }
+            .buttonStyle(.plain)
+            .help("Toggle history")
+
             Text("Agent")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(theme.textSecondary)
 
             Spacer()
+
+            Button {
+                viewModel.newSession()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.textSecondary)
+            }
+            .buttonStyle(.plain)
+            .help("New chat")
 
             if !viewModel.messages.isEmpty {
                 Button {
@@ -70,16 +105,6 @@ struct AgentChatView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Copy last response")
-
-                Button {
-                    viewModel.clearHistory()
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 10))
-                        .foregroundStyle(theme.textSecondary)
-                }
-                .buttonStyle(.plain)
-                .help("Clear conversation")
             }
         }
         .padding(.horizontal, 12)
@@ -179,7 +204,7 @@ struct AgentChatView: View {
         }
     }
 
-    @State private var inputFocused = false
+    @State private var isSidebarOpen = false
 
     private var inputBar: some View {
         HStack(alignment: .center, spacing: 8) {
@@ -197,6 +222,7 @@ struct AgentChatView: View {
                     .lineLimit(1...5)
                     .foregroundStyle(theme.textPrimary)
                     .tint(theme.accent)
+                    .focused($inputFocused)
                     .onSubmit {
                         Task { await viewModel.send() }
                     }
@@ -244,6 +270,8 @@ struct AgentChatView: View {
 private struct AgentMessageBubble: View {
     let message: AgentMessage
     let theme: TraceTheme.CapturePalette
+    @State private var isHovering = false
+    @State private var copied = false
 
     var body: some View {
         if message.role == "user" {
@@ -265,8 +293,15 @@ private struct AgentMessageBubble: View {
                 .padding(.vertical, 7)
                 .background(theme.accent.opacity(0.1))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(alignment: .topTrailing) {
+                    if isHovering {
+                        copyButton
+                            .padding(4)
+                    }
+                }
         }
         .padding(.horizontal, 12)
+        .onHover { isHovering = $0 }
     }
 
     private var assistantBubble: some View {
@@ -302,10 +337,38 @@ private struct AgentMessageBubble: View {
             .padding(.vertical, 7)
             .background(theme.surface)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(alignment: .topTrailing) {
+                if isHovering {
+                    copyButton
+                        .padding(4)
+                }
+            }
 
             Spacer(minLength: 30)
         }
         .padding(.horizontal, 12)
+        .onHover { isHovering = $0 }
+    }
+
+    private var copyButton: some View {
+        Button {
+            if let content = message.content {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(content, forType: .string)
+                copied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    copied = false
+                }
+            }
+        } label: {
+            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                .font(.system(size: 9))
+                .foregroundStyle(copied ? theme.accent : theme.textSecondary)
+                .padding(3)
+                .background(theme.panelBackground.opacity(0.9))
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -651,5 +714,95 @@ private struct AgentTypingIndicator: View {
         }
         .padding(.horizontal, 12)
         .onAppear { animate = true }
+    }
+}
+
+// MARK: - Sidebar
+
+private struct AgentSidebarView: View {
+    @ObservedObject var viewModel: AgentChatViewModel
+    let theme: TraceTheme.CapturePalette
+    @Binding var isSidebarOpen: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Text("History")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(theme.textSecondary)
+
+                Spacer()
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isSidebarOpen = false
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9))
+                        .foregroundStyle(theme.textSecondary.opacity(0.6))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+
+            Divider().overlay(theme.border)
+
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(viewModel.sessions) { session in
+                        sessionRow(session)
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 6)
+            }
+        }
+        .frame(width: 180)
+        .background(theme.panelBackground)
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(theme.border)
+                .frame(width: 0.5)
+        }
+    }
+
+    private func sessionRow(_ session: AgentSession) -> some View {
+        let isActive = session.id == viewModel.currentSessionId
+
+        return HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.title)
+                    .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                    .foregroundStyle(isActive ? theme.textPrimary : theme.textSecondary)
+                    .lineLimit(1)
+
+                Text(session.preview)
+                    .font(.system(size: 9))
+                    .foregroundStyle(theme.textSecondary.opacity(0.5))
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Button {
+                viewModel.deleteSession(session.id)
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 8))
+                    .foregroundStyle(theme.textSecondary.opacity(0.4))
+            }
+            .buttonStyle(.plain)
+            .opacity(isActive ? 1 : 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(isActive ? theme.accent.opacity(0.08) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            viewModel.switchToSession(session.id)
+        }
     }
 }
