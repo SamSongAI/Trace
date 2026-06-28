@@ -199,7 +199,7 @@ private struct AgentMessageBubble: View {
     private var userBubble: some View {
         HStack {
             Spacer(minLength: 40)
-            Text(message.content)
+            Text(message.content ?? "")
                 .font(.system(size: 13))
                 .foregroundStyle(theme.textPrimary)
                 .padding(.horizontal, 10)
@@ -220,8 +220,8 @@ private struct AgentMessageBubble: View {
                 .clipShape(Circle())
 
             VStack(alignment: .leading, spacing: 4) {
-                if !message.content.isEmpty {
-                    AgentMarkdownText(text: message.content, theme: theme)
+                if let content = message.content, !content.isEmpty {
+                    AgentMarkdownText(text: content, theme: theme)
                 }
                 if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
                     ForEach(toolCalls, id: \.id) { tc in
